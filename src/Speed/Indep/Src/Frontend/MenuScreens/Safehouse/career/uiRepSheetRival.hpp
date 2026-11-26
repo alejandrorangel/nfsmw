@@ -23,7 +23,7 @@ class uiRepSheetRival : public MenuScreen {
     void NotificationMessage(u32 msg, FEObject *obj, u32 param1, u32 param2) override;
     void RefreshHeader();
 
-    static void TextureLoadedCallback(uint32 arg) {
+    static void TextureLoadedCallback(uintptr_t arg) {
         reinterpret_cast<uiRepSheetRival *>(arg)->NotifyTextureLoaded();
     };
     void NotifyTextureLoaded();

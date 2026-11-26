@@ -111,7 +111,7 @@ void SED_NISSFX::Init(int channel) {
     }
 }
 
-void SED_NISSFX::LoadingCallback(int param, int error_status) {
+void SED_NISSFX::LoadingCallback(intptr_t param, int error_status) {
     int numbanktypes;
     int numbanks;
     SED_NISSFX *obj = reinterpret_cast<SED_NISSFX *>(param);

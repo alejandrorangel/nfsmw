@@ -57,6 +57,7 @@ set(NFSMW_GAME_FLAGS
     -fno-strict-aliasing     # original code type-puns freely
     -fwrapv
     -w                       # warnings off for now; the report tracks errors
+    -Wno-address-of-temporary # MSVC-ism: &T(...) passed to a function
     -ferror-limit=0
 )
 

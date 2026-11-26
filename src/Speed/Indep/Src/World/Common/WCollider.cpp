@@ -7,7 +7,11 @@
 #include "Speed/Indep/bWare/Inc/bMath.hpp"
 
 UTL::Std::map<unsigned int, WCollider *, _type_map> WCollider::fWuidMap;
+#if defined(EA_PORT_NATIVE)
+template <> UTL::Collections::Listable<WCollider, 100>::List UTL::Collections::Listable<WCollider, 100>::_mTable{};
+#else
 UTL::Collections::Listable<WCollider, 100>::List UTL::Collections::Listable<WCollider, 100>::_mTable;
+#endif
 
 // TODO move
 bool Tweak_colliderDraws = false;

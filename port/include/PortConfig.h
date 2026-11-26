@@ -25,9 +25,26 @@
 #ifdef __cplusplus
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
 #else
 #include <stddef.h>
 #include <stdint.h>
+#include <math.h>
 #endif
+// Pull in libc declarations before game headers can #define over their names
+// (e.g. Lua's ldebug.h defines a getline() macro).
+#include <stdio.h>
+#include <string.h>
+#include <strings.h>
+
+// MSVC CRT names used by the PC code.
+#define stricmp strcasecmp
+#define strnicmp strncasecmp
+#define _stricmp strcasecmp
+#define _strnicmp strncasecmp
+
+static inline int isnanf(float f) {
+    return __builtin_isnan(f);
+}
 
 #endif // PORT_CONFIG_H

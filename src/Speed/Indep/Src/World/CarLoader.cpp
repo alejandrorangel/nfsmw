@@ -695,7 +695,7 @@ void CarLoader::LoadSolidPack(LoadedSolidPack *loaded_solid_pack, int stream_sol
         loaded_solid_pack->pStreamingPack = StreamingSolidPackLoader.GetLoadedStreamingPack(loaded_solid_pack->Filename);
 
         if (loaded_solid_pack->pStreamingPack == nullptr) {
-            LoadedSolidPackCallbackBridge(reinterpret_cast<unsigned int>(loaded_solid_pack));
+            LoadedSolidPackCallbackBridge(reinterpret_cast<uintptr_t>(loaded_solid_pack));
         }
     } else {
         loaded_solid_pack->pResourceFile = CreateResourceFile(loaded_solid_pack->Filename, RESOURCE_FILE_CAR, 0, 0, 0);
@@ -2170,7 +2170,7 @@ void CarLoader::CallUserCallback(intptr_t param) {
     if (car_loader->LoadingInProgress == 1) {
         car_loader->LoadingDoneCallback();
     } else {
-        void (*callback)(unsigned int) = car_loader->pCallback;
+        void (*callback)(uintptr_t) = car_loader->pCallback;
 
         car_loader->LoadingInProgress = 0;
         car_loader->pCallback = nullptr;

@@ -21,7 +21,7 @@ class RepSheetIcon : public IconOption {
 // total size: 0x1C0
 class uiRepSheetMain : public IconScrollerMenu {
   public:
-    static void TextureLoadedCallback(uint32 arg) {
+    static void TextureLoadedCallback(uintptr_t arg) {
         reinterpret_cast<uiRepSheetMain *>(arg)->NotifyTextureLoaded();
     };
 

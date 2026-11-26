@@ -221,8 +221,8 @@ class CarLoader {
 
     void FreeDefragmentStorage();
 
-    void (*pCallback)(uint32);                       // offset 0x0, size 0x4
-    uint32 Param;                                    // offset 0x4, size 0x4
+    void (*pCallback)(uintptr_t);                    // offset 0x0, size 0x4
+    uintptr_t Param;                                 // offset 0x4, size 0x4
     eLoadingMode LoadingMode;                        // offset 0x8, size 0x4
     int InFrontEndFlag;                              // offset 0xC, size 0x4
     int TwoPlayerFlag;                               // offset 0x10, size 0x4

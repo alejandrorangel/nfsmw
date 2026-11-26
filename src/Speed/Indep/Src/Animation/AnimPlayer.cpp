@@ -97,6 +97,18 @@ void AnimLoader_IncrementAndAlignUp(int &pos, int size) {
     }
 }
 
+#if defined(EA_PORT_NATIVE)
+// Used to advance a pointer; must operate on the full 64-bit value.
+void AnimLoader_IncrementAndAlignUp(intptr_t &pos, int size) {
+    pos += size;
+    intptr_t extra = pos & 0xF;
+    if (extra != 0) {
+        pos += 0x10;
+        pos -= extra;
+    }
+}
+#endif
+
 int AnimLoader_SizeNeeded() {
     int curSharedFilePosition = 0;
     int curSceneFilePosition = 0;
@@ -119,7 +131,7 @@ int AnimLoader_SizeNeeded() {
     }
 }
 
-void AnimLoader_Callback(int);
+void AnimLoader_Callback(intptr_t);
 
 void AnimLoader_LoadResourceFile(const char *filename) {
     int file_size = bFileSize(filename);
@@ -129,7 +141,7 @@ void AnimLoader_LoadResourceFile(const char *filename) {
     res_file->BeginLoading(AnimLoader_Callback, 0);
     CAnimResourceFileProxy *proxy = BNEW CAnimResourceFileProxy(res_file, gAnimLoader_MovingPointer, gAnimLoader_UsingMemoryPool);
     gAnimLoader_ResourceFileList.AddTail(proxy);
-    AnimLoader_IncrementAndAlignUp(reinterpret_cast<int &>(gAnimLoader_MovingPointer), file_size);
+    AnimLoader_IncrementAndAlignUp(reinterpret_cast<intptr_t &>(gAnimLoader_MovingPointer), file_size);
 }
 
 void AnimLoader_NextStep() {
@@ -148,7 +160,7 @@ void AnimLoader_NextStep() {
     }
 }
 
-void AnimLoader_Callback(int) {
+void AnimLoader_Callback(intptr_t) {
     AnimLoader_NextStep();
 }
 

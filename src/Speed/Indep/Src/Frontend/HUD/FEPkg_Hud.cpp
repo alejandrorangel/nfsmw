@@ -317,7 +317,7 @@ void HudResourceManager::LoadRequiredResources(ePlayerHudType ht, const char *pk
     }
     pHudTextures = CreateResourceFile(hud_tex_file, RESOURCE_FILE_INGAME, 0, 0, 0);
     pHudTextures->SetAllocationParams(allocation_params, hud_tex_file);
-    pHudTextures->BeginLoading(LoadingCompleteCallbackBridge, reinterpret_cast<int>(this));
+    pHudTextures->BeginLoading(LoadingCompleteCallbackBridge, reinterpret_cast<intptr_t>(this));
     mHudResourcesState = HRM_LOADING_IN_PROGRESS;
     LoadingResourcesForHudType = ht;
     mPackageName = pkg_name;
@@ -347,7 +347,7 @@ void HudResourceManager::LoadingCompleteCallback() {
             float redlineRotation;
             ChooseLoadableTextures(LoadingResourcesForHudType, mTachLinesHash, redlineRotation);
             FEngSetMultiImageRot(reinterpret_cast<FEMultiImage *>(FEngFindObject(mPackageName, 0xcdfce1b0)), redlineRotation);
-            eLoadStreamingTexturePack(mCustHudTexPackName, LoadedCustomHudTexturePackCallbackBridge, reinterpret_cast<uint32>(this),
+            eLoadStreamingTexturePack(mCustHudTexPackName, LoadedCustomHudTexturePackCallbackBridge, reinterpret_cast<uintptr_t>(this),
                                       BMEMORY_MAIN_POOL);
         } else {
             float redlineRotation;
@@ -372,7 +372,7 @@ void HudResourceManager::LoadedCustomHudTexturePackCallback() {
     mCustomizeHUDTexTextureResources[2] = FEngHashString("CUSTOMHUD_SPEEDO_%2.2d", hud_num);
     mCustomizeHUDTexTextureResources[3] = FEngHashString("CUSTOMHUD_RPMNEEDLE_%2.2d", hud_num);
     mCustomizeHUDTexTextureResources[4] = FEngHashString("CUSTOMHUD_SPEEDNEEDLE_%2.2d", hud_num);
-    eLoadStreamingTexture(mCustomizeHUDTexTextureResources, 5, LoadedCustomHudTexturesCallbackBridge, reinterpret_cast<uint32>(this),
+    eLoadStreamingTexture(mCustomizeHUDTexTextureResources, 5, LoadedCustomHudTexturesCallbackBridge, reinterpret_cast<uintptr_t>(this),
                           BMEMORY_MAIN_POOL);
 }
 

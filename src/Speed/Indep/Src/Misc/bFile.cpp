@@ -231,7 +231,7 @@ CachedRealFileHandle *CachedRealFileHandle::FindHandle(const char *filename) {
     return nullptr;
 }
 
-CachedRealFileHandle *CachedRealFileHandle::AddHandle(const char *filename, int file_handle, int file_size) {
+CachedRealFileHandle *CachedRealFileHandle::AddHandle(const char *filename, EAFileHandle file_handle, int file_size) {
     while (NumInstances >= 4 && RemoveUnusedHandle()) {
         // nop
     }

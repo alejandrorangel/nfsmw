@@ -26,7 +26,7 @@ class SED_NISSFX : public Module {
 
     void ClearStream();
 
-    static void LoadingCallback(int32 param, int error_status);
+    static void LoadingCallback(intptr_t param, int error_status);
 
     // Decl: 58
     bool IsInitted() {

@@ -23,7 +23,7 @@ uiRepSheetRivalStreamer::uiRepSheetRivalStreamer(const char *pkg_name, bool in_g
         MemPoolNum = 7;
         TheTrackStreamer.DisableZoneSwitching();
         int mem_needed = 0x30000;
-        TheTrackStreamer.MakeSpaceInPool(mem_needed, MakeSpaceInPoolCallbackBridge, reinterpret_cast<int>(this));
+        TheTrackStreamer.MakeSpaceInPool(mem_needed, MakeSpaceInPoolCallbackBridge, reinterpret_cast<intptr_t>(this));
     } else {
         eLoadStreamingTexturePack("Global\\Rivals.bin", TexturePackLoadedCallbackBridge, this, 0);
     }

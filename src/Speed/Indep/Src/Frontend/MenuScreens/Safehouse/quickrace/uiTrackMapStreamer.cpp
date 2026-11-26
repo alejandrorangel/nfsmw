@@ -43,9 +43,9 @@ UITrackMapStreamer::UITrackMapStreamer()
 
         MemPoolNum = 7;
         TheTrackStreamer.DisableZoneSwitching();
-        TheTrackStreamer.MakeSpaceInPool(mem_needed, MakeSpaceInPoolCallbackBridge, reinterpret_cast<int32>(this));
+        TheTrackStreamer.MakeSpaceInPool(mem_needed, MakeSpaceInPoolCallbackBridge, reinterpret_cast<intptr_t>(this));
     } else {
-        eLoadStreamingTexturePack("TRACKS\\L2RA\\TrackMaps.bin", MapPackLoadCallback, reinterpret_cast<uint32>(this), BMEMORY_DEFAULT_POOL);
+        eLoadStreamingTexturePack("TRACKS\\L2RA\\TrackMaps.bin", MapPackLoadCallback, reinterpret_cast<uintptr_t>(this), BMEMORY_DEFAULT_POOL);
     }
 }
 
@@ -72,7 +72,7 @@ void UITrackMapStreamer::MakeSpaceInPoolCallback() {
 #ifndef EA_BUILD_A124
     bMakeSpaceInPoolComplete = true;
 #endif
-    eLoadStreamingTexturePack("TRACKS\\L2RA\\TrackMaps.bin", MapPackLoadCallback, reinterpret_cast<uint32>(this), BMEMORY_DEFAULT_POOL);
+    eLoadStreamingTexturePack("TRACKS\\L2RA\\TrackMaps.bin", MapPackLoadCallback, reinterpret_cast<uintptr_t>(this), BMEMORY_DEFAULT_POOL);
 }
 
 void UITrackMapStreamer::Init(GRaceParameters *track, FEMultiImage *map, int unused, int region_unlock) {
@@ -89,7 +89,7 @@ void UITrackMapStreamer::Init(GRaceParameters *track, FEMultiImage *map, int unu
     }
 }
 
-void UITrackMapStreamer::MapPackLoadCallback(uint32 screenPtr) {
+void UITrackMapStreamer::MapPackLoadCallback(uintptr_t screenPtr) {
     reinterpret_cast<UITrackMapStreamer *>(screenPtr)->SetMapPackLoaded();
 }
 

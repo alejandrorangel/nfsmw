@@ -38,7 +38,7 @@ class NFSMixMaster : public AudioMemBase {
     void DestroyMap();
     void LoadMixMapFile(eMMTYPE etype, char *pfilename);
 
-    static void LoadDataCallback(int param, int error_status);
+    static void LoadDataCallback(intptr_t param, int error_status);
 
     // NFSMixMap *GetMasterMixMap() {}
 

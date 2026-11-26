@@ -443,6 +443,16 @@ inline void eLoadStreamingTexture(uint32 name_hash) {
     eLoadStreamingTexture(&name_hash, 1);
 }
 
+inline void eLoadStreamingTexture(uint32 *name_hash_table, int num_hashes, void (*callback)(uintptr_t), uintptr_t param0, int memory_pool_num) {
+    eLoadStreamingTexture(name_hash_table, num_hashes, reinterpret_cast<void (*)(void *)>(callback), reinterpret_cast<void *>(param0),
+                          memory_pool_num);
+}
+
+inline void eLoadStreamingTexture(uint32 name_hash, void (*callback)(uintptr_t), uintptr_t param0, int memory_pool_num) {
+    eLoadStreamingTexture(&name_hash, 1, callback, param0, memory_pool_num);
+}
+
+#if defined(EA_PORT_NATIVE)
 inline void eLoadStreamingTexture(uint32 *name_hash_table, int num_hashes, void (*callback)(uint32), uint32 param0, int memory_pool_num) {
     eLoadStreamingTexture(name_hash_table, num_hashes, reinterpret_cast<void (*)(void *)>(callback), reinterpret_cast<void *>(param0),
                           memory_pool_num);
@@ -451,6 +461,7 @@ inline void eLoadStreamingTexture(uint32 *name_hash_table, int num_hashes, void 
 inline void eLoadStreamingTexture(uint32 name_hash, void (*callback)(uint32), uint32 param0, int memory_pool_num) {
     eLoadStreamingTexture(&name_hash, 1, callback, param0, memory_pool_num);
 }
+#endif
 
 int eUnloadStreamingTexturePack(const char *filename);
 

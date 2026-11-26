@@ -115,7 +115,7 @@ struct DeltaQFast : public AnimMemoryMap {
         //     s = reinterpret_cast<unsigned char *>(AlignSize2(reinterpret_cast<intptr_t>(s) + mNumBones * 2 + (r - 1) * GetFrameDeltaSize()));
         // }
 
-        return reinterpret_cast<unsigned short *>(nullptr);
+        return static_cast<unsigned short *>(nullptr);
     }
 
     float *GetConstPhysical() {

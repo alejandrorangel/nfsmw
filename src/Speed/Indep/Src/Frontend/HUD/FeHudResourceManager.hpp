@@ -47,10 +47,10 @@ class HudResourceManager {
     void LoadingCompleteCallback();
     void LoadedCustomHudTexturePackCallback();
     void LoadedCustomHudTexturesCallback();
-    static void LoadingCompleteCallbackBridge(int32 param);
-    static void LoadingCompleteCallbackBridge(uint32 param);
-    static void LoadedCustomHudTexturePackCallbackBridge(uint32 param);
-    static void LoadedCustomHudTexturesCallbackBridge(uint32 param);
+    static void LoadingCompleteCallbackBridge(intptr_t param);
+    static void LoadingCompleteCallbackBridge(uintptr_t param);
+    static void LoadedCustomHudTexturePackCallbackBridge(uintptr_t param);
+    static void LoadedCustomHudTexturesCallbackBridge(uintptr_t param);
     static void LoadingCompleteCallbackBridge(void *param) {} // Decl: 47
 };
 

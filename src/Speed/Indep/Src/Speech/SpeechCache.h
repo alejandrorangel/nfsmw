@@ -73,7 +73,7 @@ class Cache : public AudioMemBase {
     // Overrides: AudioMemBase
     ~Cache() override;
 
-    static void LoadedSampleDataCB(int32 param, int error_status);
+    static void LoadedSampleDataCB(intptr_t param, int error_status);
 
     void Init(int memsize);
     void Dump();

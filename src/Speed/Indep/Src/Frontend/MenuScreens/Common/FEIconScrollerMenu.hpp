@@ -116,7 +116,7 @@ class FEScrollyBookEnd : public IconOption {
 // Decl: 262
 // Range: 0x8017D56C -> 0x8017D570
 // Overrides: IconOption
-inline void FEScrollyBookEnd::React(const char *pkg_name, uint32 data, FEObject *obj, uint32 param1, uint32 param2) override {}
+inline void FEScrollyBookEnd::React(const char *pkg_name, uint32 data, FEObject *obj, uint32 param1, uint32 param2) {}
 
 // total size: 0x38
 class IconPanel {

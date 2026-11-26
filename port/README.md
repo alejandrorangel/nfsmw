@@ -33,12 +33,26 @@ resolve.
   byte-identical and `git merge upstream/main` stays painless.
 - Never send port changes upstream (upstream bans AI-assisted porting work).
 
+## Status
+
+All 32 game units compile natively for arm64 (`port_report.py` reports 0
+errors). Nothing is linked or run yet.
+
+## Conventions learned so far
+
+- Integer callback params that carry pointers use `intptr_t`/`uintptr_t`.
+  In matching builds `types.h` `#define`s these to `int`/`unsigned int`, so
+  the change is type-identical there.
+- Values that live in asset data stay 32-bit (e.g. `WGridNodeElemTag` is
+  `unsigned int` natively, not `uintptr_t`).
+- `override` is `#define`d away in the C++98 matching builds; decomp
+  signature TODOs marked `override` that don't actually override are
+  un-marked.
+
 ## Known structural issues
 
 - **64-bit pointers in asset data.** Chunk-loaded structs (e.g. `TextureInfo`,
   0x7C bytes) embed 32-bit pointers fixed up in place. Native loads need
   translation into native structs or 32-bit offset handles.
-- **`size_t` is 64-bit.** Overloads written for 32-bit (`RotateNTo32` in
-  `AttribSys.h`) become ambiguous.
-- **STL.** Game containers were written against STLport/MSVC 7.1; libc++
-  rejects some allocator rebinds (`UTL::Std::map` in `UStandard.h`).
+- **Linking.** Most of the game is not decompiled yet; linking will need a
+  stub layer for every unresolved symbol.

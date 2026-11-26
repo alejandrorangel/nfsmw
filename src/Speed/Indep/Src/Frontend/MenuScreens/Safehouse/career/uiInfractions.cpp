@@ -32,7 +32,7 @@ PostPursuitInfractionsScreen::PostPursuitInfractionsScreen(ScreenConstructorData
 
     BustedTexture = CalcBustedTexture();
     FEngSetTextureHash(GetPackageName(), FEObj_BustedStamp, BustedTexture);
-    eLoadStreamingTexture(BustedTexture, TextureLoadedCallback, reinterpret_cast<unsigned int>(this), 0);
+    eLoadStreamingTexture(BustedTexture, TextureLoadedCallback, reinterpret_cast<uintptr_t>(this), 0);
 
     FEPlayerCarDB *stable = FEDatabase->GetPlayerCarStable(0);
     FECarRecord *record = stable->GetCarRecordByHandle(FEDatabase->GetCareerSettings()->GetCurrentCar());

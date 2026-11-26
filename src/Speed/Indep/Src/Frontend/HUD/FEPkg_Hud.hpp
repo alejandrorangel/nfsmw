@@ -108,16 +108,16 @@ class FEngHud : public UTL::COM::Object, public IHud {
 
 extern HudResourceManager TheHudResourceManager;
 
-inline void HudResourceManager::LoadingCompleteCallbackBridge(int32 param) {
+inline void HudResourceManager::LoadingCompleteCallbackBridge(intptr_t param) {
     reinterpret_cast<HudResourceManager *>(param)->LoadingCompleteCallback();
 }
-inline void HudResourceManager::LoadingCompleteCallbackBridge(uint32 param) {
+inline void HudResourceManager::LoadingCompleteCallbackBridge(uintptr_t param) {
     reinterpret_cast<HudResourceManager *>(param)->LoadingCompleteCallback();
 }
-inline void HudResourceManager::LoadedCustomHudTexturePackCallbackBridge(uint32 param) {
+inline void HudResourceManager::LoadedCustomHudTexturePackCallbackBridge(uintptr_t param) {
     reinterpret_cast<HudResourceManager *>(param)->LoadedCustomHudTexturePackCallback();
 }
-inline void HudResourceManager::LoadedCustomHudTexturesCallbackBridge(uint32 param) {
+inline void HudResourceManager::LoadedCustomHudTexturesCallbackBridge(uintptr_t param) {
     reinterpret_cast<HudResourceManager *>(param)->LoadedCustomHudTexturesCallback();
 }
 

@@ -155,7 +155,7 @@ int EAXAemsManager::AddEventSystem(eEVTSYS eESIndex, eSNDDATAPATH eSDP) {
 
 void SubscribeEventSys();
 
-void EAXAemsManager::EvtSysLoadCallback(int param, int error_status) {
+void EAXAemsManager::EvtSysLoadCallback(intptr_t param, int error_status) {
     gAEMSMgr.m_nCallbackEvtSys = param;
     SubscribeEventSys();
 }

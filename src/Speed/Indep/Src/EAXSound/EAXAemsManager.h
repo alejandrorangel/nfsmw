@@ -195,7 +195,7 @@ class EAXAemsManager : public AudioMemBase {
     bool AreResourceLoadsPending();
     void ResolvePendingAsyncLoads();
 
-    static void EvtSysLoadCallback(int32 param, int error_status);
+    static void EvtSysLoadCallback(intptr_t param, int error_status);
     static void *ResidentAllocCB(void *pbank, int residentsize, int totalsize);
     static void *AsyncResidentAllocCB(int size);
     static void DataLoadCB(intptr_t param, int error_status);

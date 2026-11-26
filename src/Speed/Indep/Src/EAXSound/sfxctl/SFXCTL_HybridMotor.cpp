@@ -140,8 +140,8 @@ void SFXCTL_HybridMotor::UpdateDeltaRPM() {
 // Decl: 233
 // I had to add m_pEAXCar-> to them
 #define THRESHOLDMIX(Threshold, ENG)                                                                                                                 \
-    Threshold *(this->m_pEAXCar->GetAttributes().##ENG##Mix_L_RPM() - this->m_pEAXCar->GetAttributes().##ENG##Mix_S_RPM()) +                         \
-        this->m_pEAXCar->GetAttributes().##ENG##Mix_S_RPM();
+    Threshold *(this->m_pEAXCar->GetAttributes().ENG##Mix_L_RPM() - this->m_pEAXCar->GetAttributes().ENG##Mix_S_RPM()) +                             \
+        this->m_pEAXCar->GetAttributes().ENG##Mix_S_RPM();
 
 // Decl: 237
 #define THRESHOLDMIX_DECEL(Threshold, ENG)                                                                                                           \

@@ -10,7 +10,7 @@ class uiRepSheetRivalStreamer {
     uiRepSheetRivalStreamer(const char *pkg_name, bool in_game);
     virtual ~uiRepSheetRivalStreamer();
 
-    static void MakeSpaceInPoolCallbackBridge(int param) {
+    static void MakeSpaceInPoolCallbackBridge(intptr_t param) {
         reinterpret_cast<uiRepSheetRivalStreamer *>(param)->MakeSpaceInPoolCallback();
     }
     static void TexturePackLoadedCallbackBridge(void *param) {

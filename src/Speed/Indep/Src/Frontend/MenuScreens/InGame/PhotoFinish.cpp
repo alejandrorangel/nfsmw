@@ -46,7 +46,7 @@ SillyTextureStreamerManager::SillyTextureStreamerManager(const char *stream_pack
     mCurrentlyLoading = true;
     TheTrackStreamer.DisableZoneSwitching();
     int mem_needed = 0x60000;
-    TheTrackStreamer.MakeSpaceInPool(mem_needed, MakeSpaceInPoolCallbackBridge, reinterpret_cast<int>(this));
+    TheTrackStreamer.MakeSpaceInPool(mem_needed, MakeSpaceInPoolCallbackBridge, reinterpret_cast<intptr_t>(this));
 }
 
 SillyTextureStreamerManager::~SillyTextureStreamerManager() {
@@ -65,7 +65,7 @@ SillyTextureStreamerManager::~SillyTextureStreamerManager() {
 
 void SillyTextureStreamerManager::MakeSpaceInPoolCallback() {
     mMakeSpaceInPoolComplete = true;
-    eLoadStreamingTexturePack(BundleFileName, LoadCallbackBridge, reinterpret_cast<uint32>(this), 0);
+    eLoadStreamingTexturePack(BundleFileName, LoadCallbackBridge, reinterpret_cast<uintptr_t>(this), 0);
 }
 
 void SillyTextureStreamerManager::LoadCallback() {

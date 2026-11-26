@@ -151,7 +151,7 @@ void uiRepSheetMain::Setup() {
     DefeatedTextureHash = GetDefeatedTexture();
     FEngSetTextureHash(GetPackageName(), FEObj_STAMPMASTER, DefeatedTextureHash);
 
-    eLoadStreamingTexture(DefeatedTextureHash, TextureLoadedCallback, reinterpret_cast<uint32>(this), BMEMORY_DEFAULT_POOL);
+    eLoadStreamingTexture(DefeatedTextureHash, TextureLoadedCallback, reinterpret_cast<uintptr_t>(this), BMEMORY_DEFAULT_POOL);
 
 #ifndef EA_BUILD_A124
     UpdateInfo();

@@ -219,7 +219,7 @@ void UIOptionsController::FinishLoadingTexCallback() {
     SetupControllerConfig();
 }
 
-void MyFinishLoadingControllerTextureCallbackBridge(uint32 p) {
+void MyFinishLoadingControllerTextureCallbackBridge(uintptr_t p) {
     UIOptionsController *ls = reinterpret_cast<UIOptionsController *>(p);
     ls->FinishLoadingTexCallback();
 }
@@ -256,7 +256,7 @@ void UIOptionsController::PrepToShowControllerConfig() {
     WhichControllerTexture = CalcControllerTextureToLoad();
     FEngSetTextureHash(GetPackageName(), 0x922A39C4, WhichControllerTexture);
 
-    eLoadStreamingTexture(WhichControllerTexture, MyFinishLoadingControllerTextureCallbackBridge, reinterpret_cast<uint32>(this),
+    eLoadStreamingTexture(WhichControllerTexture, MyFinishLoadingControllerTextureCallbackBridge, reinterpret_cast<uintptr_t>(this),
                           BMEMORY_DEFAULT_POOL);
 }
 

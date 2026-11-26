@@ -108,7 +108,7 @@ class FnRawStateChan : public FnAnimMemoryMap {
     bool FindTime(const StateTest &test, float startTime, float &resultTime) override;
 
     // Overrides: FnAnim
-    inline void Eval(float, float time, float *dofs, float) override {}
+    inline void Eval(float, float time, float *dofs, float) {}
 
   private:
     int mKeyIdx; // offset 0x10, size 0x4

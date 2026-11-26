@@ -176,7 +176,7 @@ inline int GetCodeOverlaySize() {
     return GetCodeOverlayEnd() - GetCodeOverlayStart();
 }
 
-void CodeOverlayLoadedFrontendCallback(int param, int error_status) {
+void CodeOverlayLoadedFrontendCallback(intptr_t param, int error_status) {
     CodeOverlayFlushCaches();
     void (*callback)(int) = CodeOverlayCallback;
     if (CodeOverlayCallback != nullptr) {
@@ -1228,7 +1228,7 @@ void GameFlowLoadingFrontEndPart3(int) {
     TheGameFlowManager.SetSingleFunction(DelayWaitForLoadingScreen, "Delay wait for Frontennd\n");
 }
 
-void GameFlowLoadingFrontEndPart2(int) {
+void GameFlowLoadingFrontEndPart2(intptr_t) {
     TheGameFlowManager.ClearWaitingForCallback();
     TheGameFlowManager.SetWaitingForCallback("GameFlowLoadingFrontEndPart2", 0);
     LoadAemsFrontEnd(GameFlowLoadingFrontEndPart3, 0);
@@ -1247,7 +1247,7 @@ void GameFlowLoadGarageScreen(ASYNCFILE_CALLBACK callback, intptr_t param) {
     FEManager::Get()->GetGarageBackground()->BeginLoading(callback, param);
 }
 
-void GameFlowLoadingFrontEndPart1(int) {
+void GameFlowLoadingFrontEndPart1(intptr_t) {
     TheGameFlowManager.ClearWaitingForCallback();
     TheGameFlowManager.SetWaitingForCallback("GameFlowLoadingFrontEndPart2", 0);
     GameFlowLoadGarageScreen(GameFlowLoadingFrontEndPart2, 0);

@@ -14,7 +14,7 @@ class UITrackMapStreamer {
     UITrackMapStreamer();
     virtual ~UITrackMapStreamer();
 
-    static void MakeSpaceInPoolCallbackBridge(int32 param) {
+    static void MakeSpaceInPoolCallbackBridge(intptr_t param) {
         reinterpret_cast<UITrackMapStreamer *>(param)->MakeSpaceInPoolCallback();
     };
     void MakeSpaceInPoolCallback();
@@ -41,7 +41,7 @@ class UITrackMapStreamer {
 
   protected:
     static void MapLoadCallback(uint32 texture);
-    static void MapPackLoadCallback(uint32 screenPtr);
+    static void MapPackLoadCallback(uintptr_t screenPtr);
     void UpdateMap();
     void CalcBoundsForRace(bVector2 &top_left, bVector2 &bottom_right);
 

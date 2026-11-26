@@ -96,7 +96,7 @@ void uiRepSheetRival::Setup() {
     uint32 defeatedTexture = GetDefeatedTexture();
     FEngSetTextureHash(pDefeatedImg, defeatedTexture);
     FEngSetTextureHash(pDefeatedImgBG, defeatedTexture);
-    eLoadStreamingTexture(defeatedTexture, TextureLoadedCallback, reinterpret_cast<uint32>(this), BMEMORY_DEFAULT_POOL);
+    eLoadStreamingTexture(defeatedTexture, TextureLoadedCallback, reinterpret_cast<uintptr_t>(this), BMEMORY_DEFAULT_POOL);
     if (bIsInGame && bMidRivalFlow) {
         cFEng::Get()->QueuePackageMessage(0x34297cb0, GetPackageName(), nullptr);
     } else {

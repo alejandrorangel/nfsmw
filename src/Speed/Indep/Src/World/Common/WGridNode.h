@@ -4,7 +4,11 @@
 #include "Speed/Indep/Libs/Support/Utility/FastMem.h"
 #include "Speed/Indep/Libs/Support/Utility/UStandard.h"
 
+#if defined(EA_PORT_NATIVE)
+typedef unsigned int WGridNodeElemTag; // stored as 32 bits in track data
+#else
 typedef uintptr_t WGridNodeElemTag;
+#endif
 
 enum WGridNode_ElemType {
     WGrid_kInstance = 0,
@@ -106,11 +110,11 @@ struct WGridNode {
             this->fValid = false;
         }
 
-        const uintptr_t *GetIndPtr() {
+        const WGridNodeElemTag *GetIndPtr() {
             if (!this->fValid) {
                 return nullptr;
             }
-            const uintptr_t *retInd = nullptr;
+            const WGridNodeElemTag *retInd = nullptr;
             if (!this->fDynamic && this->fNumEntriesRemaining > 0) {
                 this->fValid = true;
                 retInd = this->fElemInd++;
@@ -137,7 +141,7 @@ struct WGridNode {
         WGridNode_ElemType fType;          // offset 0x0, size 0x4
         const WGridNode *fNode;            // offset 0x4, size 0x4
         int fNumEntriesRemaining;          // offset 0x8, size 0x4
-        const uintptr_t *fElemInd;         // offset 0xC, size 0x4
+        const WGridNodeElemTag *fElemInd;  // offset 0xC, size 0x4
         bool fValid;                       // offset 0x10, size 0x1
         bool fDynamic;                     // offset 0x14, size 0x1
         WGridNodeElemList::iterator fIter; // offset 0x18, size 0x4

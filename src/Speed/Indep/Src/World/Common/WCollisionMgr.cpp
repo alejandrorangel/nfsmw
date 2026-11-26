@@ -894,7 +894,11 @@ bool WCollisionMgr::GetClosestIntersectingBarrier(const WCollisionBarrierList &b
                                                   WorldCollisionInfo &cInfo) {
 #ifndef EA_PLATFORM_XENON // TODO
     cInfo.fType = 0;
+#if defined(EA_PORT_NATIVE) // vector iterators aren't raw pointers in libc++
+    WCollisionBarrierList::const_iterator ret = barrierList.end();
+#else
     WCollisionBarrierList::const_iterator ret = nullptr;
+#endif
     float closestDistSq = 1e38f;
 
     for (WCollisionBarrierList::const_iterator bIter = barrierList.begin(); bIter != barrierList.end(); ++bIter) {
@@ -913,7 +917,11 @@ bool WCollisionMgr::GetClosestIntersectingBarrier(const WCollisionBarrierList &b
         }
     }
 
+#if defined(EA_PORT_NATIVE)
+    if (ret != barrierList.end()) {
+#else
     if (ret != nullptr) {
+#endif
         cInfo.fBle = *ret;
         cInfo.fType = 2;
     }

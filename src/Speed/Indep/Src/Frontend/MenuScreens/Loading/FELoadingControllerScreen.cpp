@@ -87,7 +87,7 @@ void LoadingControllerScreen::FinishLoadingControllerTextureCallback(uint32 p) {
     ShowControllerConfig();
 }
 
-void FinishLoadingControllerTextureCallbackBridge(uint32 p) {
+void FinishLoadingControllerTextureCallbackBridge(uintptr_t p) {
     LoadingControllerScreen *ls;
     if (p != 0) {
         ls = reinterpret_cast<LoadingControllerScreen *>(p);
@@ -110,7 +110,7 @@ void LoadingControllerScreen::PrepToShowControllerConfig() {
     }
     WhichControllerTexture = texture_hash;
     FEngSetTextureHash(GetPackageName(), 0x922a39c4, texture_hash);
-    eLoadStreamingTexture(WhichControllerTexture, FinishLoadingControllerTextureCallbackBridge, (uint32)this, BMEMORY_MAIN_POOL);
+    eLoadStreamingTexture(WhichControllerTexture, FinishLoadingControllerTextureCallbackBridge, (uintptr_t)this, BMEMORY_MAIN_POOL);
 }
 
 void LoadingControllerScreen::ClearLoadedControllerTexture() {

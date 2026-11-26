@@ -175,8 +175,8 @@ SpeechSampleData *Cache::LoadSample(Module *module, SPCHType_SampleRequestData *
     return sample;
 }
 
-void Cache::LoadedSampleDataCB(int param, int error_status) {
-    SpeechLoadCBData *CBdata = reinterpret_cast<SpeechLoadCBData *>(static_cast<unsigned int>(param));
+void Cache::LoadedSampleDataCB(intptr_t param, int error_status) {
+    SpeechLoadCBData *CBdata = reinterpret_cast<SpeechLoadCBData *>(static_cast<uintptr_t>(param));
     CBdata->data->ready = true;
     ++CBdata->data->age;
     CBdata->data->t_load = WorldTimer;

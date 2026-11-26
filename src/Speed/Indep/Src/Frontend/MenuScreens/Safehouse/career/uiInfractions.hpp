@@ -16,7 +16,7 @@ class PostPursuitInfractionsScreen : MenuScreen {
     static MenuScreen *Create(ScreenConstructorData *sd) {
         return new ("", 0) PostPursuitInfractionsScreen(sd);
     };
-    static void TextureLoadedCallback(uint32 arg) {
+    static void TextureLoadedCallback(uintptr_t arg) {
         reinterpret_cast<PostPursuitInfractionsScreen *>(arg)->NotifyBustedTextureLoaded();
     }
 
