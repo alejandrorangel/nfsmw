@@ -19,7 +19,7 @@ class CollectionLoadData {
     // total size: 0xC
     struct AttribEntry {
         Key mKey;            // offset 0x0, size 0x4
-        void *mData;         // offset 0x4, size 0x4
+        PORT_PTR32(void) mData; // offset 0x4, size 0x4
         uint16_t mType;      // offset 0x8, size 0x2
         uint8_t mNodeFlags;  // offset 0xA, size 0x1
         uint8_t mEntryFlags; // offset 0xB, size 0x1
@@ -40,7 +40,7 @@ class CollectionLoadData {
     uint32_t mTableKeyShift; // offset 0x10, size 0x4
     uint32_t mNumEntries;    // offset 0x14, size 0x4
     uint32_t mNumTypes;      // offset 0x18, size 0x4
-    void *mLayout;           // offset 0x1C, size 0x4
+    PORT_PTR32(void) mLayout; // offset 0x1C, size 0x4
 };
 
 // total size: 0x2C
@@ -162,7 +162,7 @@ class ClassLoadData {
     Key mClass;                  // offset 0x0, size 0x4
     uint32_t mCollectionReserve; // offset 0x4, size 0x4
     uint32_t mNumDefinitions;    // offset 0x8, size 0x4
-    Definition *mDefinitions;    // offset 0xC, size 0x4
+    PORT_PTR32(Definition) mDefinitions; // offset 0xC, size 0x4
     uint32_t mLayoutSize;        // offset 0x10, size 0x4
     uint32_t mLayoutKeyShift;    // offset 0x14, size 0x4
     uint32_t mLayoutCount;       // offset 0x18, size 0x4
@@ -256,7 +256,7 @@ class DatabaseLoadData {
     uint32_t mNumClasses;      // offset 0x0, size 0x4
     uint32_t mDefaultDataSize; // offset 0x4, size 0x4
     uint32_t mNumTypes;        // offset 0x8, size 0x4
-    const char *mTypenames;    // offset 0xC, size 0x4
+    PORT_PTR32(const char) mTypenames; // offset 0xC, size 0x4
 };
 
 // total size: 0x4C

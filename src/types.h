@@ -301,4 +301,10 @@ typedef volatile int32 vs32;
 #define PORT_WEAK
 #endif
 
+// Pointer field inside data that's loaded in place (fixed up at load time).
+// A 4-byte compressed pointer in the native port, a plain pointer otherwise.
+#ifndef PORT_PTR32
+#define PORT_PTR32(T) T *
+#endif
+
 #endif // _TYPES_H_

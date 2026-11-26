@@ -248,7 +248,7 @@ void Vault::Initialize() {
     HasUnresolvedDependency();
     const PtrRef *ptr = mPointers->GetPointers();
     do {
-        char **targetptr = reinterpret_cast<char **>(&fixuptarget[ptr->mFixupOffset]);
+        PORT_PTR32(char) *targetptr = reinterpret_cast<PORT_PTR32(char) *>(&fixuptarget[ptr->mFixupOffset]);
 
         switch (ptr->mPtrType) {
             case 0:

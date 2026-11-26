@@ -45,6 +45,12 @@
 
 #define PORT_WEAK __attribute__((weak))
 
+#ifdef __cplusplus
+#include "PortPtr32.h"
+// Pointer fields in load-in-place data: 4-byte compressed pointers natively.
+#define PORT_PTR32(T) PortPtr32<T>
+#endif
+
 static inline int isnanf(float f) {
     return __builtin_isnan(f);
 }

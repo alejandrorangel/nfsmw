@@ -64,7 +64,14 @@ Collection::Collection(const CollectionLoadData &loadData, Vault *v) : mTable(lo
                 gByValueBytes += bytes;
             }
         }
+#if defined(EA_PORT_NATIVE)
+        // By-value entries keep the value itself (<= 4 bytes) in the pointer slot.
+        void *data = (entry.mNodeFlags & Node::Flag_IsByValue) ? reinterpret_cast<void *>(static_cast<uintptr_t>(entry.mData.Raw()))
+                                                               : static_cast<void *>(entry.mData);
+        mTable.Add(entry.mKey, typeList[entry.mType], data, false, entry.mNodeFlags, true, mLayout);
+#else
         mTable.Add(entry.mKey, typeList[entry.mType], entry.mData, false, entry.mNodeFlags, true, mLayout);
+#endif
         gSearchCacheLines += mTable.CountSearchCacheLines(entry.mKey, 7);
         gTotalAttribNodes++;
     }

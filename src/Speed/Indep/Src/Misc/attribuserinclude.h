@@ -80,7 +80,7 @@ class StringKey {
   private:
     uint64_t mHash64;    // offset 0x0, size 0x8
     uint32_t mHash32;    // offset 0x8, size 0x4
-    const char *mString; // offset 0xC, size 0x4
+    PORT_PTR32(const char) mString; // offset 0xC, size 0x4
 };
 
 // total size: 0x4

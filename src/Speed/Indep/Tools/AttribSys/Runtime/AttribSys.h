@@ -968,7 +968,7 @@ class RefSpec {
   private:
     Key mClassKey;                            // offset 0x0, size 0x4
     Key mCollectionKey;                       // offset 0x4, size 0x4
-    mutable const Collection *mCollectionPtr; // offset 0x8, size 0x4
+    mutable PORT_PTR32(const Collection) mCollectionPtr; // offset 0x8, size 0x4
 };
 
 // TODO where is this in the file?
@@ -976,7 +976,7 @@ class RefSpec {
 class Blob {
   private:
     uint32_t mSize;    // offset 0x0, size 0x4
-    const void *mData; // offset 0x4, size 0x4
+    PORT_PTR32(const void) mData; // offset 0x4, size 0x4
 };
 
 const Key key_default = 0xeec2271a; // Decl: 859
@@ -999,7 +999,7 @@ typedef char Char;        // Decl: 876
 typedef bool Bool;        // Decl: 877
 typedef float Float;      // Decl: 878
 typedef double Double;    // Decl: 879
-typedef const char *Text; // Decl: 880
+typedef PORT_PTR32(const char) Text; // Decl: 880
 typedef void *Reference;
 
 } // namespace Reflection

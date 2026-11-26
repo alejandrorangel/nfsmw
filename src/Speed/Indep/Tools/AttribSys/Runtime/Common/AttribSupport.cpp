@@ -147,7 +147,11 @@ const Collection *RefSpec::GetCollectionWithDefault() const {
 void RefSpec::Clean() const {
     if (mCollectionPtr) {
         mCollectionPtr->Release();
+#if defined(EA_PORT_NATIVE)
+        mCollectionPtr = nullptr; // mutable compressed pointer
+#else
         *const_cast<Collection **>(&mCollectionPtr) = nullptr;
+#endif
     }
 }
 

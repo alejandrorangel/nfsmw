@@ -729,6 +729,11 @@ static void *PortReserveMemory(int size) {
 static uintptr_t PortGameHeapStart;
 static uintptr_t PortGameHeapEnd;
 
+void PortGetGameHeapRange(uintptr_t *start, uintptr_t *end) {
+    *start = PortGameHeapStart;
+    *end = PortGameHeapEnd;
+}
+
 bool PortIsGameHeapPointer(const void *ptr) {
     uintptr_t p = reinterpret_cast<uintptr_t>(ptr);
     return p >= PortGameHeapStart && p < PortGameHeapEnd;
