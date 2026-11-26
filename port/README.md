@@ -53,10 +53,18 @@ re-run the generator to drop stale ones.
 
 ## Status
 
-Compiles, links (1013 stubs) and boots into `InitializeEverything()`:
-memory pools, strings, config, queued files, events and `eInitEngine()` run;
-it currently stops in `BootLoadingScreen()` when FEng can't find its boot
-package (file/package loading is still stubbed).
+Boots through `InitializeEverything()` up to `LoadGlobalChunks()`: memory
+pools, file system (native RealCore), GlobalA resources, FEng loading screen,
+localization, and the first streaming texture pack header. It stops in
+`InternalLoadTexturePackHeaderChunks()`, which isn't decompiled and is where
+the 64-bit texture layout problem starts.
+
+## Recovered data
+
+`tools/gen_data.py` reads initialised tables straight out of `speed.exe`
+(PE reader in `tools/pe.py`) into `src/Data/RecoveredData.cpp`; add a spec
+entry per table. Global objects with constructors (whose args come from the
+PC static initialisers) live in `src/Data/RecoveredObjects.cpp`.
 
 ## Conventions learned so far
 
@@ -65,6 +73,9 @@ package (file/package loading is still stubbed).
   the change is type-identical there.
 - Values that live in asset data stay 32-bit (e.g. `WGridNodeElemTag` is
   `unsigned int` natively, not `uintptr_t`).
+- `bNewSlotPool` doubles slot sizes natively (most callers pass 32-bit
+  sizeof literals; a struct at most doubles on 64-bit).
+- `delete`/`bFree` route by address: game-pool memory vs system heap.
 - Hard-coded 32-bit struct sizes (`+ 0x14` for `AllocationHeader`,
   `char[96]` for `MemoryPool`) become `sizeof(...)`.
 - Plain `operator new/delete` stay on the system allocator natively (AppKit

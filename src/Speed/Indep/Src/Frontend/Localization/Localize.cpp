@@ -62,7 +62,12 @@ struct FontSizeInfo {
     int Size;    // offset 0x4
 };
 
-extern FontSizeInfo FontSizeInfoTable[9];
+#if defined(EA_PLATFORM_WIN32)
+static const int NumFontSizeInfos = 11; // speed.exe 1.3 @ 0x8F4008
+#else
+static const int NumFontSizeInfos = 9;
+#endif
+extern FontSizeInfo FontSizeInfoTable[NumFontSizeInfos];
 extern int LanguageMemoryPoolNumber;
 extern void *pLanguageMemoryPoolMemory;
 extern int LanguageMemoryPoolSize;
@@ -111,7 +116,7 @@ void InitLocalization() {
     int n = 0;
     while (info->pFontNameInfo->GlobalFonts[n] != 0) {
         int font_size = -1;
-        for (int i = 0; i < 9; i++) {
+        for (int i = 0; i < NumFontSizeInfos; i++) {
             if (FontSizeInfoTable[i].Hash == info->pFontNameInfo->GlobalFonts[n]) {
                 font_size = FontSizeInfoTable[i].Size;
                 break;
@@ -122,7 +127,11 @@ void InitLocalization() {
         }
         n++;
     }
+#if defined(EA_PLATFORM_WIN32)
+    LanguageMemoryPoolSize = (total_font_size + 0x37FC8) & 0xFFFFFFC0; // PC @ 0x56B820
+#else
     LanguageMemoryPoolSize = (total_font_size + 0x4080) & 0xFFFFFFC0;
+#endif
     if (LanguageMemoryPoolNumber != 0) {
         LanguageMemoryPoolNumber = bGetFreeMemoryPoolNum();
         pLanguageMemoryPoolMemory = bMalloc(LanguageMemoryPoolSize, "LanguageMemoryPool", 0, 0);

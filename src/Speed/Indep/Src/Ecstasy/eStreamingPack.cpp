@@ -732,13 +732,16 @@ eStreamingPack *eStreamPackLoader::CreateStreamingPack(const char *filename, voi
     this->LoadedStreamingPackList.AddTail(streaming_pack);
     this->NumLoadedStreamingPacks++;
 
-    int amount_to_load;
-    if (file_size > 0x8000) {
+    // Read the first 32 KB (or the whole file) to find the header chunks
+    // (matches speed.exe 1.3 @ 0x506930).
+    int amount_to_load = file_size;
+    if (amount_to_load >= 0x8000) {
         amount_to_load = 0x8000;
-        streaming_pack->HeaderChunks = (bChunk *)bMalloc(amount_to_load, "TODO", __LINE__, 0x2040);
-        AddQueuedFile2(streaming_pack->HeaderChunks, streaming_pack->Filename, 0, loading_info->HeaderChunksSize,
-                       eStreamPackLoader::InternalLoadingHeaderPhase1Callback, (void *)this, (void *)streaming_pack, nullptr);
     }
+    streaming_pack->HeaderChunks = (bChunk *)bMalloc(amount_to_load, "TODO", __LINE__, 0x2040);
+    loading_info->HeaderChunksSize = amount_to_load;
+    AddQueuedFile2(streaming_pack->HeaderChunks, streaming_pack->Filename, 0, loading_info->HeaderChunksSize,
+                   eStreamPackLoader::InternalLoadingHeaderPhase1Callback, (void *)this, (void *)streaming_pack, nullptr);
 
     return streaming_pack;
 }

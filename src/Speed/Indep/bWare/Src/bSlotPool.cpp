@@ -5,6 +5,12 @@
 SlotPoolManager TheSlotPoolManager;
 
 SlotPool *bNewSlotPool(int slot_size, int num_slots, const char *debug_name, int memory_pool) {
+#if defined(EA_PORT_NATIVE)
+    // Most callers pass the 32-bit sizeof as a literal (e.g. QueuedFile: 0x48).
+    // A struct at most doubles going to 64-bit (every field and its alignment
+    // padding at most doubles), so 2x rounded to 8 always fits.
+    slot_size = (slot_size * 2 + 7) & ~7;
+#endif
     return TheSlotPoolManager.NewSlotPool(slot_size, num_slots, debug_name, memory_pool);
 }
 
