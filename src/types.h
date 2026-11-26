@@ -274,7 +274,10 @@ typedef signed char i8;
 #define M_TWOPI (2.0 * M_PI)
 #endif
 
-#ifdef CLANGD_DAMNIT
+#if defined(EA_PORT_NATIVE)
+// Native 64-bit port: use the real pointer-sized integer types.
+#include <cstdint>
+#elif defined(CLANGD_DAMNIT)
 typedef unsigned int uintptr_t;
 typedef int intptr_t;
 #else
