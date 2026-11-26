@@ -35,6 +35,14 @@ inline unsigned int RotateNTo32(unsigned long long v, unsigned int amount) {
     return (v << amount) | (v >> (64 - amount));
 }
 
+#if defined(EA_PORT_NATIVE)
+// size_t is 64-bit natively (and a distinct type from both overloads above).
+// Attrib keys are 32-bit hashes, so keep the original 32-bit rotation.
+inline unsigned int RotateNTo32(unsigned long v, unsigned int amount) {
+    return RotateNTo32(static_cast<unsigned int>(v), amount);
+}
+#endif
+
 #define USE_ATTRIB_ALLOC(name)                                                                                                                       \
     void *operator new(size_t bytes) {                                                                                                               \
         return (Attrib::Alloc(bytes, #name));                                                                                                        \

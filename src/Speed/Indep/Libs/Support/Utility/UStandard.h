@@ -47,7 +47,14 @@ template <typename T, typename Tag> struct vector : public std::vector<T, UTL::S
 };
 
 template <typename T, typename Tag> struct list : public std::list<T, UTL::Std::Allocator<T, Tag> > {};
+#if defined(EA_PORT_NATIVE)
+// libc++ requires the allocator's value_type to be the map's value_type;
+// MSVC 7.1/STLport rebound it silently.
+template <typename Key, typename T, typename Tag>
+struct map : public std::map<Key, T, std::less<Key>, UTL::Std::Allocator<std::pair<const Key, T>, Tag> > {};
+#else
 template <typename Key, typename T, typename Tag> struct map : public std::map<Key, T, std::less<Key>, UTL::Std::Allocator<T, Tag> > {};
+#endif
 template <typename T, typename Tag> struct set : public std::set<T, std::less<T>, UTL::Std::Allocator<T, Tag> > {};
 template <typename T, typename Tag> struct deque : public std::deque<T, UTL::Std::Allocator<T, Tag> > {};
 

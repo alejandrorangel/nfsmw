@@ -556,6 +556,15 @@ inline unsigned int Max(const unsigned int a, const unsigned int b) {
 inline size_t Max(const size_t a, const size_t b) {
     return a < b ? b : a;
 }
+#elif defined(EA_PORT_NATIVE)
+// size_t is a distinct 64-bit type natively; avoid ambiguity with the int overloads.
+inline size_t Min(const size_t a, const size_t b) {
+    return a > b ? b : a;
+}
+
+inline size_t Max(const size_t a, const size_t b) {
+    return a < b ? b : a;
+}
 #endif
 
 float Mod(const float x, const float e);
