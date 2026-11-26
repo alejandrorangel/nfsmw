@@ -54,6 +54,21 @@ TextureVRAMDataHeader *FindVRAMData(uint32 filename_hash) {
     return nullptr;
 }
 
+#if defined(EA_PORT_NATIVE)
+// Texture pack records are copied into native structs (port/src/Platform/TexturePackNative.cpp).
+TexturePackHeader *PortLoadTexturePackHeaderChunks(bChunk *chunk);
+void PortUnloadTexturePackHeaderChunks(bChunk *chunk);
+TextureInfo *PortGetStreamedTextureInfo(unsigned char *pdata, int uncompressed_size, TextureInfoPlatInfo **plat_info, bool create);
+void PortFreeStreamedTextureInfo(TextureInfo *texture_info);
+
+TexturePackHeader *InternalLoadTexturePackHeaderChunks(bChunk *chunk) {
+    return PortLoadTexturePackHeaderChunks(chunk);
+}
+
+void InternalUnloadTexturePackHeaderChunks(bChunk *chunk) {
+    PortUnloadTexturePackHeaderChunks(chunk);
+}
+#else
 // UNSOLVED
 TexturePackHeader *InternalLoadTexturePackHeaderChunks(bChunk *chunk) {}
 
@@ -93,6 +108,7 @@ void InternalUnloadTexturePackHeaderChunks(bChunk *chunk) {
     }
     texture_pack_header->pTexturePack = nullptr;
 }
+#endif
 
 TextureVRAMDataHeader *InternalLoadVRAMDataChunks(bChunk *chunk) {
     bChunk *vram_header_chunk = chunk->GetFirstChunk();
@@ -379,7 +395,7 @@ TextureIndexEntry *TexturePack::GetTextureIndexEntry(uint32 name_hash) {
 
     if (this->pPackHeader && this->pPackHeader->TextureIndexEntryTable) {
         return reinterpret_cast<TextureIndexEntry *>(
-            ScanHashTableKey32(name_hash, this->pPackHeader->TextureIndexEntryTable, this->NumTextures, 0, 8));
+            ScanHashTableKey32(name_hash, this->pPackHeader->TextureIndexEntryTable, this->NumTextures, 0, sizeof(TextureIndexEntry)));
     }
     return nullptr;
 }
@@ -543,11 +559,16 @@ void TextureLoadedStreamingEntryCallback(bChunk *chunk, eStreamingEntry *streami
     TexturePackHeader *texture_pack_header = streaming_pack->pTexturePackHeader;
     TexturePack *texture_pack = texture_pack_header->pTexturePack;
     unsigned char *pdata = reinterpret_cast<unsigned char *>(chunk);
+#if defined(EA_PORT_NATIVE)
+    TextureInfoPlatInfo *plat_info;
+    TextureInfo *texture_info = PortGetStreamedTextureInfo(pdata, streaming_entry->UncompressedSize, &plat_info, true);
+#else
     TextureInfoPlatInfo *plat_info =
         reinterpret_cast<TextureInfoPlatInfo *>(pdata + (streaming_entry->UncompressedSize - sizeof(TextureInfoPlatInfo)));
     TextureInfo *texture_info =
         reinterpret_cast<TextureInfo *>(pdata + (streaming_entry->UncompressedSize - sizeof(TextureInfoPlatInfo) - sizeof(TextureInfo)));
     texture_info->EndianSwap();
+#endif
     texture_pack->AttachTextureInfo(texture_info, plat_info, nullptr);
 
     int data_start = texture_info->ImagePlacement;
@@ -568,10 +589,15 @@ void TextureUnLoadedStreamingEntryCallback(bChunk *chunk, eStreamingEntry *strea
     TexturePackHeader *texture_pack_header = streaming_pack->pTexturePackHeader;
     TexturePack *texture_pack = texture_pack_header->pTexturePack;
     unsigned char *pdata = reinterpret_cast<unsigned char *>(chunk);
+#if defined(EA_PORT_NATIVE)
+    TextureInfoPlatInfo *plat_info;
+    TextureInfo *texture_info = PortGetStreamedTextureInfo(pdata, streaming_entry->UncompressedSize, &plat_info, false);
+#else
     TextureInfoPlatInfo *plat_info =
         reinterpret_cast<TextureInfoPlatInfo *>(pdata + (streaming_entry->UncompressedSize - sizeof(TextureInfoPlatInfo)));
     TextureInfo *texture_info =
         reinterpret_cast<TextureInfo *>(pdata + (streaming_entry->UncompressedSize - sizeof(TextureInfoPlatInfo) - sizeof(TextureInfo)));
+#endif
 
     int data_start = texture_info->ImagePlacement;
     int data_end;
@@ -584,7 +610,11 @@ void TextureUnLoadedStreamingEntryCallback(bChunk *chunk, eStreamingEntry *strea
     eFixupReplacementTexturesAfterUnloading(texture_info);
     texture_pack->UnAssignTextureData(data_start, data_size);
     texture_pack->UnattachTextureInfo(texture_info, plat_info, nullptr);
+#if defined(EA_PORT_NATIVE)
+    PortFreeStreamedTextureInfo(texture_info);
+#else
     texture_info->EndianSwap();
+#endif
 }
 
 void eLoadStreamingTexture(uint32 *name_hash_table, int num_hashes, void (*callback)(void *), void *param0, int memory_pool_num) {

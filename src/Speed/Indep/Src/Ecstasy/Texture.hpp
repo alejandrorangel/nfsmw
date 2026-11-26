@@ -1,7 +1,9 @@
 #ifndef TEXTURE_HPP
 #define TEXTURE_HPP
 
-#ifdef EA_PLATFORM_GAMECUBE
+#if defined(EA_PORT_NATIVE)
+#include "PortEcstasy/TextureInfoPlatNative.hpp" // port/include: Metal-backed platform record
+#elif defined(EA_PLATFORM_GAMECUBE)
 #include "Speed/GameCube/Src/Ecstasy/TextureInfoPlat.hpp"
 #elif defined(EA_PLATFORM_XENON)
 #include "Speed/Xenon/Src/Ecstasy/TextureInfoPlat.hpp"
@@ -87,7 +89,7 @@ class TexturePack : public bTNode<TexturePack> {
     }
 
     int GetTextureDataSize() {
-        return this->GetTextureDataSize();
+        return this->TextureDataSize;
     }
 
     TextureInfo *GetTexture(uint32 name_hash);

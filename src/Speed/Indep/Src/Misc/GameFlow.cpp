@@ -1138,6 +1138,10 @@ void LoadGlobalChunks() {
     GlobalMemoryFile = LoadMemoryFile("Global\\GlobalMemoryFile.bin");
     BlockUntilMemoryFileLoaded(GlobalMemoryFile);
     InitLocalization();
+#if defined(EA_PORT_NATIVE)
+    void PortTextureSmokeTest();
+    PortTextureSmokeTest(); // no-op unless NFSMW_TEXTURE_SMOKE is set
+#endif
     int32 buf_size;
     void *buf = bGetFile("GLOBAL\\ATTRIBUTES.BIN", &buf_size, 0x1040);
 

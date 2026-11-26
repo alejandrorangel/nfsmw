@@ -217,7 +217,7 @@ eStreamingEntry *eStreamPackLoader::GetStreamingEntry(uint32 name_hash, eStreami
         int num_entries = streaming_pack->StreamingEntryNumEntries;
         if (streaming_pack->StreamingEntryTable) {
             eStreamingEntry *streaming_entry =
-                (eStreamingEntry *)ScanHashTableKey32(name_hash, streaming_pack->StreamingEntryTable, num_entries, 0x0, 0x18);
+                (eStreamingEntry *)ScanHashTableKey32(name_hash, streaming_pack->StreamingEntryTable, num_entries, 0x0, sizeof(eStreamingEntry));
             if (streaming_entry) {
                 return streaming_entry;
             }
