@@ -99,7 +99,8 @@ void eDisplayFrame() {
     // and drawing it at 60 Hz for that long, so its animations (fades) play.
     // The boot stops shortly after this point for now.
     static bool held = false;
-    if (!held && quads > 0) {
+    const char *at = std::getenv("NFSMW_HOLD_AT_FRAME"); // default: first frame that draws anything
+    if (!held && quads > 0 && (at == nullptr || frame >= std::atoi(at))) {
         if (const char *hold = std::getenv("NFSMW_HOLD_FRAME")) {
             held = true;
             int frames = std::atoi(hold) * 60;

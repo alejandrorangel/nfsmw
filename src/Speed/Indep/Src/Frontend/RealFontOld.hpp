@@ -105,12 +105,18 @@ class Font {
 
     int GetVersion() const {}
 
+#if defined(EA_PORT_NATIVE)
+    // speed.exe 1.3 @ 0x569BF0 (inlined in the original): glyphs are stored
+    // from U+0020, so try the direct slot before binary searching.
+    const RealFontOld::Glyph *GetGlyph(int unicode) const;
+#else
     // UNSOLVED
     const RealFontOld::Glyph *GetGlyph(int unicode) const {
         const int GlyphSize = 0;
         const struct Glyph *GlyphTbl;
         const struct Glyph *ch;
     }
+#endif
 
     int GetState();
     bool SetState();
