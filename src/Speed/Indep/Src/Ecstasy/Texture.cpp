@@ -115,7 +115,15 @@ TextureVRAMDataHeader *InternalLoadVRAMDataChunks(bChunk *chunk) {
     bChunk *null_chunk = vram_header_chunk->GetNext();
     bChunk *vram_data_chunk = null_chunk->GetNext();
 
+#if defined(EA_PORT_NATIVE)
+    // On disk the record starts with a 32-bit bTNode (8 bytes); copy it into a
+    // native header instead of linking the disk bytes into the list.
+    TextureVRAMDataHeader *vram_header = static_cast<TextureVRAMDataHeader *>(bMalloc(sizeof(TextureVRAMDataHeader), "VRAM header", 0, 0));
+    bMemSet(vram_header, 0, sizeof(*vram_header));
+    bMemCpy(&vram_header->Version, vram_header_chunk->GetData() + 0x8, 0xC); // Version, FilenameHash, EndianSwapped
+#else
     TextureVRAMDataHeader *vram_header = reinterpret_cast<TextureVRAMDataHeader *>(vram_header_chunk->GetData());
+#endif
     if (!vram_header->EndianSwapped) {
         vram_header->EndianSwap();
         vram_header->EndianSwapped = true;
@@ -153,6 +161,9 @@ int LoaderTexturePack(bChunk *chunk) {
             texture_pack->AssignTextureData(texture_data, 0, texture_data_size);
             texture_pack->SetTextureDataSize(texture_data_size);
             vram_header->Remove();
+#if defined(EA_PORT_NATIVE)
+            bFree(vram_header);
+#endif
         }
         return 1;
     } else if (chunk->GetID() == BCHUNK_TEXTURE_PACK_DATA) {

@@ -3,6 +3,7 @@
 #include "MetalBridge.h"
 
 #include <mutex>
+#include <vector>
 
 // ---------------------------------------------------------------------------
 // Bridge for the game's platform layer (MetalBridge.h). Called from the game
@@ -70,7 +71,54 @@ void PortMetalSetDebugTexture(void *texture) {
 }
 
 // ---------------------------------------------------------------------------
-// Renderer. For now it shows the most recently loaded game texture, centred
+// Frontend frames: built on the game thread, drawn by the renderer.
+// ---------------------------------------------------------------------------
+struct FEBatch {
+    id<MTLTexture> texture; // nil = untextured
+    PortBlendMode blend;
+    uint32_t first;
+    uint32_t count;
+};
+
+struct FEFrame {
+    std::vector<PortFEVertex> vertices;
+    std::vector<FEBatch> batches;
+    int quads = 0;
+};
+
+static FEFrame gFEBuilding;
+static FEFrame gFEPublished;
+static std::mutex gFELock;
+
+void PortMetalFEBeginFrame() {
+    gFEBuilding.vertices.clear();
+    gFEBuilding.batches.clear();
+    gFEBuilding.quads = 0;
+}
+
+void PortMetalFEAddQuad(void *texture, PortBlendMode blend, const PortFEVertex quad[4]) {
+    id<MTLTexture> t = (__bridge id<MTLTexture>)texture;
+    FEFrame &f = gFEBuilding;
+    if (f.batches.empty() || f.batches.back().texture != t || f.batches.back().blend != blend) {
+        f.batches.push_back({t, blend, (uint32_t)f.vertices.size(), 0});
+    }
+    static const int order[6] = {0, 1, 2, 0, 2, 3};
+    for (int i : order) {
+        f.vertices.push_back(quad[i]);
+    }
+    f.batches.back().count += 6;
+    f.quads++;
+}
+
+int PortMetalFEEndFrame() {
+    std::lock_guard<std::mutex> guard(gFELock);
+    std::swap(gFEPublished, gFEBuilding);
+    return gFEPublished.quads;
+}
+
+// ---------------------------------------------------------------------------
+// Renderer. Draws the latest frontend frame; until the game has drawn one, it
+// shows the most recently loaded game texture, centred
 // and aspect-correct, as a check of the texture pipeline.
 // ---------------------------------------------------------------------------
 static NSString *const kDebugShader = @R"(
@@ -87,6 +135,24 @@ vertex VOut debug_vs(uint vid [[vertex_id]], constant float2 &scale [[buffer(0)]
     return o;
 }
 
+struct FEVertex { packed_float2 pos; packed_float2 uv; uchar4 rgba; };
+struct FEOut { float4 pos [[position]]; float2 uv; float4 color; };
+
+vertex FEOut fe_vs(uint vid [[vertex_id]], const device FEVertex *verts [[buffer(0)]]) {
+    FEVertex v = verts[vid];
+    FEOut o;
+    o.pos = float4(float2(v.pos), 0, 1);
+    o.uv = float2(v.uv);
+    // Console-style colour: RGB 0x80 = 1.0 (the PC renderer used MODULATE2X).
+    o.color = float4(float3(v.rgba.xyz) * (2.0 / 255.0), v.rgba.w / 255.0);
+    return o;
+}
+
+fragment float4 fe_fs(FEOut in [[stage_in]], texture2d<float> tex [[texture(0)]]) {
+    constexpr sampler s(filter::linear, mip_filter::linear, address::clamp_to_edge);
+    return in.color * tex.sample(s, in.uv);
+}
+
 fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear);
     float4 c = tex.sample(s, in.uv);
@@ -101,6 +167,8 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     id<MTLDevice> _device;
     id<MTLCommandQueue> _queue;
     id<MTLRenderPipelineState> _debugPipeline;
+    id<MTLRenderPipelineState> _fePipelines[3]; // indexed by PortBlendMode
+    id<MTLTexture> _white;
     uint64_t _frame;
 }
 
@@ -128,7 +196,30 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
             if (!_debugPipeline) {
                 NSLog(@"NFSMW: debug pipeline failed: %@", error);
             }
+
+            desc.vertexFunction = [lib newFunctionWithName:@"fe_vs"];
+            desc.fragmentFunction = [lib newFunctionWithName:@"fe_fs"];
+            MTLRenderPipelineColorAttachmentDescriptor *c = desc.colorAttachments[0];
+            c.blendingEnabled = YES;
+            c.sourceRGBBlendFactor = MTLBlendFactorSourceAlpha;
+            c.sourceAlphaBlendFactor = MTLBlendFactorSourceAlpha;
+            for (int mode = 0; mode < 3; mode++) {
+                c.rgbBlendOperation = c.alphaBlendOperation =
+                    mode == PORT_BLEND_SUBTRACTIVE ? MTLBlendOperationReverseSubtract : MTLBlendOperationAdd;
+                c.destinationRGBBlendFactor = c.destinationAlphaBlendFactor =
+                    mode == PORT_BLEND_ALPHA ? MTLBlendFactorOneMinusSourceAlpha : MTLBlendFactorOne;
+                _fePipelines[mode] = [_device newRenderPipelineStateWithDescriptor:desc error:&error];
+                if (!_fePipelines[mode]) {
+                    NSLog(@"NFSMW: FE pipeline %d failed: %@", mode, error);
+                }
+            }
         }
+
+        // Bound in place of a texture for untextured frontend quads.
+        MTLTextureDescriptor *wd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:1 height:1 mipmapped:NO];
+        _white = [_device newTextureWithDescriptor:wd];
+        uint32_t white = 0xFFFFFFFF;
+        [_white replaceRegion:MTLRegionMake2D(0, 0, 1, 1) mipmapLevel:0 withBytes:&white bytesPerRow:4];
     }
     return self;
 }
@@ -152,9 +243,35 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         texture = gDebugTexture;
     }
 
+    FEFrame fe;
+    {
+        std::lock_guard<std::mutex> guard(gFELock);
+        fe.vertices = gFEPublished.vertices;
+        fe.batches = gFEPublished.batches;
+    }
+
     id<MTLCommandBuffer> cmd = [_queue commandBuffer];
     id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:pass];
-    if (texture && _debugPipeline) {
+    if (!fe.vertices.empty()) {
+        // FEng draws a 4:3 (640x480) screen; letterbox it.
+        CGSize size = view.drawableSize;
+        double w = size.width, h = size.height;
+        if (w / h > 4.0 / 3.0) {
+            w = h * 4.0 / 3.0;
+        } else {
+            h = w * 3.0 / 4.0;
+        }
+        [enc setViewport:(MTLViewport){(size.width - w) / 2, (size.height - h) / 2, w, h, 0, 1}];
+        id<MTLBuffer> vb = [_device newBufferWithBytes:fe.vertices.data()
+                                                length:fe.vertices.size() * sizeof(PortFEVertex)
+                                               options:MTLResourceStorageModeShared];
+        [enc setVertexBuffer:vb offset:0 atIndex:0];
+        for (const FEBatch &b : fe.batches) {
+            [enc setRenderPipelineState:_fePipelines[b.blend]];
+            [enc setFragmentTexture:(b.texture ? b.texture : _white) atIndex:0];
+            [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:b.first vertexCount:b.count];
+        }
+    } else if (texture && _debugPipeline) {
         // Fit the texture inside 80% of the view, keeping its aspect ratio.
         CGSize size = view.drawableSize;
         float view_aspect = size.width / size.height;

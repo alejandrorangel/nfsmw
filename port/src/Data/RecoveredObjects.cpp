@@ -24,3 +24,20 @@ eStreamPackLoader StreamingTexturePackLoader(0x80, TextureLoadedStreamingEntryCa
 // speed.exe 1.3 static initialiser @ 0x886080 (object @ 0x91A060)
 eStreamPackLoader StreamingSolidPackLoader(0x80, SolidLoadedStreamingEntryCallback, SolidUnloadedStreamingEntryCallback,
                                            SolidLoadingStreamingPackPhase1, SolidLoadingStreamingPackPhase2, SolidUnloadingStreamingPack);
+
+// Frontend draw toggle (FEManager.cpp). Initialised .data in the original
+// (GameCube 0x8041B99C); on by default.
+bool DrawFEng = true;
+
+// Chunk loaders registered by static bChunkLoader objects the decomp hasn't
+// defined yet (found by scanning speed.exe 1.3 for calls to the bChunkLoader
+// constructor @ 0x45D600). Only the ones the port can handle natively are
+// registered; models (0x80134000), lights and emitters come later.
+#include "Speed/Indep/bWare/Inc/bChunk.hpp"
+
+int LoaderTexturePack(bChunk *chunk);
+int UnloaderTexturePack(bChunk *chunk);
+
+bChunkLoader bChunkLoaderTexturePackList(0xB3300000, LoaderTexturePack, UnloaderTexturePack); // @ 0x8862B4
+bChunkLoader bChunkLoaderCramDataChunks(0xB3320000, LoaderTexturePack, UnloaderTexturePack);  // @ 0x8862D4
+bChunkLoader bChunkLoaderTextureAnimPack(0xB0300100, LoaderTexturePack, UnloaderTexturePack); // @ 0x8862F4

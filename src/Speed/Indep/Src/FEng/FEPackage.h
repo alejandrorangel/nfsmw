@@ -101,7 +101,11 @@ class FEPackage : public FENode {
     i32 iTickIncrement;                    // offset 0x40, size 0x4, Decl: 120
     char *pFilename;                       // offset 0x44, size 0x4, Decl: 122
     FEPackage *pParentPackage;             // offset 0x48, size 0x4, Decl: 123
+#if defined(EA_PORT_NATIVE) // holds an FEPackageData pointer
+    uintptr_t UserParam;
+#else
     u32 UserParam;                         // offset 0x4C, size 0x4, Decl: 125
+#endif
     FEMinList Objects;                     // offset 0x50, size 0x10, Decl: 127
     FEMinList Responses;                   // offset 0x60, size 0x10, Decl: 128
     u32 NumRequests;                       // offset 0x70, size 0x4, Decl: 130
@@ -186,6 +190,15 @@ class FEPackage : public FENode {
         return bStartEqualsAccept;
     }
 
+#if defined(EA_PORT_NATIVE)
+    uintptr_t GetUserParam() const {
+        return UserParam;
+    }
+
+    void SetUserParam(uintptr_t NewParam) {
+        UserParam = NewParam;
+    }
+#else
     u32 GetUserParam() const { // Decl: 201
         return UserParam;
     }
@@ -193,6 +206,7 @@ class FEPackage : public FENode {
     void SetUserParam(u32 NewParam) { // Decl: 202
         UserParam = NewParam;
     }
+#endif
 
     void SetParentPackage(FEPackage *pPack) { // Decl: 204
         pParentPackage = pPack;

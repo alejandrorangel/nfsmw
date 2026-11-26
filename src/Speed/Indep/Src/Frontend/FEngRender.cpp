@@ -25,7 +25,13 @@ extern void FinishedRenderingFEngLayer();
 float ObjectSortLastZ = -999999.0f;
 
 uint32 FEngColorToEpolyColor(FEColor c) {
+#if defined(EA_PLATFORM_WIN32)
+    // PC (speed.exe 1.3 @ 0x56FA90): RGB halved (0x80 = full, doubled again by
+    // the renderer), alpha kept; bytes R, G, B, A.
+    return (c.r / 2) | ((c.g / 2) << 8) | ((c.b / 2) << 16) | (c.a << 24);
+#else
     return (c.a / 2) | ((c.b / 2) << 8) | ((c.g / 2) << 16) | ((c.r / 2) << 24);
+#endif
 }
 
 uint32 next_power_of_2(uint32 number) {

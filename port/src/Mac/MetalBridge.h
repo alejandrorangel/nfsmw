@@ -21,3 +21,23 @@ void PortMetalReleaseTexture(void *texture);
 
 // Debug viewer: the renderer shows the most recently created texture.
 void PortMetalSetDebugTexture(void *texture);
+
+// Frontend (FEng) 2D rendering. The game thread records a frame of textured
+// quads in clip space and publishes it; the renderer draws the latest one.
+enum PortBlendMode {
+    PORT_BLEND_ALPHA,      // src*a + dst*(1-a)
+    PORT_BLEND_ADDITIVE,   // src*a + dst
+    PORT_BLEND_SUBTRACTIVE // dst - src*a
+};
+
+struct PortFEVertex {
+    float x, y;            // clip space
+    float u, v;
+    unsigned char rgba[4]; // ePoly colour: R, G, B at half scale (0x80 = 1.0), A full
+};
+
+void PortMetalFEBeginFrame();
+// Quad corners in order 0..3 around the perimeter (triangulated 0-1-2, 0-2-3).
+void PortMetalFEAddQuad(void *texture, PortBlendMode blend, const PortFEVertex quad[4]);
+// Returns the number of quads published.
+int PortMetalFEEndFrame();

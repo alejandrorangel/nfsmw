@@ -53,11 +53,24 @@ re-run the generator to drop stale ones.
 
 ## Status
 
-Boots through `InitializeEverything()` up to `LoadGlobalChunks()`: memory
-pools, file system (native RealCore), GlobalA resources, FEng loading screen,
-localization, and the first streaming texture pack header. It stops in
-`InternalLoadTexturePackHeaderChunks()`, which isn't decompiled and is where
-the 64-bit texture layout problem starts.
+**The game draws its boot loading screen on Metal** (`loading_boot.fng`:
+MW logo on the frontend backdrop), through its own frontend renderer.
+
+Boot then continues to `LoadGlobalChunks()` and stops at the attribute
+database (`db.vlt`, another in-place pointer format).
+
+Rendering pieces in place:
+
+- `src/Platform/TexturePackNative.cpp`: texture packs copied into native
+  records; `TexturePlatMetal.cpp` turns them into Metal textures
+- `src/Platform/FERenderMetal.cpp`: `eViewPlatInterface::FE*` +
+  `eDisplayFrame` record frontend quads (640x480 virtual screen)
+- `src/Mac/MetalRenderer.mm`: draws the latest frontend frame, letterboxed
+- `src/Platform/eMathNative.cpp`: the Ecstasy matrix layer (D3DX on PC)
+
+Debug switches: `NFSMW_HOLD_FRAME=<s>` keeps ticking/drawing the frontend
+once it first draws; `NFSMW_TRACE_FRAMES`, `NFSMW_TRACE_FE`,
+`NFSMW_TRACE_TEXTURES`, `NFSMW_TRACE_FILES`; `NFSMW_TEXTURE_SMOKE=1`.
 
 ## Recovered data
 

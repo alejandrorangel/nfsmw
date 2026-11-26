@@ -46,6 +46,22 @@ template <int N> class FEObjectSorter {
     void SortObjects();
 };
 
+#if defined(EA_PORT_NATIVE)
+// The radix sort below assumes the 32-bit SFERadixKey layout (8-byte stride,
+// key at +4) and big-endian byte order, and counts into the wrong table.
+// Natively: a stable ascending sort on the same key (the z value's bits).
+template <int N> void FEObjectSorter<N>::SortObjects() {
+    for (u32 i = 1; i < mulNumObjects; i++) {
+        SFERadixKey key = mastFinalList[i];
+        u32 j = i;
+        while (j > 0 && mastFinalList[j - 1].ulKey > key.ulKey) {
+            mastFinalList[j] = mastFinalList[j - 1];
+            j--;
+        }
+        mastFinalList[j] = key;
+    }
+}
+#else
 // UNSOLVED
 template <int N> void FEObjectSorter<N>::SortObjects() { // Decl: 81
     SFERadixKey *pstDestList = mastScratchList;
@@ -77,5 +93,6 @@ template <int N> void FEObjectSorter<N>::SortObjects() { // Decl: 81
         pstDestList = pstTemp;
     }
 };
+#endif
 
 #endif
