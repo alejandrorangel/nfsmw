@@ -1120,12 +1120,18 @@ int FinishedLoadingGlobalSuccesful = 0;
 extern unsigned char bin_globala_bun[];
 
 void LoadGlobalAChunks() {
+#if defined(EA_PLATFORM_WIN32)
+    // PC ships GlobalA as a file instead of embedding it (speed.exe 1.3 @ 0x662B30).
+    LoadResourceFile("GLOBAL\\GLOBALA.BUN", RESOURCE_FILE_GLOBAL, 0);
+    WaitForResourceLoadingComplete();
+#else
     int alignment = 0x80;
     unsigned char *aligned_mem = reinterpret_cast<unsigned char *>((reinterpret_cast<uintptr_t>(bin_globala_bun) + alignment) & ~(alignment - 1));
     // TODO hardcoded size?
     bOverlappedMemCpy(aligned_mem, &bin_globala_bun[1], 0x15df4);
     LoadEmbeddedChunks(reinterpret_cast<bChunk *>(aligned_mem), 0x15df4, "Embedded GlobalA.bun");
     WaitForResourceLoadingComplete();
+#endif
 }
 
 void LoadGlobalChunks() {

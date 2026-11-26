@@ -19,6 +19,19 @@ void FastMem::Init() {}
 // STRIPPED
 void FastMem::Deinit() {}
 
+#if defined(EA_PORT_NATIVE)
+#include <cstdlib>
+
+// FastMem's small-block pooling isn't decompiled yet; the system allocator is
+// a drop-in replacement for it.
+void *FastMem::Alloc(size_t bytes, const char *kind) {
+    return std::malloc(bytes != 0 ? bytes : 1);
+}
+
+void FastMem::Free(void *ptr, size_t bytes, const char *kind) {
+    std::free(ptr);
+}
+#else
 void *FastMem::Alloc(size_t bytes, const char *kind) {}
 
 void FastMem::Free(void *ptr, size_t bytes, const char *kind) {
@@ -31,3 +44,4 @@ void FastMem::Free(void *ptr, size_t bytes, const char *kind) {
         this->mFreeLists[listIndex] = freeBlk;
     }
 }
+#endif

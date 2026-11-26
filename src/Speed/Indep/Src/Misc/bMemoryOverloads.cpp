@@ -9,6 +9,34 @@
 // defined here.
 #include <cstdlib>
 
+bool PortIsGameHeapPointer(const void *ptr);
+
+static inline void PortFree(void *ptr) {
+    if (PortIsGameHeapPointer(ptr)) {
+        bFree(ptr);
+    } else {
+        std::free(ptr);
+    }
+}
+
+// Plain new stays on the system heap (AppKit/libc++ share it), but delete must
+// also accept game-pool memory, e.g. FNEW'd FEng strings released with delete[].
+void operator delete(void *ptr) noexcept {
+    PortFree(ptr);
+}
+
+void operator delete[](void *ptr) noexcept {
+    PortFree(ptr);
+}
+
+void operator delete(void *ptr, size_t) noexcept {
+    PortFree(ptr);
+}
+
+void operator delete[](void *ptr, size_t) noexcept {
+    PortFree(ptr);
+}
+
 void *operator new(size_t size, int allocation_params) {
     return std::malloc(size);
 }
@@ -18,23 +46,23 @@ void *operator new[](size_t size, int allocation_params) {
 }
 
 void operator delete(void *ptr, int allocation_params) {
-    std::free(ptr);
+    PortFree(ptr);
 }
 
 void operator delete(void *ptr, const char *file, int line) {
-    std::free(ptr);
+    PortFree(ptr);
 }
 
 void operator delete[](void *ptr, const char *file, int line) {
-    std::free(ptr);
+    PortFree(ptr);
 }
 
 void operator delete(void *ptr, const char *file, int line, int allocation_params) {
-    std::free(ptr);
+    PortFree(ptr);
 }
 
 void operator delete[](void *ptr, const char *file, int line, int allocation_params) {
-    std::free(ptr);
+    PortFree(ptr);
 }
 
 #else

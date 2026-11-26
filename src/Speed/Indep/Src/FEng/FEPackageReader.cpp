@@ -232,7 +232,11 @@ bool FEPackageReader::ReadResourceChunk() {
         }
         FEngMemCpy(pPack->pResourceNames, pNameChunk->GetData(), pNameChunk->GetSize());
         for (u32 i = 0; i < NumRequests; i++) {
+#if defined(EA_PORT_NATIVE) // pFilename holds an offset into pResourceNames; don't truncate the base
+            pPack->pRequests[i].pFilename = pPack->pResourceNames + reinterpret_cast<uintptr_t>(pPack->pRequests[i].pFilename);
+#else
             pPack->pRequests[i].pFilename = pPack->pRequests[i].pFilename + reinterpret_cast<u32>(pPack->pResourceNames);
+#endif
         }
     }
     return true;

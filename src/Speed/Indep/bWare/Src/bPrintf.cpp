@@ -52,8 +52,14 @@ int bReleasePrintf(const char *fmt, ...) {
     if (EnableReleasePrintf) {
         va_start(argList, fmt);
         // TODO returning this causes issues??
+#if defined(EA_PORT_NATIVE) // matching builds omit the return; natively it's UB
+        int result = bVPrintf(fmt, argList);
+        va_end(argList);
+        return result;
+#else
         bVPrintf(fmt, argList);
         va_end(argList);
+#endif
     } else {
         return 0;
     }
@@ -75,15 +81,27 @@ int bVPrintf(char terminal_channel, char *fmt, char *argList) {}
 int bSPrintf(char *destString, const char *fmt, ...) {
     va_list argList;
     va_start(argList, fmt);
+#if defined(EA_PORT_NATIVE)
+    int result = bVSPrintf(destString, fmt, argList);
+    va_end(argList);
+    return result;
+#else
     bVSPrintf(destString, fmt, argList);
     va_end(argList);
+#endif
 }
 
 int bSNPrintf(char *buf, int max_len, const char *format, ...) {
     va_list argList;
     va_start(argList, format);
+#if defined(EA_PORT_NATIVE)
+    int result = bVSNPrintf(buf, max_len, format, argList);
+    va_end(argList);
+    return result;
+#else
     bVSNPrintf(buf, max_len, format, argList);
     va_end(argList);
+#endif
 }
 
 int bVSPrintf(char *destString, const char *fmt, va_list argList) {

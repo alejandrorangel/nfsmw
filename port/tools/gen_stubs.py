@@ -39,7 +39,7 @@ def run(cmd, **kw):
 def game_objects():
     objs = []
     for dirpath, _, files in os.walk(os.path.join(BUILD, "CMakeFiles")):
-        if "nfsmw_game.dir" in dirpath or "nfsmw.dir" in dirpath:
+        if dirpath.split(os.sep)[-1].endswith(".dir") or ".dir" + os.sep in dirpath + os.sep:
             objs += [os.path.join(dirpath, f) for f in files if f.endswith(".o")]
     if not objs:
         sys.exit("no objects found; build nfsmw_game first")

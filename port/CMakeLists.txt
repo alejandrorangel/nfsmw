@@ -74,6 +74,27 @@ set_target_properties(nfsmw_game PROPERTIES CXX_STANDARD 14 CXX_EXTENSIONS ON)
 target_include_directories(nfsmw_game PRIVATE ${NFSMW_GAME_INCLUDES})
 target_compile_definitions(nfsmw_game PRIVATE ${NFSMW_GAME_DEFINES})
 target_compile_options(nfsmw_game PRIVATE ${NFSMW_GAME_FLAGS})
+# Decomp placeholders like `int f() {}` silently return garbage. In Debug,
+# trap them with file:line instead.
+option(NFSMW_PORT_CHECK_MISSING_RETURN "Report decomp functions that fall off the end without returning" ON)
+if(NFSMW_PORT_CHECK_MISSING_RETURN)
+    target_compile_options(nfsmw_game PRIVATE $<$<CONFIG:Debug>:-fsanitize=return>)
+endif()
+
+# ---------------------------------------------------------------------------
+# Native platform layer: replaces EA SDK / Win32 pieces the game links against.
+# Same includes as the game, but with warnings on since this code is ours.
+# ---------------------------------------------------------------------------
+add_library(nfsmw_platform OBJECT
+    src/Platform/RealCoreNative.cpp
+)
+set_target_properties(nfsmw_platform PROPERTIES CXX_STANDARD 17)
+target_include_directories(nfsmw_platform PRIVATE ${NFSMW_GAME_INCLUDES})
+target_compile_definitions(nfsmw_platform PRIVATE ${NFSMW_GAME_DEFINES})
+target_compile_options(nfsmw_platform PRIVATE
+    -include "${CMAKE_CURRENT_SOURCE_DIR}/include/PortConfig.h"
+    -fms-extensions -fdeclspec -Wall -Wno-unused-parameter
+)
 
 # ---------------------------------------------------------------------------
 # macOS platform layer + app bundle.
@@ -88,6 +109,9 @@ set_target_properties(nfsmw PROPERTIES
     MACOSX_BUNDLE_BUNDLE_NAME "NFSMW"
 )
 target_compile_options(nfsmw PRIVATE -fobjc-arc)
+if(NFSMW_PORT_CHECK_MISSING_RETURN)
+    target_link_options(nfsmw PRIVATE $<$<CONFIG:Debug>:-fsanitize=return>)
+endif()
 target_link_libraries(nfsmw PRIVATE
     "-framework Cocoa"
     "-framework Metal"
@@ -100,6 +124,7 @@ if(NFSMW_PORT_LINK_GAME)
     # the decompiled code references but doesn't define yet.
     target_sources(nfsmw PRIVATE
         $<TARGET_OBJECTS:nfsmw_game>
+        $<TARGET_OBJECTS:nfsmw_platform>
         src/Stubs/PortStubs.cpp
         src/Stubs/GeneratedStubs.S
     )

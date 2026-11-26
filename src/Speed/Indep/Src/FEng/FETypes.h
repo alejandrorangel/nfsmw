@@ -108,6 +108,24 @@ class FERect {
     }
 };
 
+#if defined(EA_PORT_NATIVE)
+// FEng data is little-endian (PC assets), like the native host: no swaps.
+inline u32 FEngGetu32(u32 Val) {
+    return Val;
+}
+
+inline i32 FEngGeti32(i32 Val) {
+    return Val;
+}
+
+inline u16 FEngGetu16(u16 Val) {
+    return Val;
+}
+
+inline i16 FEngGeti16(i16 Val) {
+    return Val;
+}
+#else
 // Decl: 152-154 // TODO: probably checks FENG_BIG_ENDIAN for byte swaps
 inline u32 FEngGetu32(u32 Val) {
     return (Val >> 24) | (Val << 24) | ((Val & 0xFF00) << 8) | ((Val >> 8) & 0xFF00);
@@ -124,6 +142,7 @@ inline u16 FEngGetu16(u16 Val) {
 inline i16 FEngGeti16(i16 Val) {
     return ((Val & 0xFF00) >> 8) | (Val << 8);
 }
+#endif
 
 inline float FEngGetf32(float &Val) {
     u32 Temp = FEngGetu32(reinterpret_cast<u32 &>(Val));

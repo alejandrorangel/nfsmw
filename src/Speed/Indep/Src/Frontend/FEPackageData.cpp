@@ -717,7 +717,7 @@ uint32 FEPackageData::GetNameHash() {
             return 0;
         }
 
-        FEChunk *pHeadChunk = pHeadChunk->GetFirstChunk();
+        FEChunk *pHeadChunk = chunk->GetFirstChunk();
 
         if (pHeadChunk->GetID() != Chunk_FEPackageHeader) {
             return 0;
@@ -725,13 +725,14 @@ uint32 FEPackageData::GetNameHash() {
 
         u32 *pData = (u32 *)pHeadChunk->GetData();
 
-        if (FEngGetu32(pData[0]) > 0x1FFFF) {
+        // Header version; packages older than 2.0 carry no name (speed.exe 1.3 @ 0x585820).
+        if (FEngGetu32(pData[0]) < 0x20000) {
             return 0;
         }
 
         u32 NameLen = FEngGetu32(pData[4]);
         u32 FileNameLen = FEngGetu32(pData[5]);
-        const char *pShortName = reinterpret_cast<const char *>(pData[6]);
+        const char *pShortName = reinterpret_cast<const char *>(&pData[6]); // stored inline
         uint32 hash = FEHashUpper(pShortName);
         return hash;
 

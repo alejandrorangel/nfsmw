@@ -24,7 +24,7 @@ class FETag {
     }
 
     u8 *Data() { // Decl: 40
-        return reinterpret_cast<u8 *>(this) + sizeof(this);
+        return reinterpret_cast<u8 *>(this) + sizeof(*this);
     }
     u32 Getu32(u32 Index) {
         return FEngGetu32(reinterpret_cast<u32 *>(Data())[Index]);
@@ -43,7 +43,7 @@ class FETag {
     }
 
     FETag *Next() { // Decl: 48
-        return reinterpret_cast<FETag *>(reinterpret_cast<u8 *>(this) + sizeof(this) + GetSize());
+        return reinterpret_cast<FETag *>(reinterpret_cast<u8 *>(this) + sizeof(*this) + GetSize());
     }
 };
 

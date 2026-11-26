@@ -714,11 +714,24 @@ unsigned int GetVirtualMemoryAllocParams() {
 }
 
 #if defined(EA_PORT_NATIVE)
+#include <cstdlib>
 #include <sys/mman.h>
 
 static void *PortReserveMemory(int size) {
     void *mem = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
     return mem == MAP_FAILED ? nullptr : mem;
+}
+
+// Every bWare pool lives inside the main pool's mapping, so an address check
+// tells game-heap memory apart from system-heap memory. The game mixes
+// allocators freely (FNEW + delete[], new + bFree), which was harmless when
+// global new/delete were bMalloc/bFree; natively they're the system's.
+static uintptr_t PortGameHeapStart;
+static uintptr_t PortGameHeapEnd;
+
+bool PortIsGameHeapPointer(const void *ptr) {
+    uintptr_t p = reinterpret_cast<uintptr_t>(ptr);
+    return p >= PortGameHeapStart && p < PortGameHeapEnd;
 }
 #endif
 
@@ -769,6 +782,8 @@ void bMemoryInit() {
         // Generous because native structs are bigger than the original 32-bit ones.
         const int bware_memory_size = 512 * 1024 * 1024;
         void *main_pool = PortReserveMemory(bware_memory_size);
+        PortGameHeapStart = reinterpret_cast<uintptr_t>(main_pool);
+        PortGameHeapEnd = PortGameHeapStart + bware_memory_size;
         bInitMemoryPool(0, main_pool, bware_memory_size, "Main Pool");
         MemoryInitialized = TRUE;
     }
@@ -873,6 +888,12 @@ void bFree(void *ptr) {
     if (ptr == nullptr) {
         return;
     }
+#if defined(EA_PORT_NATIVE)
+    if (!PortIsGameHeapPointer(ptr)) { // came from plain new / malloc
+        std::free(ptr);
+        return;
+    }
+#endif
     for (int n = 0; n < 16; n++) {
         MemoryPoolOverrideInfo *override_info = MemoryPoolInfoTable[n].OverrideInfo;
         intptr_t address = reinterpret_cast<intptr_t>(ptr);
