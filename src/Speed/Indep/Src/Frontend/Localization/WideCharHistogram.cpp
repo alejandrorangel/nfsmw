@@ -103,4 +103,7 @@ bool WideCharHistogram::UnpackString(uint16 *wide, int size, const char *packed)
             out++;
         } while (result != 0 && (in = nextIn, out < size));
     }
+#if defined(SANE_CODE) || defined(EA_PORT_NATIVE)
+    return !error;
+#endif
 }

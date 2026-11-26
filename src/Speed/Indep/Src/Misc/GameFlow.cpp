@@ -1152,7 +1152,9 @@ void LoadGlobalChunks() {
     ResourceFile *r = LoadResourceFile("GLOBAL\\GLOBALB.LZC", RESOURCE_FILE_GLOBAL, 9);
     r->ChangeFilenameForHotChunking("GLOBAL\\GLOBALB.BUN");
 
+#if !defined(EA_PLATFORM_WIN32) // GameCube ARAM bundle; PC has none (speed.exe 1.3 @ 0x664780)
     LoadFileIntoVirtualMemory("GLOBAL\\GLOBALB_VM_NGC.LZC", true, false);
+#endif
     LoadResourceFile(BrakesModelPackFilename, RESOURCE_FILE_CAR, 0);
     LoadResourceFile(BrakesTexturePackFilename, RESOURCE_FILE_CAR, 0);
     WaitForResourceLoadingComplete();

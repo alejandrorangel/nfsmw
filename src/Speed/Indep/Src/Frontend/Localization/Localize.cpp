@@ -49,7 +49,7 @@ extern LanguageInfo LanguageInfoTable[];
 
 struct StringRecord {
     uint32 Hash;         // offset 0x0, size 0x4
-    uint8 *PackedString; // offset 0x4, size 0x4
+    PORT_PTR32(uint8) PackedString; // offset 0x4, size 0x4 (string-table offset on disk)
 };
 
 static unsigned int NumStringRecords;
@@ -176,7 +176,9 @@ void LoadLanguageResources(bool load_global, bool load_frontend, bool load_ingam
     }
     if (load_global) {
         if (pLanguageResourceFile == nullptr) {
+#if !defined(EA_PLATFORM_WIN32) // GameCube ARAM copy; the PC table has no FilenameTextOnly
             pLanguageResourceFile_VM = LoadFileIntoVirtualMemory(info->FilenameTextOnly, false, false);
+#endif
             int pool = 0;
             pLanguageResourceFile = CreateResourceFile(info->Filename, RESOURCE_FILE_LANGUAGE, 0, 0, 0);
             int file_size = bFileSize(info->Filename);
@@ -241,6 +243,10 @@ void LoadCurrentLanguage() {
 #ifdef EA_PLATFORM_GAMECUBE
     eLanguages ngc_language = GC_GetOSLanguage();
     SetCurrentLanguage(ngc_language);
+#elif defined(EA_PLATFORM_WIN32)
+    // speed.exe 1.3 @ 0x57E850
+    eLanguages PC_GetOSLanguage();
+    SetCurrentLanguage(PC_GetOSLanguage());
 #elif EA_PLATFORM_PS2
     if (BuildRegion::IsAmerica()) {
         SetCurrentLanguage(eLANGUAGE_ENGLISH);
@@ -381,7 +387,11 @@ int LoaderLanguage(bChunk *chunk) {
             bPlatEndianSwap(reinterpret_cast<uint32 *>(&RecordTable[i]));
             uint32 offset = reinterpret_cast<uint32 *>(&RecordTable[i])[1];
             bPlatEndianSwap(&offset);
+#if defined(EA_PORT_NATIVE)
+            RecordTable[i].PackedString = PackedStringTable + offset;
+#else
             reinterpret_cast<uint32 *>(&RecordTable[i])[1] = reinterpret_cast<uint32>(PackedStringTable) + offset;
+#endif
         }
         return 1;
     }

@@ -199,7 +199,8 @@ class CarPartModelTable {
     int8 TemplatedNameHashes;               // offset 0x0, size 0x1
     int8 pad;                               // offset 0x1, size 0x1
     uint16 MiddleStringOffset;              // offset 0x2, size 0x2
-    char *ModelNames[CARPART_MODEL_NUM][5]; // offset 0x4, size 0x14
+    // Each slot is a name hash, a string-table index (before fixup), -1, or a pointer.
+    PORT_PTR32(char) ModelNames[CARPART_MODEL_NUM][5]; // offset 0x4, size 0x14
 };
 
 // total size: 0xE

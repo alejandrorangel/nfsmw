@@ -307,7 +307,22 @@ int LoaderCarInfo(bChunk *chunk) {
         bChunk *car_model_table_chunk = car_attributes_table_chunk->GetNext();
         bChunk *car_typename_table_chunk = car_model_table_chunk->GetNext();
         bChunk *car_parts_table_chunk = car_typename_table_chunk->GetNext();
+#if defined(EA_PORT_NATIVE)
+        // The pack header starts with a 32-bit bTNode and pointer slots; use a
+        // native copy, and stash its address in the disk record's link slots.
+        char *disk_pack = car_pack_chunk->GetData();
+        CarPartPack *car_part_pack = static_cast<CarPartPack *>(bMalloc(sizeof(CarPartPack), "CarPartPack (native)", 0, 0));
+        bMemSet(car_part_pack, 0, sizeof(CarPartPack));
+        bMemCpy(&car_part_pack->Version, disk_pack + 0x08, 4);
+        bMemCpy(&car_part_pack->NumAttributeTables, disk_pack + 0x18, 4);
+        bMemCpy(&car_part_pack->NumAttributes, disk_pack + 0x20, 4);
+        bMemCpy(&car_part_pack->NumTypeNames, disk_pack + 0x28, 4);
+        bMemCpy(&car_part_pack->NumModelTables, disk_pack + 0x30, 4);
+        bMemCpy(&car_part_pack->NumParts, disk_pack + 0x38, 4);
+        bMemCpy(disk_pack, &car_part_pack, sizeof(car_part_pack));
+#else
         CarPartPack *car_part_pack = reinterpret_cast<CarPartPack *>(car_pack_chunk->GetData());
+#endif
 
         car_part_pack->EndianSwap();
         car_part_pack->InPlaceInit();
@@ -351,10 +366,17 @@ int LoaderCarInfo(bChunk *chunk) {
             if (model_table->TemplatedNameHashes != 0) {
                 for (int model_number = 0; model_number < 1; model_number++) {
                     for (int model_lod = 0; model_lod < 5; model_lod++) {
+#if defined(EA_PORT_NATIVE)
+                        uint32 index = model_table->ModelNames[model_number][model_lod].Raw();
+                        if (index != 0xFFFFFFFF) {
+                            model_table->ModelNames[model_number][model_lod] = const_cast<char *>(&CarPartStringTable[index * 4]);
+                        }
+#else
                         if ((model_table->ModelNames[model_number][model_lod]) != (char *)-1) {
                             model_table->ModelNames[model_number][model_lod] =
                                 const_cast<char *>(&CarPartStringTable[reinterpret_cast<int>(model_table->ModelNames[model_number][model_lod]) * 4]);
                         }
+#endif
                     }
                 }
             }
@@ -456,12 +478,20 @@ int UnloaderCarInfo(bChunk *chunk) {
 
     if (chunk->GetID() == BCHUNK_SPEED_CARPART_PACK_HEADER) {
         bChunk *car_pack_chunk = chunk->GetFirstChunk();
+#if defined(EA_PORT_NATIVE)
+        CarPartPack *car_part_pack;
+        bMemCpy(&car_part_pack, car_pack_chunk->GetData(), sizeof(car_part_pack));
+#else
         CarPartPack *car_part_pack = reinterpret_cast<CarPartPack *>(car_pack_chunk->GetData());
+#endif
 
         car_part_pack->Remove();
         CarPartDB.NumPacks--;
         CarPartDB.NumParts -= car_part_pack->NumParts;
         CarPartDB.NumBytes -= chunk->GetSize();
+#if defined(EA_PORT_NATIVE)
+        bFree(car_part_pack);
+#endif
         return 1;
     }
 
@@ -543,6 +573,15 @@ unsigned int CarPart::GetAppliedAttributeUParam(unsigned int namehash, unsigned 
 }
 
 unsigned int CarPartModelTable::GetModelNameHash(unsigned int base_namehash, int model_num, int lod) {
+#if defined(EA_PORT_NATIVE)
+    if (this->ModelNames[model_num][lod].Raw() == 0xFFFFFFFF) {
+        return 0;
+    }
+
+    if (!this->TemplatedNameHashes) {
+        return this->ModelNames[model_num][lod].Raw(); // a hash, not a pointer
+    }
+#else
     if (reinterpret_cast<int>(this->ModelNames[model_num][lod]) == -1) {
         return 0;
     }
@@ -550,6 +589,7 @@ unsigned int CarPartModelTable::GetModelNameHash(unsigned int base_namehash, int
     if (!this->TemplatedNameHashes) {
         return reinterpret_cast<unsigned int>(this->ModelNames[model_num][lod]);
     }
+#endif
 
     unsigned int namehash = base_namehash;
     char lod_name[3] = {'_', static_cast<char>(lod + 'A'), '\0'};

@@ -405,7 +405,9 @@ TSMemoryNode *TSMemoryPool::GetNextFreeNode(bool start_from_top, TSMemoryNode *n
             return next_node;
         }
     }
-    // return nullptr; // TODO put behind SANE_CODE macro
+#if defined(SANE_CODE) || defined(EA_PORT_NATIVE)
+    return nullptr; // falling off the end is undefined natively
+#endif
 }
 
 TSMemoryNode *TSMemoryPool::GetNextAllocatedNode(bool start_from_top, TSMemoryNode *node) {
@@ -415,7 +417,9 @@ TSMemoryNode *TSMemoryPool::GetNextAllocatedNode(bool start_from_top, TSMemoryNo
             return next_node;
         }
     }
-    // return nullptr; // TODO put behind SANE_CODE macro
+#if defined(SANE_CODE) || defined(EA_PORT_NATIVE)
+    return nullptr; // falling off the end is undefined natively
+#endif
 }
 
 unsigned int TSMemoryPool::GetPoolChecksum() {
