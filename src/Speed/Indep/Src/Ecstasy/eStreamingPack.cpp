@@ -444,7 +444,7 @@ void eStreamPackLoader::LoadStreamingEntry(unsigned int *name_hash_table, int nu
             load_info->StreamingEntry = streaming_entry;
             load_info->FileOffset = streaming_entry->ChunkByteOffset;
             if (streaming_entry->ChunkByteOffset < smallest_file_offset) {
-                streaming_entry->ChunkByteOffset = smallest_file_offset;
+                smallest_file_offset = streaming_entry->ChunkByteOffset; // track the minimum, don't clobber the entry
             }
             num_load_entries++;
 
@@ -463,6 +463,11 @@ void eStreamPackLoader::LoadStreamingEntry(unsigned int *name_hash_table, int nu
         load_info = load_info->GetNext();
     }
 
+    // The list links nodes inside load_info_table; empty it before freeing so
+    // its destructor doesn't walk freed memory.
+    while (!load_info_list.IsEmpty()) {
+        load_info_list.RemoveHead();
+    }
     bFree(load_info_table);
 
     if (!loading_table->NumLoadsPending && callback) {

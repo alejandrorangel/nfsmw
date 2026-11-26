@@ -233,6 +233,7 @@ void PortFreeStreamedTextureInfo(TextureInfo *texture_info) {
 // ---------------------------------------------------------------------------
 #include <cstdio>
 #include <cstdlib>
+#include <unistd.h>
 
 void PortTextureSmokeTest() {
     if (std::getenv("NFSMW_TEXTURE_SMOKE") == nullptr) {
@@ -254,4 +255,6 @@ void PortTextureSmokeTest() {
     eLoadStreamingTexture(hashes, n, nullptr, nullptr, 0);
     eWaitForStreamingTexturePackLoading(pack_name);
     bFree(hashes);
+    std::fprintf(stderr, "[smoke] done; holding 4s so the debug view can be inspected\n");
+    usleep(4 * 1000 * 1000);
 }
