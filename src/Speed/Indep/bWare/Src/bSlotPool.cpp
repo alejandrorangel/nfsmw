@@ -259,7 +259,7 @@ void *SlotPool::Malloc() {
     }
     SlotPoolEntry *slot = static_cast<SlotPoolEntry *>(FastMalloc());
     if (slot && (Flags & SLOTPOOL_FLAG_ZERO_ALLOCATED_MEMORY)) {
-        int num_words = SlotSize >> 2;
+        int num_words = SlotSize / static_cast<int>(sizeof(SlotPoolEntry)); // was SlotSize >> 2: 4-byte entries
         for (int n = 0; n < num_words; n++) {
             slot[n].Next = nullptr;
         }
@@ -340,7 +340,7 @@ void *SlotPool::Malloc(int num_slots, void **last_slot) {
     }
     if (Flags & SLOTPOOL_FLAG_ZERO_ALLOCATED_MEMORY) {
         for (SlotPoolEntry *slot = first_slot; slot; slot = slot->Next) {
-            int num_words = SlotSize >> 2;
+            int num_words = SlotSize / static_cast<int>(sizeof(SlotPoolEntry)); // was SlotSize >> 2: 4-byte entries
             for (int n = 1; n < num_words; n++) {
                 slot[n].Next = nullptr;
             }
