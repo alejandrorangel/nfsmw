@@ -138,10 +138,10 @@ vertex VOut debug_vs(uint vid [[vertex_id]], constant float2 &scale [[buffer(0)]
 struct FEVertex { packed_float2 pos; packed_float2 uv; uchar4 rgba; };
 struct FEOut { float4 pos [[position]]; float2 uv; float4 color; };
 
-vertex FEOut fe_vs(uint vid [[vertex_id]], const device FEVertex *verts [[buffer(0)]]) {
+vertex FEOut fe_vs(uint vid [[vertex_id]], const device FEVertex *verts [[buffer(0)]], constant float2 &scale [[buffer(1)]]) {
     FEVertex v = verts[vid];
     FEOut o;
-    o.pos = float4(float2(v.pos), 0, 1);
+    o.pos = float4(float2(v.pos) * scale, 0, 1);
     o.uv = float2(v.uv);
     // Console-style colour: RGB 0x80 = 1.0 (the PC renderer used MODULATE2X).
     o.color = float4(float3(v.rgba.xyz) * (2.0 / 255.0), v.rgba.w / 255.0);
@@ -253,15 +253,34 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     id<MTLCommandBuffer> cmd = [_queue commandBuffer];
     id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:pass];
     if (!fe.vertices.empty()) {
-        // FEng draws a 4:3 (640x480) screen; letterbox it.
+        // FEng draws a 640x480 (4:3) virtual screen. Aspect modes (NFSMW_ASPECT):
+        //   fill    (default) "Hor+": scale by height, centre, and let elements
+        //           outside the 4:3 area (backdrops already extend past it) use
+        //           the extra width; narrower windows scale by width instead.
+        //   4:3     pillar/letterbox to exactly the original screen.
+        //   stretch stretch 4:3 to the window (what the PC original did).
         CGSize size = view.drawableSize;
-        double w = size.width, h = size.height;
-        if (w / h > 4.0 / 3.0) {
-            w = h * 4.0 / 3.0;
-        } else {
-            h = w * 3.0 / 4.0;
+        double aspect = size.width / size.height;
+        float scale[2] = {1.0f, 1.0f};
+        MTLViewport viewport = {0, 0, size.width, size.height, 0, 1};
+        static const char *mode = getenv("NFSMW_ASPECT");
+        if (mode && strcmp(mode, "4:3") == 0) {
+            double w = size.width, h = size.height;
+            if (aspect > 4.0 / 3.0) {
+                w = h * 4.0 / 3.0;
+            } else {
+                h = w * 3.0 / 4.0;
+            }
+            viewport = (MTLViewport){(size.width - w) / 2, (size.height - h) / 2, w, h, 0, 1};
+        } else if (!(mode && strcmp(mode, "stretch") == 0)) {
+            if (aspect > 4.0 / 3.0) {
+                scale[0] = (float)((4.0 / 3.0) / aspect);
+            } else {
+                scale[1] = (float)(aspect / (4.0 / 3.0));
+            }
         }
-        [enc setViewport:(MTLViewport){(size.width - w) / 2, (size.height - h) / 2, w, h, 0, 1}];
+        [enc setViewport:viewport];
+        [enc setVertexBytes:scale length:sizeof(scale) atIndex:1];
         id<MTLBuffer> vb = [_device newBufferWithBytes:fe.vertices.data()
                                                 length:fe.vertices.size() * sizeof(PortFEVertex)
                                                options:MTLResourceStorageModeShared];

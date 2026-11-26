@@ -53,11 +53,11 @@ re-run the generator to drop stale ones.
 
 ## Status
 
-**The game draws its boot loading screen on Metal** (`loading_boot.fng`:
-MW logo on the frontend backdrop), through its own frontend renderer.
+**The game draws its loading screens on Metal** -- logo, backdrop and
+localized text through its own frontend and font code.
 
-Boot then continues to `LoadGlobalChunks()` and stops at the attribute
-database (`db.vlt`, another in-place pointer format).
+Boot gets through `LoadGlobalChunks()` (attribute database, GLOBALB,
+language, fonts) and stops in `InitFrontendDatabase()` (preset cars).
 
 Rendering pieces in place:
 
@@ -67,6 +67,13 @@ Rendering pieces in place:
   `eDisplayFrame` record frontend quads (640x480 virtual screen)
 - `src/Mac/MetalRenderer.mm`: draws the latest frontend frame, letterboxed
 - `src/Platform/eMathNative.cpp`: the Ecstasy matrix layer (D3DX on PC)
+
+Aspect ratio (`NFSMW_ASPECT`): `fill` (default) scales the 640x480
+frontend by window height and lets elements outside the 4:3 area use the
+extra width, like the community widescreen fixes; `4:3` pillar/letterboxes;
+`stretch` stretches like the PC original. (PC's `eIsWidescreen()` is hard
+false, and the install only ships two widescreen screens, so the game's
+own console widescreen path stays off.)
 
 Debug switches: `NFSMW_HOLD_FRAME=<s>` keeps ticking/drawing the frontend
 once it first draws; `NFSMW_TRACE_FRAMES`, `NFSMW_TRACE_FE`,
