@@ -4,18 +4,36 @@ Work-in-progress native Apple Silicon build of NFS: Most Wanted, rendering with
 Metal. Lives only in this fork; it is independent from the matching decomp
 build (`configure.py` + ninja), which keeps working unchanged.
 
-## Build
+## Build & run
 
 ```sh
-cmake -S port -B build/port -G Ninja
-ninja -C build/port nfsmw          # app shell: build/port/NFSMW.app
-python3 port/tools/port_report.py  # compile all game units, write build/port/port_report.md
+cmake -S port -B build/port -G Ninja       # Debug by default
+ninja -C build/port nfsmw_game             # compile the decompiled game
+python3 port/tools/gen_stubs.py            # regenerate link stubs (after upstream merges)
+ninja -C build/port nfsmw                  # link build/port/NFSMW.app
+
+# run against a PC Black Edition install
+NFSMW_DATA=~/Games/NFSMW build/port/NFSMW.app/Contents/MacOS/NFSMW
+NFSMW_DATA=~/Games/NFSMW port/tools/crashtrace.sh   # stubs hit + backtrace under lldb
+python3 port/tools/port_report.py          # categorised native compile errors
 ```
 
-`nfsmw_game` compiles the same `Speed/Indep/SourceLists/z*.cpp` unity units
-as the PC (`SPEED_EXE_1_3`) target. It is not linked into the app until
-`-DNFSMW_PORT_LINK_GAME=ON`, which needs the decomp to be complete enough to
-resolve.
+The app owns `main()` and runs the game's (renamed) `NFSMW_GameMain` on a
+64 MB-stack thread, with `NFSMW_DATA` as the working directory.
+
+### Link stubs
+
+Most of the game isn't decompiled, so `gen_stubs.py` emits
+`src/Stubs/GeneratedStubs.S`: a weak definition for every symbol the game
+references but nothing defines.
+
+- functions log `[stub] <name>` once and return 0 (`NFSMW_STUBS_FATAL=1`
+  aborts instead, to catch the first one in a debugger)
+- data is zero-filled (sized from the GameCube symbol table, doubled)
+- vtables point every slot at a per-class logging trap
+
+Stubs are weak, so decompiled or port-implemented code always wins; just
+re-run the generator to drop stale ones.
 
 ## Layout
 
@@ -35,8 +53,10 @@ resolve.
 
 ## Status
 
-All 32 game units compile natively for arm64 (`port_report.py` reports 0
-errors). Nothing is linked or run yet.
+Compiles, links (1013 stubs) and boots into `InitializeEverything()`:
+memory pools, strings, config, queued files, events and `eInitEngine()` run;
+it currently stops in `BootLoadingScreen()` when FEng can't find its boot
+package (file/package loading is still stubbed).
 
 ## Conventions learned so far
 
@@ -45,6 +65,10 @@ errors). Nothing is linked or run yet.
   the change is type-identical there.
 - Values that live in asset data stay 32-bit (e.g. `WGridNodeElemTag` is
   `unsigned int` natively, not `uintptr_t`).
+- Hard-coded 32-bit struct sizes (`+ 0x14` for `AllocationHeader`,
+  `char[96]` for `MemoryPool`) become `sizeof(...)`.
+- Plain `operator new/delete` stay on the system allocator natively (AppKit
+  and libc++ share them); game pool memory comes from explicit `bMalloc`.
 - `override` is `#define`d away in the C++98 matching builds; decomp
   signature TODOs marked `override` that don't actually override are
   un-marked.

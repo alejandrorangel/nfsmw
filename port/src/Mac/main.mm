@@ -5,6 +5,59 @@
 
 #import "MetalRenderer.h"
 
+#include <pthread.h>
+#include <unistd.h>
+
+// Decompiled game entry point (Speed/Indep/Src/Misc/Main.cpp), renamed for the port.
+extern int NFSMW_GameMain(int argc, char **argv);
+// bWare main memory pool. The original platform startup created it before
+// InitializeEverything(), which assumes pool 0 already exists.
+extern void bMemoryInit();
+
+static int g_argc;
+static char **g_argv;
+
+static void *GameThread(void *) {
+    pthread_setname_np("NFSMW game");
+    bMemoryInit();
+    int rc = NFSMW_GameMain(g_argc, g_argv);
+    NSLog(@"NFSMW: game main returned %d", rc);
+    dispatch_async(dispatch_get_main_queue(), ^{
+      [NSApp terminate:nil];
+    });
+    return nullptr;
+}
+
+// Game data dir: --data <dir> or $NFSMW_DATA. The game uses relative paths
+// ("GLOBAL\\GLOBALB.BUN"), so it runs with this as its working directory.
+static NSString *GameDataDir() {
+    for (int i = 1; i + 1 < g_argc; i++) {
+        if (strcmp(g_argv[i], "--data") == 0) {
+            return [NSString stringWithUTF8String:g_argv[i + 1]];
+        }
+    }
+    const char *env = getenv("NFSMW_DATA");
+    return env ? [NSString stringWithUTF8String:env] : nil;
+}
+
+static void StartGameThread() {
+    NSString *dir = GameDataDir();
+    if (!dir) {
+        NSLog(@"NFSMW: no game data dir (pass --data <dir> or set NFSMW_DATA); showing renderer only");
+        return;
+    }
+    if (chdir(dir.fileSystemRepresentation) != 0) {
+        NSLog(@"NFSMW: can't chdir to %@", dir);
+        return;
+    }
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 64 * 1024 * 1024); // console code assumes a big stack
+    pthread_t thread;
+    pthread_create(&thread, &attr, GameThread, nullptr);
+    pthread_attr_destroy(&attr);
+}
+
 @interface AppDelegate : NSObject <NSApplicationDelegate>
 @end
 
@@ -37,6 +90,8 @@
     [_window center];
     [_window makeKeyAndOrderFront:nil];
     NSLog(@"NFSMW: Metal device %@", device.name);
+
+    StartGameThread();
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)app {
@@ -46,6 +101,8 @@
 @end
 
 int main(int argc, const char *argv[]) {
+    g_argc = argc;
+    g_argv = const_cast<char **>(argv);
     @autoreleasepool {
         NSApplication *app = [NSApplication sharedApplication];
         [app setActivationPolicy:NSApplicationActivationPolicyRegular];

@@ -129,7 +129,7 @@ void SimpleChopper::OnBehaviorChange(const UCrc32 &mechanic) {
     }
 }
 
-float Max_Chopper_Accel = 80.0f;
+PORT_WEAK float Max_Chopper_Accel = 80.0f;
 
 void SimpleChopper::SetTorqueToMatchPitchAndRoll(UMath::Vector3 &localXZAccel, UMath::Vector3 &angVelOut) {
     this->mIrigidBody->ConvertWorldToLocal(localXZAccel, false);
@@ -189,8 +189,8 @@ void SimpleChopper::SetTorqueToMatchPitchAndRoll(UMath::Vector3 &localXZAccel, U
     this->mIrigidBody->ResolveTorque(UMath::Vector3::kZero);
 }
 
-float Min_Chopper_Accel = 30.0f;
-float Chopper_Ratio = 2.0f;
+PORT_WEAK float Min_Chopper_Accel = 30.0f;
+PORT_WEAK float Chopper_Ratio = 2.0f;
 
 void SimpleChopper::OnTaskSimulate(float dT) {
     this->mIrigidBody->ModifyXPos(-this->mLastBodyOffset.x);

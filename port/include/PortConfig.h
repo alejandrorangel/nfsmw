@@ -43,6 +43,8 @@
 #define _stricmp strcasecmp
 #define _strnicmp strncasecmp
 
+#define PORT_WEAK __attribute__((weak))
+
 static inline int isnanf(float f) {
     return __builtin_isnan(f);
 }

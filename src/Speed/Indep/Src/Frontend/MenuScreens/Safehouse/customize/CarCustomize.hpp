@@ -676,20 +676,20 @@ class CustomizePerformance : public CustomizationScreen {
     TwoStageSlider TopSpeedSlider; // offset 0x284, size 0x44
 };
 
-bool g_bCustomizeManagerHasControl = false;
-bool g_bTestCareerCustomization = false;
-char *g_pCustomizeMainPkg = "CustomizeMain.fng";
-char *g_pCustomizeSubPkg = "CustomizeCategory.fng";
-char *g_pCustomizeSubTopPkg = "CustomizeGenericTop.fng";
-char *g_pCustomizePartsPkg = "CustomizeParts.fng";
-char *g_pCustomizePerfPkg = "CustomizePerformance.fng";
-char *g_pCustomizeDecalsPkg = "Decals.fng";
-char *g_pCustomizePaintPkg = "Paint.fng";
-char *g_pCustomizeRimsPkg = "Rims.fng";
-char *g_pCustomizeHudPkg = "CustomHUD.fng";
-char *g_pCustomizeHudColorPkg = "CustomHUDColor.fng";
-char *g_pCustomizeSpoilerPkg = "Spoilers.fng";
-char *g_pCustomizeShoppingCartPkg = "ShoppingCart.fng";
+PORT_WEAK bool g_bCustomizeManagerHasControl = false;
+PORT_WEAK bool g_bTestCareerCustomization = false;
+PORT_WEAK char *g_pCustomizeMainPkg = "CustomizeMain.fng";
+PORT_WEAK char *g_pCustomizeSubPkg = "CustomizeCategory.fng";
+PORT_WEAK char *g_pCustomizeSubTopPkg = "CustomizeGenericTop.fng";
+PORT_WEAK char *g_pCustomizePartsPkg = "CustomizeParts.fng";
+PORT_WEAK char *g_pCustomizePerfPkg = "CustomizePerformance.fng";
+PORT_WEAK char *g_pCustomizeDecalsPkg = "Decals.fng";
+PORT_WEAK char *g_pCustomizePaintPkg = "Paint.fng";
+PORT_WEAK char *g_pCustomizeRimsPkg = "Rims.fng";
+PORT_WEAK char *g_pCustomizeHudPkg = "CustomHUD.fng";
+PORT_WEAK char *g_pCustomizeHudColorPkg = "CustomHUDColor.fng";
+PORT_WEAK char *g_pCustomizeSpoilerPkg = "Spoilers.fng";
+PORT_WEAK char *g_pCustomizeShoppingCartPkg = "ShoppingCart.fng";
 
 static uint32 gCarTypeNameHash;
 

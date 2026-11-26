@@ -82,10 +82,13 @@ const char *HudResourceManager::mPackageName = nullptr;
 char HudResourceManager::mCustHudTexPackName[32];
 uint32 HudResourceManager::mCustomizeHUDTexTextureResources[5];
 
-const char *HudDragTexturePackFilename = "GLOBAL\\HUDTEXDRAG.BIN";
-const char *HudSingleRaceTexturePackFilename = "GLOBAL\\HUDTEXRACE.BIN";
-const char *HudDragSplitScreenTexturePackFilename = "GLOBAL\\HUDTEXSPLIT.BIN";
-const char *HudSplitScreenTexturePackFilename = "GLOBAL\\HUDTEXDRAGSPLIT.BIN";
+#if defined(EA_PORT_NATIVE)
+HudResourceManager TheHudResourceManager;
+#endif
+PORT_WEAK const char *HudDragTexturePackFilename = "GLOBAL\\HUDTEXDRAG.BIN";
+PORT_WEAK const char *HudSingleRaceTexturePackFilename = "GLOBAL\\HUDTEXRACE.BIN";
+PORT_WEAK const char *HudDragSplitScreenTexturePackFilename = "GLOBAL\\HUDTEXSPLIT.BIN";
+PORT_WEAK const char *HudSplitScreenTexturePackFilename = "GLOBAL\\HUDTEXDRAGSPLIT.BIN";
 
 HudResourceManager::HudResourceManager() {
     mHudResourcesState = HRM_NOT_LOADED;

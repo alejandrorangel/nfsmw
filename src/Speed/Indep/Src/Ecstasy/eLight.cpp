@@ -14,7 +14,11 @@
 
 bTList<eLightMaterial> LightMaterialList;    // size: 0x8, address: 0x80460DDC
 eLightMaterial DefaultLightMaterialData;     // size: 0xA8, address: 0x80460DE4
+#if defined(EA_PORT_NATIVE) // in .data originally, so it had an initializer
+static eLightMaterial *DefaultLightMaterial = &DefaultLightMaterialData;
+#else
 static eLightMaterial *DefaultLightMaterial; // size: 0x4, address: 0x8041A63C
+#endif
 int32 DrawLightFlares;
 
 int LoaderLights(bChunk *bchunk /* r30 */) {}

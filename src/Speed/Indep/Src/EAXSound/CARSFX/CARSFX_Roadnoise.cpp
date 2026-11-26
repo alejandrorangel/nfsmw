@@ -138,7 +138,7 @@ void CARSFX_RoadNoise::Destroy() {
     }
 }
 
-int RoadNoiseVolumes[9]; // size: 0x24, Decl: 211
+PORT_WEAK int RoadNoiseVolumes[9]; // size: 0x24, Decl: 211
 
 void CARSFX_RoadNoise::UpdateParams(float t) {
     SndBase::UpdateParams(t);

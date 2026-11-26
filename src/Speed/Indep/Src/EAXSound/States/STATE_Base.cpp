@@ -34,7 +34,7 @@ CSTATE_Base::~CSTATE_Base() {
     this->Destroy();
 }
 
-int DEBUGPRINT_MIXERCONNECT; // Decl: 46
+PORT_WEAK int DEBUGPRINT_MIXERCONNECT; // Decl: 46
 
 void CSTATE_Base::DisconnectMixMap() {
     SndBase *CurSFXOBj = this->m_pHeadSFXObj;

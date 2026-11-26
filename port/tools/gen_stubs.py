@@ -1,0 +1,212 @@
+#!/usr/bin/env python3
+"""Generate link stubs for every symbol the decompiled game references but
+does not define yet.
+
+Usage (from repo root, after `ninja -C build/port nfsmw_game` succeeds):
+    python3 port/tools/gen_stubs.py
+
+Writes port/src/Stubs/GeneratedStubs.S. Re-run whenever upstream decomp
+progress adds or removes references. Stubs are weak definitions, so a stale
+stub never collides with a symbol that has since been decompiled.
+
+Stub behaviour
+  * functions: log "[stub] <name>" to stderr the first time they're hit, then
+    return 0 (x0/x1 and v0-v3 zeroed, so int/pointer/float/Vector returns are 0).
+  * data: zero-filled storage. Size comes from the GameCube symbol table when
+    the name is found there (doubled, for 64-bit pointers), else a default.
+  * vtables: two zero header words + slots that all point at a per-class trap,
+    so calling any virtual on an unimplemented class logs the class name.
+"""
+
+import os
+import re
+import subprocess
+import sys
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+BUILD = os.path.join(ROOT, "build", "port")
+OUT = os.path.join(ROOT, "port", "src", "Stubs", "GeneratedStubs.S")
+GC_SYMBOLS = os.path.join(ROOT, "config", "GOWE69", "symbols.txt")
+
+DEFAULT_DATA_SIZE = 1024
+VTABLE_SLOTS = 256
+
+
+def run(cmd, **kw):
+    return subprocess.run(cmd, capture_output=True, text=True, **kw)
+
+
+def game_objects():
+    objs = []
+    for dirpath, _, files in os.walk(os.path.join(BUILD, "CMakeFiles")):
+        if "nfsmw_game.dir" in dirpath or "nfsmw.dir" in dirpath:
+            objs += [os.path.join(dirpath, f) for f in files if f.endswith(".o")]
+    if not objs:
+        sys.exit("no objects found; build nfsmw_game first")
+    return sorted(objs)
+
+
+def nm_symbols(game_objs, all_objs):
+    """Symbols the game objects need that no object (game or port) defines."""
+    def scan(objs):
+        undefined, defined = set(), set()
+        for line in run(["nm", "-P"] + objs).stdout.splitlines():
+            parts = line.split()
+            if len(parts) < 2 or parts[0].endswith(":"):
+                continue
+            (undefined if parts[1] == "U" else defined).add(parts[0])
+        return undefined, defined
+
+    undefined, _ = scan(game_objs)
+    _, defined = scan(all_objs)
+    # ___dso_handle is provided by the linker itself.
+    return undefined - defined - {"___dso_handle"}
+
+
+SDK_LIBS = [
+    "usr/lib/libc++.1.tbd",
+    "usr/lib/libc++abi.tbd",
+    "usr/lib/libSystem.B.tbd",
+    "usr/lib/libobjc.A.tbd",
+]
+SDK_FRAMEWORKS = ["Cocoa", "AppKit", "Foundation", "CoreFoundation", "Metal", "MetalKit", "QuartzCore", "GameController"]
+
+
+def system_exports():
+    """Every symbol the SDK libraries/frameworks we link against export."""
+    sdk = run(["xcrun", "--show-sdk-path"]).stdout.strip()
+    paths = [os.path.join(sdk, p) for p in SDK_LIBS]
+    paths += [os.path.join(sdk, f"System/Library/Frameworks/{f}.framework/{f}.tbd") for f in SDK_FRAMEWORKS]
+    syms = set()
+    tok = re.compile(r"'?(_[A-Za-z0-9_$.]+)'?")
+    for p in paths:
+        if os.path.exists(p):
+            syms.update(tok.findall(open(p, errors="replace").read()))
+    return syms
+
+
+def demangle(names):
+    names = sorted(names)
+    res = run(["c++filt", "-_"], input="\n".join(names)).stdout.splitlines()
+    return dict(zip(names, res))
+
+
+def branch_targets(objs):
+    targets = set()
+    out = run(["objdump", "-r"] + objs).stdout
+    for line in out.splitlines():
+        if "ARM64_RELOC_BRANCH26" in line:
+            targets.add(line.split()[-1])
+    return targets
+
+
+def gc_sizes():
+    sizes = {}
+    if not os.path.exists(GC_SYMBOLS):
+        return sizes
+    rx = re.compile(r"^(\S+) = \S+; // type:(\w+)(?:.*?size:(0x[0-9A-Fa-f]+))?")
+    for line in open(GC_SYMBOLS):
+        m = rx.match(line)
+        if m and m.group(2) == "object" and m.group(3):
+            sizes[m.group(1)] = int(m.group(3), 16)
+    return sizes
+
+
+def main():
+    all_objs = [o for o in game_objects() if "/Stubs/" not in o]
+    objs = [o for o in all_objs if "nfsmw_game.dir" in o]
+    candidates = nm_symbols(objs, all_objs)
+    dem = demangle(candidates)
+    system = system_exports()
+    stubs = [s for s in sorted(candidates) if s not in system]
+
+    branches = branch_targets(objs)
+    sizes = gc_sizes()
+
+    funcs, datas, vtables = [], [], []
+    for s in stubs:
+        d = dem[s]
+        if s.startswith("__ZTV"):
+            vtables.append(s)
+        elif s.startswith(("__ZTI", "__ZTS")):
+            datas.append((s, 64))
+        elif s in branches or ("(" in d and not d.startswith(("vtable", "typeinfo"))):
+            funcs.append(s)
+        else:
+            cname = s[1:] if s.startswith("_") and not s.startswith("__Z") else None
+            size = sizes.get(cname, 0) * 2 if cname else 0
+            datas.append((s, max(size, 16) if size else DEFAULT_DATA_SIZE))
+
+    L = []
+    w = L.append
+    w("// GENERATED by port/tools/gen_stubs.py -- do not edit by hand.")
+    w(f"// {len(funcs)} functions, {len(datas)} data, {len(vtables)} vtables")
+    w("")
+    w("    .section __DATA,__data")
+    recs = {}
+    for i, s in enumerate(funcs + vtables):
+        recs[s] = f"Lrec{i}"
+        label = dem[s]
+        w(f"Lrec{i}: .byte 0")  # "already reported" flag, then the name
+        w(f'    .asciz "{label.replace(chr(92), chr(92) * 2).replace(chr(34), chr(92) + chr(34))}"')
+    w("")
+    w("    .text")
+    w("    .p2align 2")
+    w("_port_stub_trampoline:")
+    w("    stp x29, x30, [sp, #-16]!")
+    w("    mov x29, sp")
+    w("    mov x0, x16")
+    w("    bl _port_stub_log")
+    w("    ldp x29, x30, [sp], #16")
+    w("    mov x0, #0")
+    w("    mov x1, #0")
+    w("    movi v0.2d, #0")
+    w("    movi v1.2d, #0")
+    w("    movi v2.2d, #0")
+    w("    movi v3.2d, #0")
+    w("    ret")
+    w("")
+    for s in funcs:
+        w(f'    .globl "{s}"')
+        w(f'    .weak_definition "{s}"')
+        w("    .p2align 2")
+        w(f'"{s}":')
+        w(f"    adrp x16, {recs[s]}@PAGE")
+        w(f"    add x16, x16, {recs[s]}@PAGEOFF")
+        w("    b _port_stub_trampoline")
+    for i, s in enumerate(vtables):
+        w("    .p2align 2")
+        w(f"Lvtrap{i}:")
+        w(f"    adrp x16, {recs[s]}@PAGE")
+        w(f"    add x16, x16, {recs[s]}@PAGEOFF")
+        w("    b _port_stub_trampoline")
+    w("")
+    w("    .section __DATA,__data")
+    for i, s in enumerate(vtables):
+        w(f'    .globl "{s}"')
+        w(f'    .weak_definition "{s}"')
+        w("    .p2align 3")
+        w(f'"{s}":')
+        w("    .quad 0, 0")
+        w(f"    .rept {VTABLE_SLOTS}")
+        w(f"    .quad Lvtrap{i}")
+        w("    .endr")
+    w("")
+    for s, size in datas:
+        w(f'    .globl "{s}"')
+        w(f'    .weak_definition "{s}"')
+        w("    .p2align 4")
+        w(f'"{s}":')
+        w(f"    .space {size}")
+    w("")
+
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    with open(OUT, "w") as f:
+        f.write("\n".join(L))
+
+    print(f"functions: {len(funcs)}  data: {len(datas)}  vtables: {len(vtables)}")
+    print(f"wrote {os.path.relpath(OUT, ROOT)}")
+
+
+if __name__ == "__main__":
+    main()

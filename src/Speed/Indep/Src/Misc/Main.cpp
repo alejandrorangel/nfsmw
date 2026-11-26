@@ -544,7 +544,10 @@ void MainLoop(float hardware_ms) {
 
 static const float Tweak_MinimumRealTimeStep = 0.25f; // Decl: 3123
 
-#ifndef EA_PLATFORM_XENON
+#if defined(EA_PORT_NATIVE)
+// The macOS app owns main(); it runs the game loop on its own thread.
+int NFSMW_GameMain(int argc, char **argv)
+#elif !defined(EA_PLATFORM_XENON)
 int main(int argc, char **argv)
 #else
 int MainThreadFunction(int argc, char **argv)

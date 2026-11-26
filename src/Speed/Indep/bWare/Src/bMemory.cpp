@@ -453,7 +453,11 @@ asd:
 const char *pTraceDebugText = nullptr;  // size: 0x4, address: 0x80416450
 int TraceDebugLine = 0;                 // size: 0x4, address: 0x80416454
 int MemoryInitialized = 0;              // size: 0x4, address: 0x80416458
+#if defined(EA_PORT_NATIVE) // MemoryPool is larger than 0x60 with 64-bit pointers
+alignas(MemoryPool) char MemoryPoolMem[16][sizeof(MemoryPool)];
+#else
 char MemoryPoolMem[16][96];             // size: 0x600, address: 0x8045A20D
+#endif
 MemoryPool *MemoryPools[16];            // size: 0x40, address: 0x8045A810
 MemoryPoolInfo MemoryPoolInfoTable[16]; // size: 0x100, address: 0x8045A850
 bVirtualMemoryManager eARAMMM;          // size: 0x18, address: 0x8045A950
@@ -709,6 +713,15 @@ unsigned int GetVirtualMemoryAllocParams() {
     return (GetVirtualMemoryPoolNumber() & 0xf) | 0x400;
 }
 
+#if defined(EA_PORT_NATIVE)
+#include <sys/mman.h>
+
+static void *PortReserveMemory(int size) {
+    void *mem = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    return mem == MAP_FAILED ? nullptr : mem;
+}
+#endif
+
 void bMemoryInit() {
 #ifdef EA_PLATFORM_GAMECUBE
     void *arenaLo;
@@ -748,6 +761,15 @@ void bMemoryInit() {
         int pool_number;
         int pool_num_VM = GetVirtualMemoryPoolNumber();
         bInitMemoryPool(pool_num_VM, reinterpret_cast<void *>(eARAMMM.mVirtualBaseAddr), eARAMMM.mARamSize, GetVirtualMemoryPoolName());
+        MemoryInitialized = TRUE;
+    }
+#elif defined(EA_PORT_NATIVE)
+    if (!MemoryInitialized) {
+        // Reserve the main pool up front; pages are committed lazily by the OS.
+        // Generous because native structs are bigger than the original 32-bit ones.
+        const int bware_memory_size = 512 * 1024 * 1024;
+        void *main_pool = PortReserveMemory(bware_memory_size);
+        bInitMemoryPool(0, main_pool, bware_memory_size, "Main Pool");
         MemoryInitialized = TRUE;
     }
 #else
@@ -809,12 +831,12 @@ void *bWareMalloc(int size, const char *debug_text, int debug_line, int allocati
     }
 
     // TODO rename
-    int allocation_header_offset = bMemoryGetAlignmentOffset(allocation_params) + 0x14;
+    int allocation_header_offset = bMemoryGetAlignmentOffset(allocation_params) + sizeof(AllocationHeader);
     int new_size;
     pool_num = bMemoryGetPoolNum(allocation_params);
     MemoryPool *pool = MemoryPools[pool_num];
     void *memory =
-        pool->AllocateMemory(size + 0x14, alignment, allocation_header_offset, allocation_params & 0x40, allocation_params & 0x80, &new_size);
+        pool->AllocateMemory(size + sizeof(AllocationHeader), alignment, allocation_header_offset, allocation_params & 0x40, allocation_params & 0x80, &new_size);
 
     if (memory != nullptr) {
         int padding = 0;

@@ -21,7 +21,7 @@ int DEBUG_REVERB_CHANGES = 0;          // size: 0x4, address: 0xFFFFFFFF, Decl: 
 static const int SPEW_REVERB_INFO = 0; // size: 0x4, Decl: 41
 
 extern ParameterAccessor ReverbAccessor; // size: 0x1C, Decl: 45
-eREVERBFX ReverbZoneCrossMap[12];        // size: 0x30, Decl: 46
+PORT_WEAK eREVERBFX ReverbZoneCrossMap[12];        // size: 0x30, Decl: 46
 
 eTrackPathZoneType SFXCTL_Tunnel::m_PlayerZoneType = TRACK_PATH_ZONE_RESET; // size: 0x4, Decl: 49
 

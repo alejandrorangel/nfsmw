@@ -54,6 +54,10 @@ class HudResourceManager {
     static void LoadingCompleteCallbackBridge(void *param) {} // Decl: 47
 };
 
+#if defined(EA_PORT_NATIVE) // header definition -> one per unit; defined in FEPkg_Hud.cpp natively
+extern HudResourceManager TheHudResourceManager;
+#else
 HudResourceManager TheHudResourceManager; // size: 0x38, Decl:speed/indep/src/frontend/hud/FeHudResourceManager.hpp:51
+#endif
 
 #endif

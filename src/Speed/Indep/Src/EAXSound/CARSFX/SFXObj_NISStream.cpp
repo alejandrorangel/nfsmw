@@ -16,7 +16,7 @@ unsigned int g_laststartanimid = 0;
 
 bool g_bWasLastNISaStart = true;
 
-int DBGPRNT_NIS; // size: 0x4, address: 0xFFFFFFFF, Decl: 40
+PORT_WEAK int DBGPRNT_NIS; // size: 0x4, address: 0xFFFFFFFF, Decl: 40
 
 DEFINE_CREATABLE(0x50, SFXObj_NISStream, SndBase);
 

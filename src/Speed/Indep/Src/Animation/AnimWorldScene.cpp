@@ -7,7 +7,9 @@
 
 extern int AnimCfg_DisableWorldAnimations;
 bool PrintWorldAnimationStuff = false;
+#if !defined(EA_PORT_NATIVE) // defined in World/RaceParameters.cpp
 RaceParameters TheRaceParameters;
+#endif
 
 CAnimWorldScene::CAnimWorldScene() : mHandle(0) {
     mHandle = bStringHash("WorldAnimations");

@@ -189,7 +189,7 @@ int SndStrmWrapper::SetFXLevel(int bus, int level) {}
 // STRIPPED
 int SndStrmWrapper::SetDryLevel(int level) {}
 
-int DEBUG_STREAMS; // size: 0x4, Decl: 447
+PORT_WEAK int DEBUG_STREAMS; // size: 0x4, Decl: 447
 
 // STRIPPED
 int SndStrmWrapper::SetPitchMult(int pitchmult) {}

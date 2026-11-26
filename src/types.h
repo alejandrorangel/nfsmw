@@ -294,4 +294,11 @@ typedef volatile int32 vs32;
 
 #define REFRESH_RATE (60.0f)
 
+// Marks a decomp duplicate definition of a global (the same variable defined
+// in two units, or in a header). Weak in the native port so the real
+// definition wins at link time; expands to nothing in matching builds.
+#ifndef PORT_WEAK
+#define PORT_WEAK
+#endif
+
 #endif // _TYPES_H_
