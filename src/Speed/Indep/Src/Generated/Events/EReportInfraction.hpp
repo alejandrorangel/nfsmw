@@ -6,6 +6,9 @@
 #endif
 
 #include "Speed/Indep/Src/Main/Event.h"
+#include "Speed/Indep/Src/Gameplay/GInfractionManager.h"
+
+typedef GInfractionManager::InfractionType InfractionType;
 
 // total size: 0xc
 class EReportInfraction : public Event {

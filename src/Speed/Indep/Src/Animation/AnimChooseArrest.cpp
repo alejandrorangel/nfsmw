@@ -240,11 +240,29 @@ void NISListenerActivity::MessageBusted(const MPerpBusted &message) {
     if (ChooseArrestLocation(markerPos, markerAngle)) {
         Sim::IActivity *activity = Sim::IActivity::CreateInstance("NISActivity", Sim::Param());
         INIS *nis;
+#if defined(EA_PORT_NATIVE)
+        nis = nullptr;
+#endif
         if (activity && activity->QueryInterface(&nis)) {
             nis->AddCar("car1", playerVehicle);
             nis->StartLocation(markerPos, markerAngle);
             nis->Load(CAnimChooser::Arrest, sceneName, cameraTrack, true);
         }
+#if defined(EA_PORT_NATIVE)
+        // TODO(port): NISActivity isn't ported (no factory natively), so the
+        // arrest NIS can't play. Do what its end does on PC (NISActivity at
+        // 0x6F7520 for an arrest scene), which is also PC's path when there's
+        // no arrest location: back to the safehouse rap sheet in free roam,
+        // the pause menu in a race.
+        if (activity == nullptr || nis == nullptr) {
+            GRaceParameters *parms = GRaceStatus::Get().GetRaceParameters();
+            if (!parms) {
+                new EQuitToFE(GARAGETYPE_CAREER_SAFEHOUSE, "Infractions.fng");
+            } else {
+                new EPause(0, 1, 0);
+            }
+        }
+#endif
 #ifndef EA_BUILD_A124
     } else {
         GRaceParameters *parms = GRaceStatus::Get().GetRaceParameters();

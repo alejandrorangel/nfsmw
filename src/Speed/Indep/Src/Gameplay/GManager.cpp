@@ -15,6 +15,8 @@
 #include <algorithm>
 #if defined(EA_PORT_NATIVE)
 #include "Speed/Indep/Src/Interfaces/Simables/ISimable.h"
+#include "Speed/Indep/Src/Generated/Events/EAutoSave.hpp"
+#include "Speed/Indep/Src/Generated/Messages/MNotifyMilestoneProgress.h"
 #include "Speed/Indep/Src/Sim/Simulation.h"
 #include <cstdio>
 #include <cstdlib>
@@ -698,3 +700,85 @@ void GManager::Update(float dT) {
     // TODO(port): UpdatePendingSMS, UpdateTriggerAvailability and
     // UpdateIconVisibility (SMS, triggers and icons aren't ported).
 }
+
+#if defined(EA_PORT_NATIVE)
+// Milestone value tracking and the pursuit notifications. The milestone type
+// table (mMilestoneTypeInfo) and the milestones themselves aren't allocated
+// natively yet (AllocateMilestones/ResetMilestoneTrackingInfo aren't ported),
+// so these mostly find nothing; PC looks values up with find() and writes
+// through whatever it returns, natively an unknown value is ignored.
+
+// PC: 0x5EDA20
+void GManager::TrackValue(const char *valueName, float value) {
+    MilestoneInfoMap::iterator it = mMilestoneTypeInfo.find(Attrib::StringToKey(valueName));
+    if (it == mMilestoneTypeInfo.end()) {
+        return;
+    }
+    MilestoneTypeInfo &info = it->second;
+    info.mLastKnownValue = value;
+    if (info.mBestValue != -1.0f) {
+        if ((info.mFlags & 1) == 0) {
+            if (info.mBestValue <= value) {
+                return;
+            }
+        } else if (value <= info.mBestValue) {
+            return;
+        }
+    }
+    info.mBestValue = value;
+    MNotifyMilestoneProgress(valueName, value).Post(UCrc32(UCRC32_Gameplay));
+    if (GRaceStatus::Exists() && GRaceStatus::Get().GetPlayMode() == GRaceStatus::kPlayMode_Roaming) {
+        for (unsigned int i = 0; i < mNumMilestones; i++) {
+            GMilestone &milestone = mMilestones[i];
+            if ((milestone.GetIsAvailable() || milestone.GetIsDonePendingEscape()) && milestone.GetTypeKey() == info.mTypeKey) {
+                milestone.NotifyProgress(value);
+            }
+        }
+    }
+}
+
+// PC: 0x5EDC00
+float GManager::GetValue(Attrib::Key valueKey) {
+    MilestoneInfoMap::iterator it = mMilestoneTypeInfo.find(valueKey);
+    if (it == mMilestoneTypeInfo.end()) {
+        return 0.0f;
+    }
+    return it->second.mLastKnownValue;
+}
+
+// PC: 0x5EDD10. Values that only count per pursuit start over.
+void GManager::NotifyPursuitStarted() {
+    for (MilestoneInfoMap::iterator it = mMilestoneTypeInfo.begin(); it != mMilestoneTypeInfo.end(); ++it) {
+        if ((it->second.mFlags & 2) != 0) {
+            it->second.mBestValue = -1.0f;
+            it->second.mLastKnownValue = -1.0f;
+        }
+    }
+}
+
+// PC: 0x602770. Milestones done during the pursuit are awarded when it's
+// evaded (or reset when it isn't); evading in free roam autosaves.
+void GManager::NotifyPursuitEnded(bool evaded) {
+    for (unsigned int i = 0; i < mNumMilestones; i++) {
+        GMilestone &milestone = mMilestones[i];
+        if (milestone.GetIsAvailable() || milestone.GetIsDonePendingEscape()) {
+            milestone.NotifyPursuitOver(evaded);
+        }
+    }
+    if (evaded && GRaceStatus::Get().GetPlayMode() == GRaceStatus::kPlayMode_Roaming) {
+        new EAutoSave();
+    }
+}
+
+// PC: 0x5E48F0. Shows the pursuit breaker icons of a section again (all of
+// them for -1).
+void GManager::RestorePursuitBreakerIcons(int sectionID) {
+    for (unsigned int i = 0; i < mNumIcons; i++) {
+        GIcon *icon = mIcons[i];
+        if (icon->GetType() == GIcon::kType_PursuitBreaker &&
+            (sectionID == -1 || sectionID == icon->GetSectionID() || sectionID == icon->GetCombinedSectionID())) {
+            icon->SetFlag(1);
+        }
+    }
+}
+#endif

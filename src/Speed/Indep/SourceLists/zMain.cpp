@@ -34,6 +34,8 @@
 
 #include "Speed/Indep/Src/Generated/Events/EPause.cpp"
 
+#include "Speed/Indep/Src/Generated/Events/EReportInfraction.cpp"
+
 #include "Speed/Indep/Src/Generated/Events/EUnPause.cpp"
 
 #include "Speed/Indep/Src/Generated/Events/ERestartRace.cpp"

@@ -41,11 +41,35 @@ class GInfractionManager {
         this->ReportInfraction(kInfraction_Resist);
     }
 
+#if defined(EA_PORT_NATIVE)
+    // PC: 0x6E9830, 0x6E9860, 0x6E9890 -- reported once per rising edge.
+    void ReportSpeeding(bool speeding) {
+        if (speeding && !mSpeeding) {
+            ReportInfraction(kInfraction_Speeding);
+        }
+        mSpeeding = speeding;
+    }
+
+    void ReportRecklessDriving(bool reckless) {
+        if (reckless && !mDrivingRecklessly) {
+            ReportInfraction(kInfraction_Reckless);
+        }
+        mDrivingRecklessly = reckless;
+    }
+
+    void ReportRacing(bool racing) {
+        if (racing && !mRacing) {
+            ReportInfraction(kInfraction_Racing);
+        }
+        mRacing = racing;
+    }
+#else
     void ReportSpeeding(bool speeding) {}
 
     void ReportRecklessDriving(bool reckless) {}
 
     void ReportRacing(bool racing) {}
+#endif
 
     void ReportAssaultingPoliceOfficer() {
         this->ReportInfraction(kInfraction_Assault);

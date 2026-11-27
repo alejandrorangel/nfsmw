@@ -7,6 +7,7 @@
 #include "Speed/Indep/Src/Gameplay/GManager.h"
 #include "Speed/Indep/Src/Gameplay/GRaceDatabase.h"
 #include "Speed/Indep/Src/Gameplay/GRaceStatus.h"
+#include "Speed/Indep/Src/Generated/Events/EReportInfraction.hpp"
 
 GInfractionManager *GInfractionManager::mObj = nullptr;
 
@@ -71,8 +72,7 @@ void GInfractionManager::ReportInfraction(InfractionType infraction) {
     }
     if ((mInfractions & infraction) == 0) {
         mInfractions |= infraction;
-        // TODO(port): PC also queues EReportInfraction(infraction) (vtable 0x8A72F8, dtor 0x641A30) -- the HUD infraction
-        // notice; the event isn't reconstructed yet.
+        new EReportInfraction(infraction);
         GManager::Get().TrackValue("total_infractions", static_cast<float>(CountBits(mInfractions)));
     }
     mNumThisPursuit++;

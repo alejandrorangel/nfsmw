@@ -100,6 +100,10 @@ class GIcon {
 
     GIcon(Type type, const UMath::Vector3 &pos, float rotDeg); // Decl: 143
 
+#if defined(EA_PORT_NATIVE)
+    friend class GManager; // RestorePursuitBreakerIcons sets the flags directly (PC 0x5E48F0)
+#endif
+
   private:
     ~GIcon(); // Decl: 144
 
