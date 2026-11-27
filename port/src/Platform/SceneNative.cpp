@@ -137,6 +137,16 @@ void MaterialConstants(const eLightMaterial *light_material, float out[20]) {
     out[19] = d.SpecularPower; // x flt_9018E0 (1)
 }
 
+// A solid's texture table entry looked up by name each time (the normal and
+// specular maps can come from packs that unload while the solid stays, so
+// PortSolidTexture's cached pointer could dangle).
+TextureInfo *SolidTextureUncached(eSolid *solid, int index) {
+    if (index < 0 || index >= solid->NumTextureTableEntries || !solid->pTextureTable) {
+        return nullptr;
+    }
+    return GetTextureInfo(solid->pTextureTable[index].NameHash, 0, 0);
+}
+
 // The GLOSSYWINDOW effect's WindowReflection: the WINDOWREFLECTION texture
 // (looked up by sub_6D7400 when the effect begins).
 void *WindowReflectionTexture() {
@@ -165,8 +175,8 @@ void DrawSolid(eSolid *solid, const M44 world, const eDynamicLightContext *light
             d.texture2 = WindowReflectionTexture();
         } else if (group.Effect == PORT_EFFECT_WORLDNORMALMAP || group.Effect == PORT_EFFECT_WORLDREFLECT) {
             // sub_6C6D10: texture slots 1 (NormalMapTexture) and 3 (SpecularMapTexture).
-            d.texture2 = MetalTextureOf(PortSolidTexture(solid, group.TextureSlots[1]));
-            d.texture3 = MetalTextureOf(PortSolidTexture(solid, group.TextureSlots[3]));
+            d.texture2 = MetalTextureOf(SolidTextureUncached(solid, group.TextureSlots[1]));
+            d.texture3 = MetalTextureOf(SolidTextureUncached(solid, group.TextureSlots[3]));
         }
         int light_index = group.TextureSlots[5];
         const eLightMaterial *light_material = nullptr;

@@ -1043,9 +1043,17 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 if ((c.effect == 1 || c.effect == 3) && d.texture2 && d.texture3 && d.vertex_stride >= 60) {
                     c.shade |= 128;
                 }
-                // IDI_CAR_FX technique: #1 (shader=3, PC's higher car detail)
-                // unless NFSMW_CAR_SHADER=1 asks for technique #0 (shader=1).
-                // TODO(port): follow the PC car-shader video setting.
+                // IDI_CAR_FX technique. speed.exe 1.3 (sub_6D5C10, sub_6D7500,
+                // sub_6E0AB0) picks per draw a shadow level: 0 when shadow
+                // detail (0x901830) is off or outside the shadow range, else up
+                // to 0x982C3C (2 with D24S8 shadow maps, NVIDIA path), and the
+                // car then uses technique #0 (level 0), #1..#3 (levels 1..3) or
+                // #4/#5 (ATI DF16 path). The top preset has shadows on, so near
+                // cars draw #2 (ps #6 = ps #8 plus 4-tap PCF). The port has no
+                // shadow map yet: it uses the shadowed techniques' lighting
+                // (ps #8) fully lit, or technique #0 with NFSMW_CAR_SHADER=1.
+                // TODO(port): ShadowDetail video setting and the shadow-map
+                // pass (render target type 4, view 0x919C70, CAR_SHADOW_MAP).
                 static const char *car_shader = getenv("NFSMW_CAR_SHADER");
                 if (!(car_shader && strcmp(car_shader, "1") == 0)) {
                     c.shade |= 64;
