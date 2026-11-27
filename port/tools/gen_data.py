@@ -99,6 +99,11 @@ TABLES = [
          fields=[char(), char(), char()])
     for i, lang in enumerate(["English", "French", "German", "Italian", "Spanish", "Dutch", "Swedish", "Polish", "Finnish", "Danish"])
 ] + [
+    # --- Frontend/Database/FEDatabase.cpp: controller config attribute keys, [config][analog]
+    # (declared Attrib::Key [5][2]; flattened here, same storage) ---
+    dict(name="DriveConfigs", addr=0x89F6AC, type="unsigned int", count=10, stride=4, fields=[u32()]),
+    dict(name="HudConfigs", addr=0x89F6D4, type="unsigned int", count=10, stride=4, fields=[u32()]),
+] + [
     dict(name="LanguageInfoTable", addr=0x8F40F8, type="LanguageInfo", count=10, stride=0x14,
          fields=[cast("eLanguages", i32()), cstr(), cstr(), null_ptr(), ref(), ref()]),
 ]

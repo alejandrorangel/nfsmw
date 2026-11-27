@@ -1192,9 +1192,9 @@ void PVehicle::OnTaskSimulate(float dT) {
             UMath::Vector3 v;
             GetLinearVelocity(v);
             const InputControls *in = mInput ? &mInput->GetControls() : nullptr;
-            VEHICLE_TRACE("player pos %.2f %.2f %.2f vel %.2f %.2f %.2f speed %.2f wheels %u gas %.2f brake %.2f steer %.2f gear %d rpm %.0f\n",
+            VEHICLE_TRACE("player pos %.2f %.2f %.2f vel %.2f %.2f %.2f speed %.2f wheels %u gas %.2f brake %.2f steer %.2f gear %d rpm %.0f player %d forcestop %d staging %d\n",
                           p.x, p.y, p.z, v.x, v.y, v.z, mSpeed, mWheelsOnGround, in ? in->fGas : 0.0f, in ? in->fBrake : 0.0f,
-                          in ? in->fSteering : 0.0f, mTranny ? (int)mTranny->GetGear() : -1, mEngine ? mEngine->GetRPM() : 0.0f);
+                          in ? in->fSteering : 0.0f, mTranny ? (int)mTranny->GetGear() : -1, mEngine ? mEngine->GetRPM() : 0.0f, GetPlayer() != nullptr, mForceStop, mStaging);
         }
     }
 #endif

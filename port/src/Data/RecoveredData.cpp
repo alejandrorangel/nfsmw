@@ -82,6 +82,34 @@ bPrintfLocaleInfo FinnishLocaleInfo = {44, 32, 3};
 // DanishLocaleInfo @ 0x8f40f0
 bPrintfLocaleInfo DanishLocaleInfo = {44, 46, 3};
 
+// DriveConfigs @ 0x89f6ac
+unsigned int DriveConfigs[10] = {
+    {0x73928352u},
+    {0xAD37E45Au},
+    {0x35229E26u},
+    {0x58341EC2u},
+    {0xEAA1761Du},
+    {0x58CB8BB8u},
+    {0xE7901ECCu},
+    {0xCFA829CCu},
+    {0x80D3785Au},
+    {0x2BC75215u},
+};
+
+// HudConfigs @ 0x89f6d4
+unsigned int HudConfigs[10] = {
+    {0xCAAE372Fu},
+    {0x26190AC6u},
+    {0xCAAE372Fu},
+    {0x26190AC6u},
+    {0xCAAE372Fu},
+    {0x26190AC6u},
+    {0xCAAE372Fu},
+    {0x26190AC6u},
+    {0xCAAE372Fu},
+    {0x26190AC6u},
+};
+
 // LanguageInfoTable @ 0x8f40f8
 LanguageInfo LanguageInfoTable[10] = {
     {static_cast<eLanguages>(0), const_cast<char *>("ENGLISH"), const_cast<char *>("LANGUAGES\\ENGLISH.BIN"), nullptr, &EropeanFontNameInfo, &EnglishLocaleInfo},

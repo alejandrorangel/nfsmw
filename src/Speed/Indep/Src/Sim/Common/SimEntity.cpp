@@ -42,6 +42,24 @@ bool Entity::SetPosition(const UMath::Vector3 &position) const {
     return false;
 }
 
+#if defined(EA_PORT_NATIVE)
+// speed.exe 1.3: 0x6FC4B0
+bool Entity::Attach(IUnknown *object) {
+    if (UTL::COM::ComparePtr(mSimable, object)) {
+        return false;
+    }
+    ISimable *isimable;
+    if (object->QueryInterface(&isimable)) {
+        if (mSimable) {
+            Detach(mSimable);
+            mSimable = nullptr;
+        }
+        mSimable = isimable;
+    }
+    return mAttachments->Attach(object);
+}
+#endif
+
 bool Entity::Detach(IUnknown *object) {
     if (UTL::COM::ComparePtr(mSimable, object)) {
         mSimable = nullptr;
