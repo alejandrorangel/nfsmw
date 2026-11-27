@@ -319,7 +319,31 @@ eSolidListHeader *InternalLoaderSolidHeaderChunks(bChunk *chunk) {
 }
 #endif
 
+#if defined(EA_PORT_NATIVE)
+eSolid *PortCreateSolid(bChunk *chunk);  // port/src/Platform/SolidNative.cpp
+eSolid *PortNativeSolid(bChunk *info_chunk);
+void PortFreeSolid(eSolid *solid);
+
+// PC: speed.exe 1.3 @ 0x5070E0. The solid itself is built natively.
+eSolid *InternalLoaderSolidChunks(bChunk *chunk, eSolidListHeader *solid_list_header) {
+    eSolid *solid = PortCreateSolid(chunk);
+    if (solid == nullptr) {
+        return nullptr;
+    }
+    eSolidIndexEntry *index_entry = solid_list_header ? GetSolidIndexEntry(solid_list_header, solid->NameHash) : nullptr;
+    if (index_entry) {
+        index_entry->Solid = solid;
+    }
+    SolidList.AddTail(solid);
+    SolidLoadedTable.SetLoaded(solid->NameHash);
+    LoadedSolidStats.NumLoadedSolids++;
+    LoadedSolidStats.TotalSolidsByteSize += chunk->GetSize();
+    eDirtySolids = 1;
+    return solid;
+}
+#else
 eSolid *InternalLoaderSolidChunks(bChunk *chunk /* r14 */, eSolidListHeader *solid_list_header /* r1+0x8 */) {}
+#endif
 
 void InternalUnloaderSolidChunks(bChunk *chunk, eSolidListHeader *solid_list_header) {
     if (chunk->GetID() != BCHUNK_SOLID_PACK) {
@@ -331,7 +355,11 @@ void InternalUnloaderSolidChunks(bChunk *chunk, eSolidListHeader *solid_list_hea
     while (solid_chunk < solid_last_chunk) {
         uint32 current_chunk_id = solid_chunk->GetID();
         if (current_chunk_id == BCHUNK_SOLID_INFO) {
+#if defined(EA_PORT_NATIVE)
+            solid = PortNativeSolid(solid_chunk);
+#else
             solid = reinterpret_cast<eSolid *>(solid_chunk->GetAlignedData(16));
+#endif
             solid->UnFixPlatInfo();
         } else if (current_chunk_id == BCHUNK_MESH_NORMAL_SMOOTHER) {
             LoadedSolidStats.TotalNormalSmootherBytes -= solid_chunk->GetSize();
@@ -360,6 +388,9 @@ void InternalUnloaderSolidChunks(bChunk *chunk, eSolidListHeader *solid_list_hea
     eDirtySolids = 1;
     LoadedSolidStats.NumLoadedSolids--;
     LoadedSolidStats.TotalSolidsByteSize -= chunk->GetSize();
+#if defined(EA_PORT_NATIVE)
+    PortFreeSolid(solid);
+#endif
 }
 
 int LoaderSolidList(bChunk *chunk) {

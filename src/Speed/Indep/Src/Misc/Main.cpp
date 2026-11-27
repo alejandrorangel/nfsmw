@@ -184,7 +184,11 @@ void InitializeEverything(int argc, char **argv) {
     FEPackageManager::Init();
     LoadGlobalAChunks();
     FEManager::Init();
+#if !defined(EA_PLATFORM_WIN32)
+    // Not on PC (speed.exe 1.3 InitializeEverything @ 0x665FC0): the console
+    // boot loading screen would otherwise stay under every frontend screen.
     BootLoadingScreen();
+#endif
     InitBigFiles();
     InitMemoryCard();
     LoadGlobalChunks();

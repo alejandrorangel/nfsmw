@@ -65,6 +65,24 @@ void PortMetalReleaseTexture(void *texture) {
     (void)t; // released when it goes out of scope
 }
 
+void *PortMetalCreateBuffer(const void *data, size_t length, const char *label) {
+    if (gDevice == nil || length == 0) {
+        return nullptr;
+    }
+    id<MTLBuffer> buffer = [gDevice newBufferWithBytes:data length:length options:MTLResourceStorageModeShared];
+    if (label) {
+        buffer.label = [NSString stringWithUTF8String:label];
+    }
+    return (__bridge_retained void *)buffer;
+}
+
+void PortMetalReleaseBuffer(void *buffer) {
+    if (buffer) {
+        id<MTLBuffer> b = (__bridge_transfer id<MTLBuffer>)buffer;
+        (void)b;
+    }
+}
+
 void PortMetalSetDebugTexture(void *texture) {
     std::lock_guard<std::mutex> guard(gDebugLock);
     gDebugTexture = (__bridge id<MTLTexture>)texture;
@@ -132,9 +150,59 @@ void PortMetalFEAddQuad(void *texture, PortBlendMode blend, const PortFEVertex q
     f.quads++;
 }
 
+// Strong references, so a model unloaded mid-frame stays alive until drawn.
+struct Draw3D {
+    id<MTLBuffer> vertex_buffer;
+    id<MTLBuffer> index_buffer;
+    id<MTLTexture> texture;
+    uint32_t first_index;
+    uint32_t num_indices;
+    uint32_t flags;
+    float world[16];
+};
+
+struct Frame3D {
+    float view_proj[16];
+    std::vector<Draw3D> draws;
+    bool overlay = false;
+};
+static Frame3D g3DBuilding;
+static Frame3D g3DPublished;
+
+static float gViewAspect = 4.0f / 3.0f;
+
+float PortMetalViewAspect() {
+    return gViewAspect;
+}
+
+void PortMetal3DBeginFrame(const float view_proj[16]) {
+    memcpy(g3DBuilding.view_proj, view_proj, sizeof(g3DBuilding.view_proj));
+    g3DBuilding.draws.clear();
+    g3DBuilding.overlay = false;
+}
+
+void PortMetal3DSetOverlay(bool on_top) {
+    g3DBuilding.overlay = on_top;
+}
+
+void PortMetal3DAdd(const Port3DDraw *draw) {
+    if (draw->vertex_buffer && draw->index_buffer && draw->num_indices) {
+        Draw3D d;
+        d.vertex_buffer = (__bridge id<MTLBuffer>)draw->vertex_buffer;
+        d.index_buffer = (__bridge id<MTLBuffer>)draw->index_buffer;
+        d.texture = (__bridge id<MTLTexture>)draw->texture;
+        d.first_index = draw->first_index;
+        d.num_indices = draw->num_indices;
+        d.flags = draw->flags;
+        memcpy(d.world, draw->world, sizeof(d.world));
+        g3DBuilding.draws.push_back(d);
+    }
+}
+
 int PortMetalFEEndFrame() {
     std::lock_guard<std::mutex> guard(gFELock);
     std::swap(gFEPublished, gFEBuilding);
+    std::swap(g3DPublished, g3DBuilding);
     return gFEPublished.quads;
 }
 
@@ -175,6 +243,36 @@ fragment float4 fe_fs(FEOut in [[stage_in]], texture2d<float> tex [[texture(0)]]
     return in.color * tex.sample(s, in.uv);
 }
 
+// 3D meshes. Vertices are pulled from the raw 36-byte PC layout.
+struct MeshConst { float4x4 mvp; float4x4 world; };
+struct MeshOut { float4 pos [[position]]; float2 uv; float4 color; float3 normal; };
+
+vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffer(0)]], constant MeshConst &c [[buffer(1)]]) {
+    const device float *v = verts + vid * 9;
+    float4 p = float4(v[0], v[1], v[2], 1);
+    MeshOut o;
+    // Row-vector matrices loaded column-major: M * p computes p * M.
+    o.pos = c.mvp * p;
+    o.normal = (c.world * float4(v[3], v[4], v[5], 0)).xyz;
+    uint argb = as_type<uint>(v[6]);
+    o.color = float4((argb >> 16) & 0xff, (argb >> 8) & 0xff, argb & 0xff, argb >> 24) / 255.0;
+    o.uv = float2(v[7], v[8]);
+    return o;
+}
+
+fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(0)]]) {
+    constexpr sampler s(filter::linear, mip_filter::linear, address::repeat);
+    float4 c = tex.sample(s, in.uv) * in.color;
+    if (c.a < 0.25) {
+        discard_fragment();
+    }
+    // Placeholder lighting until the game's shaders are ported.
+    float3 n = normalize(in.normal);
+    float3 l = normalize(float3(0.4, -0.5, 0.75));
+    float lit = 0.45 + 0.55 * saturate(abs(dot(n, l)));
+    return float4(c.rgb * lit, c.a);
+}
+
 fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear);
     float4 c = tex.sample(s, in.uv);
@@ -190,6 +288,10 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     id<MTLCommandQueue> _queue;
     id<MTLRenderPipelineState> _debugPipeline;
     id<MTLRenderPipelineState> _fePipelines[3]; // indexed by PortBlendMode
+    id<MTLRenderPipelineState> _meshPipelines[3]; // opaque, alpha blend, additive
+    id<MTLDepthStencilState> _depthWrite;
+    id<MTLDepthStencilState> _depthTest;
+    id<MTLDepthStencilState> _depthOff;
     id<MTLTexture> _white;
     uint64_t _frame;
 }
@@ -237,6 +339,34 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
             }
         }
 
+        if (lib) {
+            MTLRenderPipelineDescriptor *md = [MTLRenderPipelineDescriptor new];
+            md.vertexFunction = [lib newFunctionWithName:@"mesh_vs"];
+            md.fragmentFunction = [lib newFunctionWithName:@"mesh_fs"];
+            md.colorAttachments[0].pixelFormat = view.colorPixelFormat;
+            md.depthAttachmentPixelFormat = view.depthStencilPixelFormat;
+            md.stencilAttachmentPixelFormat = view.depthStencilPixelFormat;
+            for (int mode = 0; mode < 3; mode++) {
+                MTLRenderPipelineColorAttachmentDescriptor *c = md.colorAttachments[0];
+                c.blendingEnabled = mode != 0;
+                c.sourceRGBBlendFactor = c.sourceAlphaBlendFactor = MTLBlendFactorSourceAlpha;
+                c.destinationRGBBlendFactor = c.destinationAlphaBlendFactor =
+                    mode == 1 ? MTLBlendFactorOneMinusSourceAlpha : MTLBlendFactorOne;
+                _meshPipelines[mode] = [_device newRenderPipelineStateWithDescriptor:md error:&error];
+                if (!_meshPipelines[mode]) {
+                    NSLog(@"NFSMW: mesh pipeline %d failed: %@", mode, error);
+                }
+            }
+        }
+        MTLDepthStencilDescriptor *dd = [MTLDepthStencilDescriptor new];
+        dd.depthCompareFunction = MTLCompareFunctionLessEqual;
+        dd.depthWriteEnabled = YES;
+        _depthWrite = [_device newDepthStencilStateWithDescriptor:dd];
+        dd.depthWriteEnabled = NO;
+        _depthTest = [_device newDepthStencilStateWithDescriptor:dd];
+        dd.depthCompareFunction = MTLCompareFunctionAlways;
+        _depthOff = [_device newDepthStencilStateWithDescriptor:dd];
+
         // Bound in place of a texture for untextured frontend quads.
         MTLTextureDescriptor *wd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:1 height:1 mipmapped:NO];
         _white = [_device newTextureWithDescriptor:wd];
@@ -247,6 +377,48 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
 }
 
 - (void)mtkView:(MTKView *)view drawableSizeWillChange:(CGSize)size {
+}
+
+- (void)drawScene:(const Frame3D &)scene encoder:(id<MTLRenderCommandEncoder>)enc view:(MTKView *)view {
+    if (!scene.draws.empty() && _meshPipelines[0]) {
+        // Opaque first, then blended in submission order.
+        CGSize size = view.drawableSize;
+        [enc setViewport:(MTLViewport){0, 0, size.width, size.height, 0, 1}];
+        [enc setCullMode:MTLCullModeNone];
+        for (int blended = 0; blended < 2; blended++) {
+            for (const Draw3D &d : scene.draws) {
+                int mode = (d.flags & PORT_3D_ADDITIVE) ? 2 : (d.flags & PORT_3D_ALPHA_BLEND) ? 1 : 0;
+                if ((mode != 0) != (blended != 0)) {
+                    continue;
+                }
+                struct {
+                    float mvp[16];
+                    float world[16];
+                } c;
+                // mvp = world * view_proj (row vectors).
+                for (int i = 0; i < 4; i++) {
+                    for (int j = 0; j < 4; j++) {
+                        float sum = 0;
+                        for (int k = 0; k < 4; k++) {
+                            sum += d.world[i * 4 + k] * scene.view_proj[k * 4 + j];
+                        }
+                        c.mvp[i * 4 + j] = sum;
+                    }
+                }
+                memcpy(c.world, d.world, sizeof(c.world));
+                [enc setRenderPipelineState:_meshPipelines[mode]];
+                [enc setDepthStencilState:(mode == 0 ? _depthWrite : _depthTest)];
+                [enc setVertexBuffer:d.vertex_buffer offset:0 atIndex:0];
+                [enc setVertexBytes:&c length:sizeof(c) atIndex:1];
+                [enc setFragmentTexture:(d.texture ? d.texture : _white) atIndex:0];
+                [enc drawIndexedPrimitives:MTLPrimitiveTypeTriangle
+                                indexCount:d.num_indices
+                                 indexType:MTLIndexTypeUInt16
+                               indexBuffer:d.index_buffer
+                         indexBufferOffset:d.first_index * 2];
+            }
+        }
+    }
 }
 
 - (void)drawInMTKView:(MTKView *)view {
@@ -266,14 +438,23 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     }
 
     FEFrame fe;
+    Frame3D scene;
     {
         std::lock_guard<std::mutex> guard(gFELock);
         fe.vertices = gFEPublished.vertices;
         fe.batches = gFEPublished.batches;
+        scene = g3DPublished;
     }
+    gViewAspect = (float)(view.drawableSize.width / view.drawableSize.height);
+    pass.depthAttachment.clearDepth = 1.0;
+    pass.depthAttachment.loadAction = MTLLoadActionClear;
 
     id<MTLCommandBuffer> cmd = [_queue commandBuffer];
     id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:pass];
+    if (!scene.overlay) {
+        [self drawScene:scene encoder:enc view:view];
+    }
+    [enc setDepthStencilState:_depthOff];
     if (!fe.vertices.empty()) {
         // FEng draws a 640x480 (4:3) virtual screen. Aspect modes (NFSMW_ASPECT):
         //   fill    (default) "Hor+": scale by height, centre, and let elements
@@ -332,6 +513,9 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         [enc setVertexBytes:scale length:sizeof(scale) atIndex:0];
         [enc setFragmentTexture:texture atIndex:0];
         [enc drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+    }
+    if (scene.overlay) {
+        [self drawScene:scene encoder:enc view:view];
     }
     [enc endEncoding];
     [cmd presentDrawable:view.currentDrawable];

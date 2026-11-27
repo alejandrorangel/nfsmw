@@ -111,12 +111,15 @@ static void PaceFrame() {
     next_ns += period_ns;
 }
 
+void PortRenderScene(int frame); // SceneNative.cpp
+
 void eDisplayFrame() {
+    static int frame = 0;
+    frame++;
+    PortRenderScene(frame);
     int quads = RenderFrontend();
     PaceFrame();
 
-    static int frame = 0;
-    frame++;
     if (std::getenv("NFSMW_TRACE_FLOW") && frame % 60 == 0) {
         PortTraceGameFlow(frame);
     }

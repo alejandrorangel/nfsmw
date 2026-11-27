@@ -1,7 +1,9 @@
 #ifndef __ECSTASY_ENGINE__ECSTASYDATA_HPP
 #define __ECSTASY_ENGINE__ECSTASYDATA_HPP
 
-#ifdef EA_PLATFORM_GAMECUBE
+#if defined(EA_PORT_NATIVE)
+#include "PortEcstasy/eSolidPlatNative.hpp" // port/include: Metal-backed platform record
+#elif defined(EA_PLATFORM_GAMECUBE)
 #include "Speed/GameCube/Src/Ecstasy/eSolidPlat.hpp"
 #elif defined(EA_PLATFORM_PLAYSTATION2)
 #include "Speed/PSX2/Src/Ecstasy/eSolidPlat.hpp"
@@ -270,6 +272,11 @@ class eSolidPlatInterface {
     eSolidPlatInfo *GetPlatInfo() {
         return this->PlatInfo;
     }
+#if defined(EA_PORT_NATIVE)
+    void PortSetPlatInfo(eSolidPlatInfo *info) {
+        this->PlatInfo = info;
+    }
+#endif
 
   protected:
     void SetSmoothVertex(uint32 vertex_offset, float nx, float ny, float nz);

@@ -42,6 +42,29 @@ void PortMetalFEAddQuad(void *texture, PortBlendMode blend, const PortFEVertex q
 // Returns the number of quads published.
 int PortMetalFEEndFrame();
 
+// 3D frames: meshes drawn under the frontend, published with it by
+// PortMetalFEEndFrame. Matrices are the game's row-vector bMatrix4 layout
+// (p' = p * M); view_proj maps world space to Metal clip space.
+struct Port3DDraw {
+    void *vertex_buffer; // 36-byte vertices: position, normal, D3DCOLOR, uv
+    void *index_buffer;  // 16-bit triangle list
+    void *texture;       // id<MTLTexture>, or null for white
+    uint32_t first_index;
+    uint32_t num_indices;
+    uint32_t flags; // PORT_3D_*
+    float world[16];
+};
+enum { PORT_3D_ALPHA_BLEND = 1, PORT_3D_ADDITIVE = 2 };
+
+void PortMetal3DBeginFrame(const float view_proj[16]);
+float PortMetalViewAspect(); // drawable width / height
+void PortMetal3DSetOverlay(bool on_top); // debug: draw this frame's 3D over the frontend
+void PortMetal3DAdd(const Port3DDraw *draw);
+
+// GPU buffers for model data (retained; release with PortMetalReleaseBuffer).
+void *PortMetalCreateBuffer(const void *data, size_t length, const char *label);
+void PortMetalReleaseBuffer(void *buffer);
+
 // Maps a point in the view (0..1 from the top-left) to the frontend's 640x480
 // virtual screen, using the aspect mode of the last frame drawn.
 void PortMetalViewToFEScreen(float u, float v, float *x, float *y);
