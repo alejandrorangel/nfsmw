@@ -102,7 +102,16 @@ void *MetalTextureOf(TextureInfo *t) {
     return t->GetPlatInfo()->MetalTexture;
 }
 
-// Car effect constants from a light material (see Port3DDraw::material).
+// TimeOfDay +0x60 (the blended 'timeofdaylighting' CarSpecScale, set by
+// SetTimeOfDayLighting); scales the car's specular colours.
+float gCarSpecScale = 1.0f;
+
+// Car effect constants from a light material (see Port3DDraw::material), as
+// speed.exe 1.3 sub_6C76E0 sets them for the shader techniques: DiffuseRange.w
+// = (MaxA - MinA) * 0.25, specular min/max scales times TimeOfDay CarSpecScale,
+// envmap min/range from the red channel times the scale (only .x is read).
+// TODO(port): sub_6C76E0 zeroes diffuse and specular for render flag 0x100
+// (without 0x80) while the env map is on; no ported caller sets 0x100 yet.
 void MaterialConstants(const eLightMaterial *light_material, float out[20]) {
     if (light_material == nullptr) {
         const float defaults[20] = {1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 8};
@@ -110,20 +119,29 @@ void MaterialConstants(const eLightMaterial *light_material, float out[20]) {
         return;
     }
     const eLightMaterialData &d = light_material->feData;
+    const float spec_min_scale = gCarSpecScale * d.SpecularMinScale, spec_max_scale = gCarSpecScale * d.SpecularMaxScale;
     float dmin[4] = {d.DiffuseMinScale * d.DiffuseMinR, d.DiffuseMinScale * d.DiffuseMinG, d.DiffuseMinScale * d.DiffuseMinB, d.DiffuseMinA};
     float dmax[4] = {d.DiffuseMaxScale * d.DiffuseMaxR, d.DiffuseMaxScale * d.DiffuseMaxG, d.DiffuseMaxScale * d.DiffuseMaxB, d.DiffuseMaxA};
-    float smin[4] = {d.SpecularMinScale * d.SpecularMinR, d.SpecularMinScale * d.SpecularMinG, d.SpecularMinScale * d.SpecularMinB, 0};
-    float smax[4] = {d.SpecularMaxScale * d.SpecularMaxR, d.SpecularMaxScale * d.SpecularMaxG, d.SpecularMaxScale * d.SpecularMaxB, 0};
+    float smin[4] = {spec_min_scale * d.SpecularMinR, spec_min_scale * d.SpecularMinG, spec_min_scale * d.SpecularMinB, 0};
+    float smax[4] = {spec_max_scale * d.SpecularMaxR, spec_max_scale * d.SpecularMaxG, spec_max_scale * d.SpecularMaxB, 0};
     for (int i = 0; i < 4; i++) {
         out[i] = dmin[i];
         out[4 + i] = dmax[i] - dmin[i];
         out[8 + i] = smin[i];
         out[12 + i] = smax[i] - smin[i];
     }
-    out[16] = d.EnvmapMinScale;
-    out[17] = d.EnvmapMaxScale - d.EnvmapMinScale;
-    out[18] = d.EnvmapPower;
-    out[19] = d.SpecularPower;
+    out[7] = (d.DiffuseMaxA - d.DiffuseMinA) * 0.25f;
+    out[16] = d.EnvmapMinR * d.EnvmapMinScale;
+    out[17] = d.EnvmapMaxR * d.EnvmapMaxScale - out[16];
+    out[18] = d.EnvmapPower;   // x flt_9018DC (1)
+    out[19] = d.SpecularPower; // x flt_9018E0 (1)
+}
+
+// The GLOSSYWINDOW effect's WindowReflection: the WINDOWREFLECTION texture
+// (looked up by sub_6D7400 when the effect begins).
+void *WindowReflectionTexture() {
+    static const unsigned int hash = bStringHash("WINDOWREFLECTION");
+    return MetalTextureOf(GetTextureInfo(hash, 1, 0));
 }
 
 // render_flags: eViewPlatInterface::Render flags (bit 0: CarRender's
@@ -143,6 +161,9 @@ void DrawSolid(eSolid *solid, const M44 world, const eDynamicLightContext *light
         d.texture = MetalTextureOf(texture);
         d.first_index = group.FirstIndex;
         d.effect = group.Effect;
+        if (group.Effect == PORT_EFFECT_GLOSSYWINDOW) {
+            d.texture2 = WindowReflectionTexture();
+        }
         int light_index = group.TextureSlots[5];
         const eLightMaterial *light_material = nullptr;
         if (light_index < solid->NumLightMaterials && solid->LightMaterialTable) {
@@ -387,6 +408,11 @@ void SetTimeOfDayLighting(V3 sun, float cloud, PortWorldFog &f) {
     blend(la.AmbientColour(), lb.AmbientColour(), ha.AmbientColour(), hb.AmbientColour(), f.ambient);
     f.diffuse[3] = 1.0f;
     f.ambient[3] = 4.0f;
+    {
+        float lo = la.CarSpecScale() + (lb.CarSpecScale() - la.CarSpecScale()) * cloud;
+        float hi = ha.CarSpecScale() + (hb.CarSpecScale() - ha.CarSpecScale()) * cloud;
+        gCarSpecScale = hi + (lo - hi) * low_weight;
+    }
     f.lit = 1;
     static const bool trace = std::getenv("NFSMW_TRACE_FOG") != nullptr;
     static int frame;

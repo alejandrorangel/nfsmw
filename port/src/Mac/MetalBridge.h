@@ -55,6 +55,7 @@ struct Port3DDraw {
     uint32_t vertex_stride; // bytes (multiple of 4, >= 36)
     void *index_buffer;  // 16-bit triangle list
     void *texture;       // id<MTLTexture>, or null for white
+    void *texture2;      // effect's second texture (GLOSSYWINDOW: WindowReflection), or null
     uint32_t first_index;
     uint32_t num_indices;
     uint32_t flags;  // PORT_3D_*

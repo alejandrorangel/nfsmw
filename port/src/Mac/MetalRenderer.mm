@@ -163,6 +163,7 @@ struct Draw3D {
     uint32_t vertex_stride;
     id<MTLBuffer> index_buffer;
     id<MTLTexture> texture;
+    id<MTLTexture> texture2;
     uint32_t first_index;
     uint32_t num_indices;
     uint32_t flags;
@@ -326,6 +327,7 @@ void PortMetal3DAdd(const Port3DDraw *draw) {
         d.vertex_stride = draw->vertex_stride;
         d.index_buffer = (__bridge id<MTLBuffer>)draw->index_buffer;
         d.texture = (__bridge id<MTLTexture>)draw->texture;
+        d.texture2 = (__bridge id<MTLTexture>)draw->texture2;
         d.first_index = draw->first_index;
         d.num_indices = draw->num_indices;
         d.flags = draw->flags;
@@ -389,9 +391,11 @@ fragment float4 fe_fs(FEOut in [[stage_in]], texture2d<float> tex [[texture(0)]]
 }
 
 // 3D meshes. Vertices are pulled from the raw 36-byte PC layout.
-struct MeshConst { float4x4 mvp; float4x4 world; uint stride; uint shade; uint effect; uint pad; float4 eye; };
+// view_x: the camera's x axis in world space (first column of the view
+// matrix, so dot(world normal, view_x) is the WorldView x of a model normal).
+struct MeshConst { float4x4 mvp; float4x4 world; uint stride; uint shade; uint effect; uint pad; float4 eye; float4 view_x; };
 struct MeshOut { float4 pos [[position]]; float2 uv; float4 color; float3 normal; float3 world_pos; float3 local_normal; float3 local_pos;
-                 float4 d0; float3 d1; float3 inscatter; };
+                 float4 d0; float4 d1; float3 inscatter; float2 uv1; float spec; };
 
 // PortWorldFog (MetalBridge.h).
 struct WorldFog {
@@ -458,7 +462,32 @@ vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffe
     o.d0 = o.color;
     o.d1 = 0;
     o.inscatter = 0;
-    if (FoggedEffect(c.effect)) {
+    o.uv1 = 0;
+    o.spec = 0;
+    if (c.effect == 5) {
+        // IDI_GLOSSYWINDOW_FX technique #0 'world' shader=1 (vs #11). L =
+        // LocalLightVec, V = normalize(eye - v), R = 2 (N.L) N - L.
+        float3 n = o.normal;
+        float3 l = fog.light_dir.xyz;
+        float3 v = normalize(c.eye.xyz - o.world_pos);
+        float ndl = dot(n, l);
+        float rv = saturate(dot(2.0 * ndl * n - l, v));
+        float rv2 = rv * rv;
+        float rv8 = rv2 * rv2;
+        rv8 *= rv8;
+        o.spec = rv2 * rv8; // oT2 = (R.V)^10
+        float3 extinction = 1;
+        if (fog.enabled) {
+            Scatter(o.world_pos, c.eye.xyz, fog, extinction, o.inscatter); // oT3
+        }
+        // oD0 = saturate(N.L) DiffuseColour; oD1 = E (AmbientColour.rgb *
+        // AmbientColour.w) colour, alpha the vertex alpha.
+        o.d0 = fog.lit ? saturate(saturate(ndl) * fog.diffuse) : float4(0);
+        float3 ambient = fog.lit ? fog.ambient.rgb * fog.ambient.w : float3(1);
+        o.d1 = saturate(float4(min(extinction, 1.0) * ambient * o.color.rgb, o.color.a));
+        // oT1 = (u / 2 + (N . WorldView[0]) / 2, v / 2): WindowReflection.
+        o.uv1 = float2(0.5 * o.uv.x + 0.5 * dot(n, c.view_x.xyz), 0.5 * o.uv.y);
+    } else if (FoggedEffect(c.effect)) {
         float3 extinction = 1;
         if (fog.enabled) {
             Scatter(o.world_pos, c.eye.xyz, fog, extinction, o.inscatter);
@@ -469,7 +498,7 @@ vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffe
         o.d0 = saturate(float4(extinction * ambient * o.color.rgb, o.color.a));
         if (fog.lit) {
             float3 n = normalize(o.normal);
-            o.d1 = saturate(saturate(dot(fog.light_dir.xyz, n)) * fog.diffuse.rgb);
+            o.d1 = float4(saturate(saturate(dot(fog.light_dir.xyz, n)) * fog.diffuse.rgb), 0);
         }
     }
     return o;
@@ -558,6 +587,7 @@ float4 CarShade(MeshOut in, float4 t, constant MeshConst &c, constant Material &
 // lit (model-space lights), bit 3 an environment cube is bound, bit 4 the
 // draw has an EnvMapMatrix.
 fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(0)]], texturecube<float> env_map [[texture(1)]],
+                        texture2d<float> tex2 [[texture(2)]],
                         constant MeshConst &c [[buffer(0)]], constant Material &m [[buffer(1)]], constant Lights &l [[buffer(2)]],
                         constant EnvMatrix &em [[buffer(3)]], sampler s [[sampler(0)]]) {
     float4 t = tex.sample(s, in.uv);
@@ -566,11 +596,18 @@ fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(
         out = t;
     } else if (c.effect == 4) {
         out = CarShade(in, t, c, m, l, (c.shade & 4) != 0, env_map, em);
+    } else if (c.effect == 5) {
+        // IDI_GLOSSYWINDOW_FX ps #10: 2 t.a spec + t oD0 + 2 t oD1 +
+        // t.a reflection (WindowReflection, wrap, LOD bias -1) + in-scatter;
+        // alpha t.a.
+        float3 refl = tex2.sample(s, in.uv1, bias(-1.0)).rgb;
+        float3 rgb = 2.0 * t.a * in.spec + t.rgb * in.d0.rgb + 2.0 * t.rgb * in.d1.rgb + t.a * refl + in.inscatter;
+        out = float4(saturate(rgb), t.a);
     } else {
         // PC WORLD (ps #12): 2 x texture x (oD0 + oD1) + in-scatter (mad_x2,
         // then add t2); alpha texture x oD0 alpha. WORLDPRELIT and the
         // unlit effects: oD0 = vertex colour, oD1 = 0.
-        out = float4(saturate(2.0 * t.rgb * (in.d0.rgb + in.d1) + in.inscatter), t.a * in.d0.a);
+        out = float4(saturate(2.0 * t.rgb * (in.d0.rgb + in.d1.rgb) + in.inscatter), t.a * in.d0.a);
     }
     if ((c.shade & 2) && out.a < 0.5) {
         discard_fragment();
@@ -651,6 +688,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     id<MTLDepthStencilState> _depthTest;
     id<MTLDepthStencilState> _depthOff;
     id<MTLTexture> _white;
+    id<MTLTexture> _black; // bound for a missing second texture
     // Visual treatment (see PortVisualTreatment).
     id<MTLRenderPipelineState> _filterPipeline;
     id<MTLRenderPipelineState> _treatmentPipeline;
@@ -767,6 +805,9 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         _white = [_device newTextureWithDescriptor:wd];
         uint32_t white = 0xFFFFFFFF;
         [_white replaceRegion:MTLRegionMake2D(0, 0, 1, 1) mipmapLevel:0 withBytes:&white bytesPerRow:4];
+        _black = [_device newTextureWithDescriptor:wd];
+        uint32_t opaque_black = 0xFF000000;
+        [_black replaceRegion:MTLRegionMake2D(0, 0, 1, 1) mipmapLevel:0 withBytes:&opaque_black bytesPerRow:4];
         MTLTextureDescriptor *bd = [MTLTextureDescriptor textureCubeDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm size:1 mipmapped:NO];
         _blackCube = [_device newTextureWithDescriptor:bd];
         uint32_t black = 0xFF000000;
@@ -849,6 +890,33 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
 - (void)drawDraws:(const std::vector<Draw3D> &)draws viewProj:(const float *)view_proj eye:(const float *)eye fog:(const PortWorldFog &)fog
            envMap:(id<MTLTexture>)env_map width:(double)width height:(double)height encoder:(id<MTLRenderCommandEncoder>)enc {
     if (!draws.empty() && _meshPipelines[0]) {
+        // The camera's x axis: view_proj = view * proj with proj diagonal in
+        // x (ViewProjectionFor), so view column 0 is view_proj column 0 / sx.
+        float view_x[4] = {view_proj[0], view_proj[4], view_proj[8], 0};
+        float len = sqrtf(view_x[0] * view_x[0] + view_x[1] * view_x[1] + view_x[2] * view_x[2]);
+        if (len > 0) {
+            for (int i = 0; i < 3; i++) {
+                view_x[i] /= len;
+            }
+        }
+        static const bool trace_effects = getenv("NFSMW_TRACE_EFFECTS") != nullptr;
+        if (trace_effects && width > 256) {
+            static int frame;
+            if (frame++ % 300 == 0) {
+                int counts[32] = {}, second[32] = {};
+                for (const Draw3D &d : draws) {
+                    counts[d.effect & 31]++;
+                    second[d.effect & 31] += d.texture2 != nil;
+                }
+                fprintf(stderr, "[effects]");
+                for (int i = 0; i < 32; i++) {
+                    if (counts[i]) {
+                        fprintf(stderr, " %d:%d(%d)", i, counts[i], second[i]);
+                    }
+                }
+                fprintf(stderr, "\n");
+            }
+        }
         // Opaque first, then blended in submission order.
         [enc setViewport:(MTLViewport){0, 0, width, height, 0, 1}];
         [enc setCullMode:MTLCullModeNone];
@@ -866,10 +934,12 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                     uint32_t effect;
                     uint32_t pad;
                     float eye[4];
+                    float view_x[4];
                 } c = {};
                 c.stride = d.vertex_stride;
                 c.effect = d.effect;
                 memcpy(c.eye, eye, sizeof(float) * 3);
+                memcpy(c.view_x, view_x, sizeof(view_x));
                 static const char *shade_env = getenv("NFSMW_SHADE");
                 c.shade = (shade_env && strcmp(shade_env, "texture") == 0) ? 1 : 0;
                 if (shade_env && strcmp(shade_env, "envmap") == 0) {
@@ -913,6 +983,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 [enc setFragmentTexture:(d.texture ? d.texture : _white) atIndex:0];
                 [enc setFragmentSamplerState:_meshSamplers[gTextureFiltering.load() % 3] atIndex:0];
                 [enc setFragmentTexture:(env_map ? env_map : _blackCube) atIndex:1];
+                [enc setFragmentTexture:(d.texture2 ? d.texture2 : _black) atIndex:2];
                 [enc setFragmentBytes:d.envmap length:sizeof(d.envmap) atIndex:3];
                 [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
                 [enc setFragmentBytes:d.material length:sizeof(d.material) atIndex:1];
