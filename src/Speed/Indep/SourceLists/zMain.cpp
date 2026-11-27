@@ -85,6 +85,8 @@
 #include "Speed/Indep/Src/Generated/Events/EWorldMapOn.cpp"
 
 #include "Speed/Indep/Src/Generated/Events/EWorldMapOff.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EEnableAIPhysics.cpp"
 #endif
 
 #include "Speed/Indep/Src/Input/Common/action.cpp"
