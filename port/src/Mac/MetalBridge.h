@@ -46,7 +46,8 @@ int PortMetalFEEndFrame();
 // PortMetalFEEndFrame. Matrices are the game's row-vector bMatrix4 layout
 // (p' = p * M); view_proj maps world space to Metal clip space.
 struct Port3DDraw {
-    void *vertex_buffer; // 36-byte vertices: position, normal, D3DCOLOR, uv
+    void *vertex_buffer; // vertices starting position, normal, D3DCOLOR, uv
+    uint32_t vertex_stride; // bytes (multiple of 4, >= 36)
     void *index_buffer;  // 16-bit triangle list
     void *texture;       // id<MTLTexture>, or null for white
     uint32_t first_index;

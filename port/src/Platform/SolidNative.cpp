@@ -20,7 +20,10 @@
 
 #include "../Mac/MetalBridge.h"
 
+#include <alloca.h>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 bTList<eSolid> SolidList;
 
@@ -67,14 +70,44 @@ void Warn(const char *solid_name, const char *what) {
     }
 }
 
+// NFSMW_DUMP_MESH=<dir>: writes each mesh chunk (header included) to
+// <dir>/<solid>.mesh, for studying the format offline.
+void DumpMesh(bChunk *mesh, const char *solid_name) {
+    static const char *dir = std::getenv("NFSMW_DUMP_MESH");
+    if (dir == nullptr) {
+        return;
+    }
+    char path[512];
+    std::snprintf(path, sizeof(path), "%s/%s.mesh", dir, solid_name);
+    for (char *p = path + std::strlen(dir) + 1; *p; p++) {
+        if (*p == ' ' || *p == '/' || *p == '\\') {
+            *p = '_';
+        }
+    }
+    if (FILE *f = std::fopen(path, "wb")) {
+        std::fwrite(mesh, 1, 8 + mesh->GetSize(), f);
+        std::fclose(f);
+    }
+}
+
 eSolidPlatInfo *LoadMesh(bChunk *mesh, const char *solid_name) {
+    DumpMesh(mesh, solid_name);
     const char *groups = nullptr;
     int group_bytes = 0;
-    const char *indices = nullptr;
+    const uint16 *indices = nullptr;
     int index_bytes = 0;
-    const char *vertices = nullptr;
-    int vertex_bytes = 0;
     int num_vertex_buffers = 0;
+    for (bChunk *c = mesh->GetFirstChunk(); c < mesh->GetLastChunk(); c = c->GetNext()) {
+        num_vertex_buffers += c->GetID() == kMeshVertices;
+    }
+    if (num_vertex_buffers == 0) {
+        return nullptr;
+    }
+    const char **vertices = static_cast<const char **>(alloca(num_vertex_buffers * sizeof(char *)));
+    int *vertex_bytes = static_cast<int *>(alloca(num_vertex_buffers * sizeof(int)));
+    uint32 *buffer_vertices = static_cast<uint32 *>(alloca(num_vertex_buffers * sizeof(uint32)));
+    std::memset(buffer_vertices, 0, num_vertex_buffers * sizeof(uint32));
+    num_vertex_buffers = 0;
 
     for (bChunk *c = mesh->GetFirstChunk(); c < mesh->GetLastChunk(); c = c->GetNext()) {
         switch (c->GetID()) {
@@ -82,22 +115,18 @@ eSolidPlatInfo *LoadMesh(bChunk *mesh, const char *solid_name) {
                 groups = SkipFill(c, &group_bytes);
                 break;
             case kMeshIndices:
-                indices = SkipFill(c, &index_bytes);
+                indices = reinterpret_cast<const uint16 *>(SkipFill(c, &index_bytes));
                 break;
             case kMeshVertices:
-                if (num_vertex_buffers++ == 0) {
-                    vertices = SkipFill(c, &vertex_bytes);
-                }
+                vertices[num_vertex_buffers] = SkipFill(c, &vertex_bytes[num_vertex_buffers]);
+                num_vertex_buffers++;
                 break;
             default:
                 break;
         }
     }
-    if (num_vertex_buffers > 1) {
-        Warn(solid_name, "more than one vertex buffer; only the first is used");
-    }
     int num_groups = groups ? group_bytes / kDiskGroupSize : 0;
-    if (num_groups == 0 || !indices || !vertices) {
+    if (num_groups == 0 || !indices || num_vertex_buffers == 0) {
         return nullptr;
     }
 
@@ -105,10 +134,14 @@ eSolidPlatInfo *LoadMesh(bChunk *mesh, const char *solid_name) {
     bMemSet(info, 0, sizeof(*info));
     info->Groups = static_cast<eSolidPlatGroup *>(bMalloc(num_groups * sizeof(eSolidPlatGroup), "eSolidPlatGroup (native)", 0, 0));
     info->NumGroups = num_groups;
+    info->VertexBuffers = static_cast<void **>(bMalloc(num_vertex_buffers * sizeof(void *), "eSolidPlatInfo VBs", 0, 0));
+    info->VertexStrides = static_cast<uint32 *>(bMalloc(num_vertex_buffers * sizeof(uint32), "eSolidPlatInfo strides", 0, 0));
 
-    uint32 total_vertices = 0;
+    // Assign groups to vertex buffers and count each buffer's vertices.
+    int vb = 0;
     uint32 total_indices = 0;
-    for (int i = 0; i < num_groups; i++) {
+    bool ok = true;
+    for (int i = 0; i < num_groups && ok; i++) {
         const char *g = groups + i * kDiskGroupSize;
         eSolidPlatGroup &out = info->Groups[i];
         bMemCpy(out.AABBMin, g + 0x00, 12);
@@ -118,24 +151,51 @@ eSolidPlatInfo *LoadMesh(bChunk *mesh, const char *solid_name) {
         out.NumVertices = Read<uint32>(g + 0x3C);
         out.FirstIndex = Read<uint32>(g + 0x44);
         out.NumIndices = Read<uint32>(g + 0x5C);
-        total_vertices += out.NumVertices;
+        if ((out.FirstIndex + out.NumIndices) * 2 > static_cast<uint32>(index_bytes)) {
+            ok = false;
+            break;
+        }
+        uint32 min_index = 0xFFFF;
+        for (uint32 k = 0; k < out.NumIndices; k++) {
+            min_index = indices[out.FirstIndex + k] < min_index ? indices[out.FirstIndex + k] : min_index;
+        }
+        if (min_index == 0 && buffer_vertices[vb] != 0) {
+            vb++;
+        }
+        if (vb >= num_vertex_buffers) {
+            ok = false;
+            break;
+        }
+        out.VertexBuffer = static_cast<uint16>(vb);
+        buffer_vertices[vb] += out.NumVertices;
         if (out.FirstIndex + out.NumIndices > total_indices) {
             total_indices = out.FirstIndex + out.NumIndices;
         }
     }
-    if (total_vertices == 0 || vertex_bytes % total_vertices != 0 || total_indices * 2 > static_cast<uint32>(index_bytes)) {
-        Warn(solid_name, "mesh sizes don't add up; skipped");
+    if (ok && vb + 1 != num_vertex_buffers) {
+        ok = false;
+    }
+    for (int b = 0; ok && b < num_vertex_buffers; b++) {
+        if (buffer_vertices[b] == 0 || vertex_bytes[b] % buffer_vertices[b] != 0) {
+            ok = false;
+        } else {
+            info->VertexStrides[b] = vertex_bytes[b] / buffer_vertices[b];
+            ok = info->VertexStrides[b] >= 36 && info->VertexStrides[b] % 4 == 0;
+        }
+    }
+    if (!ok) {
+        Warn(solid_name, "mesh layout not understood; skipped");
+        bFree(info->VertexBuffers);
+        bFree(info->VertexStrides);
         bFree(info->Groups);
         bFree(info);
         return nullptr;
     }
-    info->NumVertices = total_vertices;
-    info->NumIndices = total_indices;
-    info->VertexStride = vertex_bytes / total_vertices;
-    if (info->VertexStride != 36) {
-        Warn(solid_name, "vertex format other than 36 bytes (not drawn yet)");
+    for (int b = 0; b < num_vertex_buffers; b++) {
+        info->VertexBuffers[b] = PortMetalCreateBuffer(vertices[b], vertex_bytes[b], solid_name);
     }
-    info->VertexBuffer = PortMetalCreateBuffer(vertices, vertex_bytes, solid_name);
+    info->NumVertexBuffers = num_vertex_buffers;
+    info->NumIndices = total_indices;
     info->IndexBuffer = PortMetalCreateBuffer(indices, total_indices * 2, solid_name);
     return info;
 }
@@ -221,8 +281,12 @@ void PortFreeSolid(eSolid *solid) {
 int eSolidPlatInterface::UnloaderPlatChunks(bChunk *chunk) {
     eSolidPlatInfo *info = PlatInfo;
     if (info) {
-        PortMetalReleaseBuffer(info->VertexBuffer);
+        for (int b = 0; b < info->NumVertexBuffers; b++) {
+            PortMetalReleaseBuffer(info->VertexBuffers[b]);
+        }
         PortMetalReleaseBuffer(info->IndexBuffer);
+        bFree(info->VertexBuffers);
+        bFree(info->VertexStrides);
         bFree(info->Groups);
         bFree(info);
         PlatInfo = nullptr;

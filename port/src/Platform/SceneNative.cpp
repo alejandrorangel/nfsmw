@@ -1,11 +1,9 @@
 // Native 3D scene submission (the world/frontend views of the PC eDisplayFrame).
 //
-// For now this only hosts the model smoke test:
-//   NFSMW_SOLID_SMOKE=<car>  (e.g. BMWM3GTRE46) loads CARS\<car>\TEXTURES.BIN
-//   and GEOMETRY.BIN through the game's resource loader once the frontend is up,
-//   and draws the car's top-detail ("_A") parts under the menus with an
-//   orbiting camera. It checks solid loading, textures and the Metal 3D path
-//   before the car viewer (which places the real frontend car) is ported.
+// For now this only hosts the model smoke test (NFSMW_SMOKE_CAR /
+// NFSMW_SMOKE_SOLIDS, below), drawn over the frontend with an orbiting camera.
+// It checks solid loading, textures and the Metal 3D path before the car
+// viewer (which places the real frontend car) is ported.
 
 #include "Speed/Indep/Src/Ecstasy/Ecstasy.hpp"
 #include "Speed/Indep/Src/Ecstasy/EcstasyData.hpp"
@@ -86,14 +84,15 @@ void *MetalTextureOf(TextureInfo *t) {
 
 void DrawSolid(eSolid *solid, const M44 world) {
     eSolidPlatInfo *info = solid->GetPlatInfo();
-    if (info == nullptr || info->VertexStride != 36) {
+    if (info == nullptr) {
         return;
     }
     for (int g = 0; g < info->NumGroups; g++) {
         const eSolidPlatGroup &group = info->Groups[g];
         TextureInfo *texture = PortSolidTexture(solid, group.TextureSlots[0]);
         Port3DDraw d = {};
-        d.vertex_buffer = info->VertexBuffer;
+        d.vertex_buffer = info->VertexBuffers[group.VertexBuffer];
+        d.vertex_stride = info->VertexStrides[group.VertexBuffer];
         d.index_buffer = info->IndexBuffer;
         d.texture = MetalTextureOf(texture);
         d.first_index = group.FirstIndex;
@@ -108,19 +107,41 @@ void DrawSolid(eSolid *solid, const M44 world) {
     }
 }
 
+// NFSMW_SMOKE_CAR=<car>: loads CARS\<car>\{TEXTURES,GEOMETRY}.BIN and draws the
+// car's top-detail parts. NFSMW_SMOKE_SOLIDS=<text>: draws every loaded solid
+// whose name contains <text> (e.g. BACKDROP_CRIB, the frontend garage).
 const char *SmokeCar() {
-    static const char *car = std::getenv("NFSMW_SOLID_SMOKE");
+    static const char *car = std::getenv("NFSMW_SMOKE_CAR");
     return car;
 }
 
-// Requests the car's files once and sets the orbit camera.
+const char *SmokeSolids() {
+    static const char *solids = std::getenv("NFSMW_SMOKE_SOLIDS");
+    return solids;
+}
+
+bool SmokeWants(const char *name) {
+    if (const char *car = SmokeCar()) {
+        size_t n = std::strlen(car);
+        // Top detail only, one body kit, no damage/decal variants.
+        if (std::strncmp(name, car, n) == 0 && name[n] == '_' && EndsWith(name, "_A") &&
+            !(std::strstr(name, "_KIT") && !std::strstr(name, "_KIT00_")) && !std::strstr(name, "DAMAGE") && !std::strstr(name, "DECAL")) {
+            return true;
+        }
+    }
+    if (const char *solids = SmokeSolids()) {
+        return std::strstr(name, solids) != nullptr;
+    }
+    return false;
+}
+
+// Requests the car's files once and fits an orbit camera to what's drawn.
 bool SmokeSetup(int frame, M44 view_proj) {
-    const char *car = SmokeCar();
-    if (car == nullptr) {
+    if (SmokeCar() == nullptr && SmokeSolids() == nullptr) {
         return false;
     }
     static bool requested = false;
-    if (!requested && frame > 120) {
+    if (const char *car = SmokeCar(); car && !requested && frame > 120) {
         requested = true;
         char path[128];
         std::snprintf(path, sizeof(path), "CARS\\%s\\TEXTURES.BIN", car);
@@ -129,35 +150,40 @@ bool SmokeSetup(int frame, M44 view_proj) {
         LoadResourceFile(path, RESOURCE_FILE_CAR, 0);
     }
 
+    V3 lo = {1e9f, 1e9f, 1e9f}, hi = {-1e9f, -1e9f, -1e9f};
+    for (eSolid *s = SolidList.GetHead(); s != SolidList.EndOfList(); s = s->GetNext()) {
+        if (SmokeWants(s->Name)) {
+            lo = {std::fmin(lo.x, s->AABBMinX), std::fmin(lo.y, s->AABBMinY), std::fmin(lo.z, s->AABBMinZ)};
+            hi = {std::fmax(hi.x, s->AABBMaxX), std::fmax(hi.y, s->AABBMaxY), std::fmax(hi.z, s->AABBMaxZ)};
+        }
+    }
+    V3 centre = {0, 0, 0.6f};
+    float radius = 3.0f;
+    if (lo.x <= hi.x) {
+        centre = {(lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f, (lo.z + hi.z) * 0.5f};
+        radius = 0.5f * std::sqrt(Dot(Sub(hi, lo), Sub(hi, lo)));
+    }
     float angle = frame * 0.01f;
-    V3 eye = {6.5f * std::cos(angle), 6.5f * std::sin(angle), 2.2f};
-    ViewProjection(view_proj, eye, V3{0, 0, 0.6f}, 0.75f, PortMetalViewAspect(), 0.1f, 200.0f);
+    float dist = radius * 2.2f;
+    V3 eye = {centre.x + dist * std::cos(angle), centre.y + dist * std::sin(angle), centre.z + radius * 0.6f};
+    ViewProjection(view_proj, eye, centre, 0.75f, PortMetalViewAspect(), radius * 0.02f, radius * 10.0f);
     return true;
 }
 
 void SmokeDraw() {
-    const char *car = SmokeCar();
-    char prefix[64];
-    std::snprintf(prefix, sizeof(prefix), "%s_", car);
     M44 world;
     Identity(world);
     static int logged = -1;
     int drawn = 0;
     for (eSolid *s = SolidList.GetHead(); s != SolidList.EndOfList(); s = s->GetNext()) {
-        const char *name = s->Name;
-        if (std::strncmp(name, prefix, std::strlen(prefix)) != 0 || !EndsWith(name, "_A")) {
-            continue;
+        if (SmokeWants(s->Name)) {
+            DrawSolid(s, world);
+            drawn++;
         }
-        // One body kit, and no damage/decal variants.
-        if ((std::strstr(name, "_KIT") && !std::strstr(name, "_KIT00_")) || std::strstr(name, "DAMAGE") || std::strstr(name, "DECAL")) {
-            continue;
-        }
-        DrawSolid(s, world);
-        drawn++;
     }
     if (drawn != logged) {
         logged = drawn;
-        std::fprintf(stderr, "[smoke] drawing %d solids of %s\n", drawn, car);
+        std::fprintf(stderr, "[smoke] drawing %d solids\n", drawn);
     }
 }
 

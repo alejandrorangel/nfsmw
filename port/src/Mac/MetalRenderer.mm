@@ -153,6 +153,7 @@ void PortMetalFEAddQuad(void *texture, PortBlendMode blend, const PortFEVertex q
 // Strong references, so a model unloaded mid-frame stays alive until drawn.
 struct Draw3D {
     id<MTLBuffer> vertex_buffer;
+    uint32_t vertex_stride;
     id<MTLBuffer> index_buffer;
     id<MTLTexture> texture;
     uint32_t first_index;
@@ -189,6 +190,7 @@ void PortMetal3DAdd(const Port3DDraw *draw) {
     if (draw->vertex_buffer && draw->index_buffer && draw->num_indices) {
         Draw3D d;
         d.vertex_buffer = (__bridge id<MTLBuffer>)draw->vertex_buffer;
+        d.vertex_stride = draw->vertex_stride;
         d.index_buffer = (__bridge id<MTLBuffer>)draw->index_buffer;
         d.texture = (__bridge id<MTLTexture>)draw->texture;
         d.first_index = draw->first_index;
@@ -244,11 +246,11 @@ fragment float4 fe_fs(FEOut in [[stage_in]], texture2d<float> tex [[texture(0)]]
 }
 
 // 3D meshes. Vertices are pulled from the raw 36-byte PC layout.
-struct MeshConst { float4x4 mvp; float4x4 world; };
+struct MeshConst { float4x4 mvp; float4x4 world; uint stride; };
 struct MeshOut { float4 pos [[position]]; float2 uv; float4 color; float3 normal; };
 
 vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffer(0)]], constant MeshConst &c [[buffer(1)]]) {
-    const device float *v = verts + vid * 9;
+    const device float *v = verts + vid * (c.stride / 4);
     float4 p = float4(v[0], v[1], v[2], 1);
     MeshOut o;
     // Row-vector matrices loaded column-major: M * p computes p * M.
@@ -394,7 +396,10 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 struct {
                     float mvp[16];
                     float world[16];
-                } c;
+                    uint32_t stride;
+                    uint32_t pad[3];
+                } c = {};
+                c.stride = d.vertex_stride;
                 // mvp = world * view_proj (row vectors).
                 for (int i = 0; i < 4; i++) {
                     for (int j = 0; j < 4; j++) {
@@ -426,16 +431,8 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     if (!pass) {
         return;
     }
-    // Slow colour cycle so it's obvious the frame loop is alive.
-    double t = (double)(_frame++) / 60.0;
-    pass.colorAttachments[0].clearColor = MTLClearColorMake(0.05, 0.05 + 0.05 * (1.0 + sin(t)), 0.12, 1.0);
+    pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
     pass.colorAttachments[0].loadAction = MTLLoadActionClear;
-
-    id<MTLTexture> texture;
-    {
-        std::lock_guard<std::mutex> guard(gDebugLock);
-        texture = gDebugTexture;
-    }
 
     FEFrame fe;
     Frame3D scene;
@@ -498,21 +495,6 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
             [enc setFragmentTexture:(b.texture ? b.texture : _white) atIndex:0];
             [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:b.first vertexCount:b.count];
         }
-    } else if (texture && _debugPipeline) {
-        // Fit the texture inside 80% of the view, keeping its aspect ratio.
-        CGSize size = view.drawableSize;
-        float view_aspect = size.width / size.height;
-        float tex_aspect = (float)texture.width / (float)texture.height;
-        float scale[2] = {0.8f, 0.8f};
-        if (tex_aspect > view_aspect) {
-            scale[1] = 0.8f * view_aspect / tex_aspect;
-        } else {
-            scale[0] = 0.8f * tex_aspect / view_aspect;
-        }
-        [enc setRenderPipelineState:_debugPipeline];
-        [enc setVertexBytes:scale length:sizeof(scale) atIndex:0];
-        [enc setFragmentTexture:texture atIndex:0];
-        [enc drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
     }
     if (scene.overlay) {
         [self drawScene:scene encoder:enc view:view];
