@@ -155,7 +155,21 @@ class Camera {
 
     // unsigned int GetLastDisparateTime() {}
 
+#if defined(EA_PORT_NATIVE)
+    bVector3 *GetVelocityTarget() {
+        return &this->VelocityKey.Target;
+    }
+    unsigned short GetVelocityFov() {
+        return this->VelocityKey.FieldOfView;
+    }
+    // speed.exe 1.3 (inlined in CubicCameraMover::ResetState, 0x46B0C0).
+    void ClearVelocity() {
+        this->bClearVelocity = true;
+        this->LastDisparateTime = RealTimeFrames;
+    }
+#else
     void ClearVelocity() {}
+#endif
 
     void SetRenderDash(int r) {
         if (!this->StopUpdating) {

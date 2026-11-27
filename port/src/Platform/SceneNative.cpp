@@ -687,14 +687,16 @@ void SetupCullInfo(eView *view, SceneryCullInfo *info, unsigned int exclude) {
     info->ExcludeFlags = flags;
 }
 
-// Until the player car exists natively, nothing drives the race camera, so it
-// stays at the frontend's position near the origin. Place it behind the
-// startup race's start grid instead (sim → world via eSwizzleWorldVector).
+// Fallback for when no camera mover drives view 1 (CameraAI only creates the
+// chase camera once a local player with a simable exists): follow the first
+// vehicle from behind, or sit behind the startup race's start grid
+// (sim → world via eSwizzleWorldVector).
 void PortDebugRaceCamera(eView *view) {
     static const bool off = std::getenv("NFSMW_NO_DEBUG_CAM") != nullptr;
+    if (view->GetCameraMover() != nullptr) {
+        return;
+    }
     Camera *camera = view->GetCamera();
-    // TODO(port): the race camera (CameraAI director / chase cam) isn't ported;
-    // follow the first vehicle from behind meanwhile.
     if (!off && VehicleRenderConn::GetList().begin() != VehicleRenderConn::GetList().end()) {
         VehicleRenderConn *car = *VehicleRenderConn::GetList().begin();
         const bMatrix4 *m = car->GetBodyMatrix();
