@@ -95,6 +95,12 @@ Sim::IActivity *QuickGame::Construct(Sim::Param params) {
     return new QuickGame(Sim::Param(params));
 }
 
+#if defined(EA_PORT_NATIVE)
+// Sim::Init("QuickGame") creates the race kernel through the activity factory;
+// the decomp has no registration for it (bss order), so the kernel was null.
+BIND_ACTIVITY_FACTORY(QuickGame);
+#endif
+
 void QuickGame::CreatePlayers() {
     bool split_screen = Sim::GetUserMode() == Sim::USER_SPLIT_SCREEN;
     Sim::IEntity *entity = Sim::IEntity::CreateInstance("LocalPlayer", Sim::Param());
