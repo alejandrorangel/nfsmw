@@ -44,6 +44,7 @@
 #include "Speed/Indep/Src/Gameplay/GActivity.h"
 #include "Speed/Indep/Src/Generated/Events/EEnterBin.hpp"
 #include "Speed/Indep/Src/Gameplay/GManager.h"
+#include "Speed/Indep/Src/Gameplay/GMilestone.h"
 #include "Speed/Indep/Src/Generated/AttribSys/Classes/milestonetypes.h"
 #include "Speed/Indep/Src/Lua/LuaGameHooks.h"
 #include "Speed/Indep/Src/Gameplay/GRaceDatabase.h"
@@ -95,6 +96,7 @@ struct Scenario {
     bool career_event;  // free roam: warp into an event's trigger and engage it
     bool milestone;     // free roam: a pursuit for the bin's milestones, escaped to the safehouse
     bool career_save;   // profiles on: a career saved to disk, then loaded back (NFSMW_BENCHMARK_PHASE)
+    bool rival;         // free roam: the bin's requirements met, the rival challenged and beaten, the next bin
 };
 
 // Race IDs are the race database's event IDs (NFSMW_BENCHMARK=list-races
@@ -116,6 +118,8 @@ const Scenario kScenarios[] = {
      true, nullptr, nullptr, 0, 0, 0, true, 0.0f, 30000, {0}, false, true},
     {"career-save", "a new career on a profile: an event won, saved, the game quit; then (NFSMW_BENCHMARK_PHASE=load) the profile loaded and the career checked",
      false, true, nullptr, nullptr, 0, 0, 0, true, 0.0f, 60000, {0}, false, false, true},
+    {"career-rival", "a new career's free roam with the bin's requirements met (debug): the rival challenge, the boss race, the rival flow, the next bin",
+     false, true, nullptr, nullptr, 0, 0, 0, true, 0.0f, 60000, {0}, false, false, false, true},
     {"frontend", "the main menu over the garage car: car shading and the frontend", true, false, nullptr, nullptr, 0, 0, 0, false, 0.0f, 3600,
      {120, 1800, 3600}},
     {"list-races", "prints the race database's events and exits", true, false, nullptr, nullptr, 0, 0, 0, false, 0.0f, 1, {0}},
@@ -247,6 +251,8 @@ void CheckSaveRoundTrip() {
                  header->mNumPersistent, header->mNumMilestoneRecords, resaved && std::memcmp(first, second, sizeof(first)) == 0);
 }
 
+void RivalPostRace(const char *control, bool hud, bool racing, int since);
+
 // The career event scenario: a career race's trigger in the current bin
 // (NFSMW_BENCHMARK_RACE picks one by event ID), the player warped into it;
 // the engage key (enter) brings up its info dialog, enter accepts it, the AI
@@ -288,7 +294,7 @@ GTrigger *FindEventTrigger() {
         GTrigger *trigger = it.GetInstance();
         GActivity *activity = trigger->GetTargetActivity();
         GRaceParameters *parms = activity ? GRaceDatabase::Get().GetRaceFromActivity(activity) : nullptr;
-        if (parms == nullptr || parms->GetEventID() == nullptr || parms->GetIsBossRace() || !trigger->IsEnabled()) {
+        if (parms == nullptr || parms->GetEventID() == nullptr || parms->GetIsBossRace() != gScenario->rival || !trigger->IsEnabled()) {
             continue;
         }
         if (!gRace.empty() ? gRace != parms->GetEventID()
@@ -339,7 +345,8 @@ void CareerEventUpdate() {
     gEventLeft = false;
     switch (gEventPhase) {
         case kEvent_FreeRoam:
-            if (gBenchFrame == 120) {
+            // The rival scenario: once the bin's script unlocked the boss race.
+            if (gBenchFrame == (gScenario->rival ? 720 : 120)) {
                 GTrigger *trigger = FindEventTrigger();
                 UMath::Vector3 pos;
                 if (trigger == nullptr) {
@@ -396,12 +403,17 @@ void CareerEventUpdate() {
             // The race AI drives (and enter on any screen that isn't the HUD:
             // the post race results)
             gEventPress = !hud && !sms && since % 60 < 6;
+            gEventHoldCar = false;
             if (!racing) {
                 SetEventPhase(kEvent_PostRace);
             }
             break;
         case kEvent_PostRace:
             gEventPress = !hud && !sms && since % 60 < 6;
+            if (gScenario->rival) {
+                RivalPostRace(control, hud, racing, since);
+                break;
+            }
             if (hud && !racing && TheGameFlowManager.IsInGame() && since > 120) {
                 std::fprintf(stderr, "[benchmark] career event %s: cash %d -> %d, completed %d\n", gEventRace->GetEventID(), gEventStartCash,
                              static_cast<int>(FEDatabase->GetCareerSettings()->GetCash()),
@@ -838,6 +850,133 @@ void CareerSaveUpdate() {
     }
 }
 
+// The rival scenario. At frame 60 the bin's requirements are met the way
+// playing would meet them (debug switches, each defaulting to the bin's
+// requirement): NFSMW_DEBUG_RACES_WON=<n> of its world races won,
+// NFSMW_DEBUG_CHALLENGES=<n> of its milestones completed (awarded, with
+// their bounty, GMilestone::DebugForceComplete), NFSMW_DEBUG_BOUNTY=<n>
+// bounty in all (the rest added to the career car).
+void LogBin(const char *when) {
+    const int bin_number = FEDatabase->GetCareerSettings()->GetCurrentBin();
+    GRaceBin *bin = GRaceDatabase::Get().GetBinNumber(bin_number);
+    if (bin == nullptr) {
+        std::fprintf(stderr, "[benchmark] no bin %d\n", bin_number);
+        return;
+    }
+    std::fprintf(stderr, "[benchmark] bin %d (%s, frame %d): races won %d/%d, challenges %d/%d, bounty %u/%d\n", bin_number, when, gBenchFrame,
+                 bin->GetAwardedRaceWins(), bin->GetRequiredRaceWins(), bin->GetCompletedChallenges(), bin->GetRequiredChallenges(),
+                 FEDatabase->GetPlayerCarStable(0)->GetTotalBounty(), bin->GetRequiredBounty());
+    for (unsigned int i = 0; i < bin->GetBossRaceCount(); i++) {
+        GRaceParameters *race = GRaceDatabase::Get().GetRaceFromHash(bin->GetBossRaceHash(i));
+        std::fprintf(stderr, "[benchmark]   boss race %s: unlocked %d completed %d\n", race && race->GetEventID() ? race->GetEventID() : "?",
+                     GRaceDatabase::Get().CheckRaceScoreFlags(bin->GetBossRaceHash(i), GRaceDatabase::kUnlocked_Career) ? 1 : 0,
+                     GRaceDatabase::Get().CheckRaceScoreFlags(bin->GetBossRaceHash(i), GRaceDatabase::kCompleted_ContextCareer) ? 1 : 0);
+    }
+}
+
+void MeetBinRequirements() {
+    const int bin_number = FEDatabase->GetCareerSettings()->GetCurrentBin();
+    GRaceBin *bin = GRaceDatabase::Get().GetBinNumber(bin_number);
+    if (bin == nullptr) {
+        return;
+    }
+    LogBin("before");
+    int races = EnvInt("NFSMW_DEBUG_RACES_WON", bin->GetRequiredRaceWins());
+    for (unsigned int i = 0; i < bin->GetWorldRaceCount() && races > 0; i++) {
+        GRaceSaveInfo *info = GRaceDatabase::Get().GetScoreInfo(bin->GetWorldRaceHash(i));
+        if (info != nullptr) {
+            info->mFlags |= GRaceDatabase::kCompleted_ContextCareer | GRaceDatabase::kUnlocked_Career;
+            races--;
+        }
+    }
+    bin->RefreshProgress();
+    int challenges = EnvInt("NFSMW_DEBUG_CHALLENGES", bin->GetRequiredChallenges()) - bin->GetCompletedChallenges();
+    for (GMilestone *m = GManager::Get().GetFirstMilestone(false, bin_number); m != nullptr && challenges > 0;
+         m = GManager::Get().GetNextMilestone(m, false, bin_number)) {
+        if (!m->GetIsAwarded()) {
+            m->DebugForceComplete();
+            challenges--;
+        }
+    }
+    const int bounty = EnvInt("NFSMW_DEBUG_BOUNTY", bin->GetRequiredBounty()) - static_cast<int>(FEDatabase->GetPlayerCarStable(0)->GetTotalBounty());
+    if (bounty > 0) {
+        Game_AwardPlayerBounty(bounty);
+    }
+    GManager::Get().RefreshEngageTriggerIcons();
+    LogBin("requirements met");
+}
+
+// After a boss race: the next one (racing again), or the rival beaten: the
+// post race screens, the rival flow in the frontend (enter on each screen,
+// left and enter on a yes/no dialog), back into free roam in the next bin.
+void RivalPostRace(const char *control, bool hud, bool racing, int since) {
+    static const int start_bin = FEDatabase->GetCareerSettings()->GetCurrentBin();
+    static int frontend_frame = -1;
+    if (racing) {
+        LogBin("next boss race");
+        SetEventPhase(kEvent_Racing);
+        return;
+    }
+    const bool in_frontend = TheGameFlowManager.IsInFrontend();
+    if (in_frontend && frontend_frame < 0) {
+        frontend_frame = gBenchFrame;
+        std::fprintf(stderr, "[benchmark] rival flow: frontend, bin %u (frame %d)\n", FEDatabase->GetCareerSettings()->GetCurrentBin(), gBenchFrame);
+        for (int i = 0; i < 6; i++) {
+            FEMarkerManager::ePossibleMarker marker = FEMarkerManager::MARKER_NONE;
+            int param = 0;
+            TheFEMarkerManager.GetMarkerForLaterSelection(i, marker, param);
+            if (marker != FEMarkerManager::MARKER_NONE) {
+                std::fprintf(stderr, "[benchmark]   marker to select: %d (0x%X)\n", static_cast<int>(marker), param);
+            }
+        }
+    }
+    const int in_control = gBenchFrame - gControlFrame;
+    const bool dialog = std::strstr(control, "Dialog") != nullptr;
+    const bool sms = std::strncmp(control, "SMS_", 4) == 0;
+    gEventLeft = dialog && in_control % 120 >= 60 && in_control % 120 < 66;
+    gEventPress = !hud && !sms && in_control >= 90 && in_control % 120 >= 90 && in_control % 120 < 96;
+    // The marker selection: the first (focused) card, then right to the next.
+    const bool markers = std::strcmp(control, "SafehouseMarkers.fng") == 0;
+    // Its intro ("You can now select 2 markers") plays first; then enter
+    // and right in turn: a card, the next card, a card, leave.
+    if (markers) {
+        const int t = in_control - 480;
+        gEventPress = t >= 0 && t % 120 < 6;
+        gEventKey = t >= 0 && t % 120 >= 60 && t % 120 < 66 ? PORT_KEY_RIGHT : -1;
+    } else {
+        gEventKey = -1;
+    }
+    if (!in_frontend && hud && TheGameFlowManager.IsInGame() && GRaceStatus::Exists() &&
+        GRaceStatus::Get().GetPlayMode() == GRaceStatus::kPlayMode_Roaming && FEDatabase->GetCareerSettings()->GetCurrentBin() != start_bin) {
+        std::fprintf(stderr, "[benchmark] rival beaten: free roam in bin %u (from %d, frame %d)\n", FEDatabase->GetCareerSettings()->GetCurrentBin(),
+                     start_bin, gBenchFrame);
+        LogBin("next bin");
+        FEPlayerCarDB *stable = FEDatabase->GetPlayerCarStable(0);
+        for (int i = 0; i < 200; i++) {
+            FECarRecord *car = stable->GetCarByIndex(i);
+            if (car != nullptr && car->IsValid() && (car->FilterBits & FE_CAR_FILTER_PINKSLIP) != 0) {
+                std::fprintf(stderr, "[benchmark]   pink slip car: handle 0x%08X key 0x%08X (%s)\n", car->Handle, car->FEKey, car->GetDebugName());
+            }
+        }
+        std::fprintf(stderr, "[benchmark]   cash %d, customize markers %d\n", FEDatabase->GetCareerSettings()->GetCash(),
+                     TheFEMarkerManager.GetNumCustomizeMarkers());
+        SetEventPhase(kEvent_BackRoaming);
+    }
+    if (since > 60 * 600) {
+        std::fprintf(stderr, "[benchmark] rival flow: not back in free roam after 10 minutes\n");
+        Finish();
+    }
+}
+
+void RivalUpdate() {
+    if (gBenchFrame == 60) {
+        MeetBinRequirements();
+    }
+    if (gBenchFrame % 600 == 0) {
+        LogBin("free roam");
+    }
+}
+
 bool MainMenuUp() {
     return TheGameFlowManager.IsInFrontend() && cFEng::Get() != nullptr && cFEng::Get()->IsPackageInControl("MainMenu.fng");
 }
@@ -997,7 +1136,7 @@ void PortBenchmarkInit() {
         // GManager::Update's NFSMW_DEBUG_SKIP_RACE), unless told otherwise
         // (NFSMW_DEBUG_SKIP_RACE=0 races it out).
         gLoadPhase = gScenario->career_save && std::getenv("NFSMW_BENCHMARK_PHASE") && std::strcmp(std::getenv("NFSMW_BENCHMARK_PHASE"), "load") == 0;
-        if (gScenario->career_event || (gScenario->career_save && !gLoadPhase)) {
+        if (gScenario->career_event || gScenario->rival || (gScenario->career_save && !gLoadPhase)) {
             setenv("NFSMW_DEBUG_SKIP_RACE", "1:60", 0);
             if (std::strcmp(std::getenv("NFSMW_DEBUG_SKIP_RACE"), "0") == 0) {
                 unsetenv("NFSMW_DEBUG_SKIP_RACE");
@@ -1169,11 +1308,14 @@ void PortBenchmarkEndFrame(uint64_t render_start_ns) {
         if (gScenario->free_roam) {
             FreeRoamScreens();
         }
-        if (gScenario->career_event || (gScenario->career_save && !gLoadPhase)) {
+        if (gScenario->career_event || gScenario->rival || (gScenario->career_save && !gLoadPhase)) {
             CareerEventUpdate();
         }
         if (gScenario->career_save) {
             CareerSaveUpdate();
+        }
+        if (gScenario->rival) {
+            RivalUpdate();
         }
         if (gScenario->milestone) {
             MilestoneUpdate();
