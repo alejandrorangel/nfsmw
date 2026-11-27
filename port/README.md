@@ -53,20 +53,28 @@ re-run the generator to drop stale ones.
 
 ## Status
 
-**The game draws its loading screens on Metal** -- logo, backdrop and
-localized text through its own frontend and font code.
+**The game boots to its frontend and renders the 3D garage on Metal** --
+splash, main menu and sub-menus over the frontend garage with the player's
+car, driven by the game's own screens, car loader and camera mover.
+Keyboard, gamepad and mouse work in the menus.
 
-Boot gets through `LoadGlobalChunks()` (attribute database, GLOBALB,
-language, fonts) and stops in `InitFrontendDatabase()` (preset cars).
+In place:
 
-Rendering pieces in place:
+- Textures: `TexturePackNative.cpp` (native records) + `TexturePlatMetal.cpp`
+- Frontend: `FERenderMetal.cpp` (`eViewPlatInterface::FE*`, `eDisplayFrame`)
+- Models: `SolidNative.cpp` loads PC geometry packs (native `eSolid`, meshes
+  in Metal buffers, any number of vertex buffers/strides)
+- 3D: `SceneNative.cpp` (`eViewPlatInterface::Render(eModel*)`, view
+  visibility tests, the frontend frame = garage + `RenderFrontEndCars`),
+  `ViewsNative.cpp` (`epInitViews`), `MetalRenderer.mm` (mesh pass under the
+  frontend)
+- Reconstructed from speed.exe 1.3: `SelectCarCameraMover`, `StringToNumber`,
+  input action generation, `Attrib::DefaultDataArea`
+- `eMathNative.cpp`: the Ecstasy matrix layer (D3DX on PC)
 
-- `src/Platform/TexturePackNative.cpp`: texture packs copied into native
-  records; `TexturePlatMetal.cpp` turns them into Metal textures
-- `src/Platform/FERenderMetal.cpp`: `eViewPlatInterface::FE*` +
-  `eDisplayFrame` record frontend quads (640x480 virtual screen)
-- `src/Mac/MetalRenderer.mm`: draws the latest frontend frame, letterboxed
-- `src/Platform/eMathNative.cpp`: the Ecstasy matrix layer (D3DX on PC)
+Not yet: the PC shaders (lighting, car paint, reflections -- the effects are
+compiled D3D9 `fx_2_0` resources in speed.exe), sound, saves, movies, the
+in-game world.
 
 Aspect ratio (`NFSMW_ASPECT`): `fill` (default) scales the 640x480
 frontend by window height and lets elements outside the 4:3 area use the
@@ -75,9 +83,19 @@ extra width, like the community widescreen fixes; `4:3` pillar/letterboxes;
 false, and the install only ships two widescreen screens, so the game's
 own console widescreen path stays off.)
 
-Debug switches: `NFSMW_HOLD_FRAME=<s>` keeps ticking/drawing the frontend
-once it first draws; `NFSMW_TRACE_FRAMES`, `NFSMW_TRACE_FE`,
-`NFSMW_TRACE_TEXTURES`, `NFSMW_TRACE_FILES`; `NFSMW_TEXTURE_SMOKE=1`.
+Debug switches:
+
+- `NFSMW_AUTO_KEYS=<s>:<key>,...` (enter esc space up down left right),
+  `NFSMW_AUTO_ENTER=<s>,...`: scripted key presses for automated runs
+- `NFSMW_SMOKE_CAR=<car>` / `NFSMW_SMOKE_SOLIDS=<name text>`: draw models over
+  the frontend with an orbit camera; `NFSMW_SCENE_ON_TOP=1` draws the 3D
+  scene over the frontend; `NFSMW_SHADE=texture` ignores vertex colours
+- `NFSMW_TRACE_SCENE`, `NFSMW_TRACE_ACTIONS`, `NFSMW_DUMP_CONTROLLERS`,
+  `NFSMW_DUMP_MESH=<dir>`, `NFSMW_TRACE_FLOW`, `NFSMW_TRACE_FRAMES`,
+  `NFSMW_TRACE_FE`, `NFSMW_TRACE_TEXTURES`, `NFSMW_TRACE_FILES`
+- `NFSMW_SOUND=1`, `NFSMW_MEMCARD=1`: turn on the unported sound / save paths
+- `NFSMW_FENG_POOL=1`: frontend allocations in the FEng pool (debugging)
+- `NFSMW_HOLD_FRAME=<s>`, `NFSMW_TEXTURE_SMOKE=1`
 
 ## Recovered data
 

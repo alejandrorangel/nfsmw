@@ -159,6 +159,7 @@ struct Draw3D {
     uint32_t first_index;
     uint32_t num_indices;
     uint32_t flags;
+    uint32_t effect;
     float world[16];
 };
 
@@ -196,6 +197,7 @@ void PortMetal3DAdd(const Port3DDraw *draw) {
         d.first_index = draw->first_index;
         d.num_indices = draw->num_indices;
         d.flags = draw->flags;
+        d.effect = draw->effect;
         memcpy(d.world, draw->world, sizeof(d.world));
         g3DBuilding.draws.push_back(d);
     }

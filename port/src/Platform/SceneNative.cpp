@@ -101,6 +101,7 @@ void DrawSolid(eSolid *solid, const M44 world) {
         d.index_buffer = info->IndexBuffer;
         d.texture = MetalTextureOf(texture);
         d.first_index = group.FirstIndex;
+        d.effect = group.Effect;
         d.num_indices = group.NumIndices;
         if (texture && texture->AlphaBlendType == TEXBLEND_ADDATIVE) {
             d.flags = PORT_3D_ADDITIVE;

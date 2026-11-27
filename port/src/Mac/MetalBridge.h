@@ -52,7 +52,8 @@ struct Port3DDraw {
     void *texture;       // id<MTLTexture>, or null for white
     uint32_t first_index;
     uint32_t num_indices;
-    uint32_t flags; // PORT_3D_*
+    uint32_t flags;  // PORT_3D_*
+    uint32_t effect; // PC effect index (eSolidPlatNative.hpp PORT_EFFECT_*)
     float world[16];
 };
 enum { PORT_3D_ALPHA_BLEND = 1, PORT_3D_ADDITIVE = 2, PORT_3D_ALPHA_TEST = 4 };

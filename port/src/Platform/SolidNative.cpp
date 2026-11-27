@@ -147,6 +147,7 @@ eSolidPlatInfo *LoadMesh(bChunk *mesh, const char *solid_name) {
         bMemCpy(out.AABBMin, g + 0x00, 12);
         bMemCpy(out.AABBMax, g + 0x0C, 12);
         bMemCpy(out.TextureSlots, g + 0x18, 6);
+        out.Effect = static_cast<uint16>(Read<uint32>(g + 0x30));
         out.Flags = Read<uint32>(g + 0x38);
         out.NumVertices = Read<uint32>(g + 0x3C);
         out.FirstIndex = Read<uint32>(g + 0x44);
