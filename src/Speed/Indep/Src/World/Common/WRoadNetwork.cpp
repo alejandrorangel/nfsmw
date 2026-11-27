@@ -1873,7 +1873,7 @@ void WRoadNav::HolePunchAvoidables(NavCookie *cookies, int num_cookies, float cu
             float my_d = bDot(&cookie_to_me, reinterpret_cast<const bVector2 *>(&cookie.Forward));
             float avoidable_ahead = avoidable_d - my_d;
             float close_factor = UMath::Ramp(avoidable_ahead, -6.0f, 6.0f);
-            float avoidable_offset = bCross(reinterpret_cast<const bVector2 *>(&cookie.Forward), &cookie_to_avoidable);
+            float avoidable_offset = bCross(&cookie_to_avoidable, reinterpret_cast<const bVector2 *>(&cookie.Forward));
             float right_projection = bCross(&right_diagonal, reinterpret_cast<const bVector2 *>(&cookie.Forward));
             float left_projection = bCross(&left_diagonal, reinterpret_cast<const bVector2 *>(&cookie.Forward));
             float avoidable_half_width = bAbs(right_projection);
