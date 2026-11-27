@@ -65,7 +65,13 @@ FEGroup *HudElement::RegisterGroup(uint32 hash) {
         while (pChild != nullptr) {
             FEObject *pChildObj = reinterpret_cast<FEObject *>(pChild);
             if (pChildObj->Type == FE_Group) {
+#ifdef EA_PORT_NATIVE
+                // FEObject only shares FENode's layout (NameHash at 0x10) on
+                // 32-bit; read it from the object (PC 0x58BBD0: [esi + 0x10]).
+                RegisterGroup(pChildObj->NameHash);
+#else
                 RegisterGroup(pChild->GetNameHash());
+#endif
             } else {
                 Objects.AddTail(pChildObj);
             }
