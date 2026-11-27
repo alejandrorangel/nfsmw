@@ -157,7 +157,13 @@ class FEngine {
 
     void SetNumJoyPads(unsigned char Count);
     FEJoyPad *GetJoyPad(unsigned char Index) {}
+#if defined(EA_PLATFORM_WIN32)
+    void SetUseMouse(bool bUseMouse) { // Decl: 199
+        bMouseActive = bUseMouse;
+    }
+#else
     void SetUseMouse(bool bUseMouse) {} // Decl: 199
+#endif
     FEMouse *GetMouse() {}              // Decl: 200
 
     FETypeLib &GetTypeLib() {} // Decl: 202

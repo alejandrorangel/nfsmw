@@ -4,12 +4,15 @@
 #import <GameController/GameController.h>
 
 #include "InputBridge.h"
+#include "MetalBridge.h"
 
 #include <cstring>
 #include <mutex>
 
 static std::mutex gInputLock;
 static float gKeys[PORT_KEY_COUNT];
+static float gMouseU = 0.5f, gMouseV = 0.5f; // view fraction, top-left origin
+static unsigned int gMouseButtons;
 
 static int PortKeyForKeyCode(unsigned short code) {
     // macOS virtual key codes (Carbon kVK_*).
@@ -99,8 +102,38 @@ static void SetKey(unsigned short code, bool down) {
     }
 }
 
+static void TrackMouse(NSEvent *event) {
+    NSView *view = event.window.contentView;
+    if (view == nil) {
+        return;
+    }
+    NSPoint p = [view convertPoint:event.locationInWindow fromView:nil];
+    NSRect b = view.bounds;
+    std::lock_guard<std::mutex> guard(gInputLock);
+    gMouseU = (float)((p.x - b.origin.x) / b.size.width);
+    gMouseV = (float)(view.isFlipped ? (p.y - b.origin.y) / b.size.height : 1.0 - (p.y - b.origin.y) / b.size.height);
+    switch (event.type) {
+        case NSEventTypeLeftMouseDown: gMouseButtons |= 1; break;
+        case NSEventTypeLeftMouseUp: gMouseButtons &= ~1u; break;
+        case NSEventTypeRightMouseDown: gMouseButtons |= 2; break;
+        case NSEventTypeRightMouseUp: gMouseButtons &= ~2u; break;
+        default: break;
+    }
+}
+
 // Installed from main.mm once the app is running.
 void PortInputInstallKeyboardMonitor() {
+    for (NSWindow *window in NSApp.windows) {
+        window.acceptsMouseMovedEvents = YES;
+    }
+    [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskMouseMoved | NSEventMaskLeftMouseDragged |
+                                                  NSEventMaskRightMouseDragged | NSEventMaskLeftMouseDown |
+                                                  NSEventMaskLeftMouseUp | NSEventMaskRightMouseDown |
+                                                  NSEventMaskRightMouseUp
+                                          handler:^NSEvent *(NSEvent *event) {
+                                            TrackMouse(event);
+                                            return event; // keep window dragging etc. working
+                                          }];
     [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown | NSEventMaskKeyUp | NSEventMaskFlagsChanged
                                           handler:^NSEvent *(NSEvent *event) {
                                             if (event.type == NSEventTypeFlagsChanged) {
@@ -128,6 +161,8 @@ void PortInputGetState(PortInputState *out) {
     {
         std::lock_guard<std::mutex> guard(gInputLock);
         std::memcpy(out->keys, gKeys, sizeof(gKeys));
+        PortMetalViewToFEScreen(gMouseU, gMouseV, &out->mouse_x, &out->mouse_y);
+        out->mouse_buttons = gMouseButtons;
     }
     GCController *controller = GCController.current;
     if (controller == nil && GCController.controllers.count > 0) {

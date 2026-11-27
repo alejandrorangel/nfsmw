@@ -41,3 +41,7 @@ void PortMetalFEBeginFrame();
 void PortMetalFEAddQuad(void *texture, PortBlendMode blend, const PortFEVertex quad[4]);
 // Returns the number of quads published.
 int PortMetalFEEndFrame();
+
+// Maps a point in the view (0..1 from the top-left) to the frontend's 640x480
+// virtual screen, using the aspect mode of the last frame drawn.
+void PortMetalViewToFEScreen(float u, float v, float *x, float *y);

@@ -248,7 +248,15 @@ u32 cFEngGameInterface::GetJoyPadMask(u8 feng_pad_index) {
     return cFEngJoyInput::mInstance->GetJoyPadMask(feng_pad_index);
 }
 
+#if defined(EA_PORT_NATIVE)
+void PortGetFEMouseInfo(FEMouseInfo &Info); // port/src/Platform/InputNative.cpp
+
+void cFEngGameInterface::GetMouseInfo(FEMouseInfo &Info) {
+    PortGetFEMouseInfo(Info);
+}
+#else
 void cFEngGameInterface::GetMouseInfo(FEMouseInfo &Info) {}
+#endif
 
 bool cFEngGameInterface::DoesPointTouchObject(float xPos, float yPos, FEObject *pButton) {
     return FEngTestForIntersection(xPos, yPos, pButton);

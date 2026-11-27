@@ -90,6 +90,28 @@ static FEFrame gFEBuilding;
 static FEFrame gFEPublished;
 static std::mutex gFELock;
 
+// How the FE virtual screen was last placed in the view (fractions of the view).
+struct FEMapping {
+    float vp_x, vp_y, vp_w, vp_h; // viewport
+    float scale_x, scale_y;       // NDC scale inside it
+};
+static std::mutex gFEMappingLock;
+static FEMapping gFEMapping = {0, 0, 1, 1, 1, 1};
+
+void PortMetalViewToFEScreen(float u, float v, float *x, float *y) {
+    FEMapping m;
+    {
+        std::lock_guard<std::mutex> guard(gFEMappingLock);
+        m = gFEMapping;
+    }
+    float ndc_x = ((u - m.vp_x) / m.vp_w) * 2.0f - 1.0f;
+    float ndc_y = 1.0f - ((v - m.vp_y) / m.vp_h) * 2.0f;
+    ndc_x /= m.scale_x;
+    ndc_y /= m.scale_y;
+    *x = (ndc_x + 1.0f) * 0.5f * 640.0f;
+    *y = (1.0f - ndc_y) * 0.5f * 480.0f;
+}
+
 void PortMetalFEBeginFrame() {
     gFEBuilding.vertices.clear();
     gFEBuilding.batches.clear();
@@ -281,6 +303,11 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         }
         [enc setViewport:viewport];
         [enc setVertexBytes:scale length:sizeof(scale) atIndex:1];
+        {
+            std::lock_guard<std::mutex> guard(gFEMappingLock);
+            gFEMapping = {(float)(viewport.originX / size.width), (float)(viewport.originY / size.height),
+                          (float)(viewport.width / size.width), (float)(viewport.height / size.height), scale[0], scale[1]};
+        }
         id<MTLBuffer> vb = [_device newBufferWithBytes:fe.vertices.data()
                                                 length:fe.vertices.size() * sizeof(PortFEVertex)
                                                options:MTLResourceStorageModeShared];

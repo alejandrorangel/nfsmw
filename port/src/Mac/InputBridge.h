@@ -32,6 +32,10 @@ struct PortInputState {
     float keys[PORT_KEY_COUNT]; // 0 or 1
     float pad[PORT_PAD_COUNT];
     bool pad_connected;
+    // Mouse in the frontend's 640x480 virtual screen (may fall outside it in
+    // widescreen), and buttons (bit 0 left, bit 1 right).
+    float mouse_x, mouse_y;
+    unsigned int mouse_buttons;
 };
 
 // Fills a consistent snapshot of the current state (callable from any thread).

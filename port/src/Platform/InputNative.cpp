@@ -16,6 +16,9 @@
 #include "Speed/Indep/Tools/AttribSys/Runtime/AttribSys.h"
 
 #include "../Mac/InputBridge.h"
+#include "Speed/Indep/Src/FEng/FEMouse.h"
+
+#include <cmath>
 
 #include <cstdio>
 #include <cstdlib>
@@ -242,4 +245,15 @@ bool IOModule::IsActiveDevice(int port) {
 
 bool IsJoystickTypeWheel(JoystickPort port) {
     return false;
+}
+
+// cFEngGameInterface::GetMouseInfo (PC: speed.exe 1.3 @ 0x516870): cursor in the
+// 640x480 frontend screen, relative to its centre; bit 0 left, bit 1 right button.
+void PortGetFEMouseInfo(FEMouseInfo &Info) {
+    PortInputState state;
+    PortInputGetState(&state);
+    Info.XPos = static_cast<i16>(std::lround(state.mouse_x - 320.0f));
+    Info.YPos = static_cast<i16>(std::lround(state.mouse_y - 240.0f));
+    Info.WheelDelta = 0;
+    Info.ButtonMask = static_cast<u16>(state.mouse_buttons & 3);
 }

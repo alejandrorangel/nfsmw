@@ -28,9 +28,17 @@ cFEng::cFEng() {
     bWasPaused = false;
     mFEng = new ("FEngine", 0) FEngine();
     mFEng->SetInterface(cFEngGameInterface::pInstance);
+#if defined(EA_PLATFORM_WIN32)
+    // PC (speed.exe 1.3 @ 0x5168D0): one joypad, and the mouse drives the frontend.
+    mFEng->SetNumJoyPads(1);
+    mFEng->SetInitialState();
+    mFEng->SetExecution(true);
+    mFEng->SetUseMouse(true);
+#else
     mFEng->SetNumJoyPads(2);
     mFEng->SetInitialState();
     mFEng->SetExecution(true);
+#endif
 }
 
 // UNSOLVED
