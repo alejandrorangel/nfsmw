@@ -19,6 +19,8 @@
 #include "Speed/Indep/Src/Gameplay/GRaceDatabase.h"
 #include "Speed/Indep/Src/Ecstasy/eMath.hpp"
 #include "Speed/Indep/Src/Generated/AttribSys/Classes/effects.h"
+#include "Speed/Indep/Src/Generated/AttribSys/Classes/timeofdaylighting.h"
+#include "Speed/Indep/Src/World/Rain.hpp"
 #include "Speed/Indep/Src/Misc/Timer.hpp"
 #include "Speed/Indep/bWare/Inc/bWare.hpp"
 
@@ -296,7 +298,7 @@ V3 TickSunDirection() {
 // (byte 0x901934, which would take them from the TimeOfDay, is never set).
 // Rayleigh and Mie strengths map from 0..100 onto 0.0001..0.01 (globals
 // 0x901938/0x90193C).
-void SetWorldFog(V3 sun) {
+void SetWorldFog(V3 sun, PortWorldFog &f) {
     Attrib::Gen::effects fx(0xce3b435b, 0, nullptr);
     const float lo = 0.0001f, range = 0.01f - 0.0001f;
     float bm_multiply = fx.BmMultiply() * 0.01f;
@@ -311,7 +313,6 @@ void SetWorldFog(V3 sun) {
     float br[3] = {rayleigh * br_colour.x, rayleigh * br_colour.y, rayleigh * br_colour.z};
     float bm[3] = {mie * bm_colour.x, mie * bm_colour.y, mie * bm_colour.z};
 
-    PortWorldFog f = {};
     f.enabled = enable ? 1 : 0;
     if (enable) {
         for (int i = 0; i < 3; i++) {
@@ -337,11 +338,53 @@ void SetWorldFog(V3 sun) {
                      enable, fx.BrMultiply(), fx.BmMultiply(), br_colour.x, br_colour.y, br_colour.z, br_colour.w, bm_colour.x, bm_colour.y, bm_colour.z,
                      bm_colour.w, g, inscatter, sun.x, sun.y, sun.z, gSun.position);
     }
-    PortMetal3DSetFog(&f);
 }
 
-void SetupFrameLighting() {
-    SetWorldFog(TickSunDirection());
+// TimeOfDay lighting, sub_769580 (called by ___eDisplayFrame with the view's
+// Rain cloud intensity, PC Rain +0x290): two pairs of 'timeofdaylighting'
+// collections (TimeOfDay +0xC0..+0x14C) are each blended by the cloud
+// intensity (sub_768EE0), then mixed by sun height (sub_769190) into
+// TimeOfDay +0x20, weight 1 - (clamp(sun.z, 0.25, 0.5) - 0.25) * 4 for the
+// low-sun pair. With the visual treatment on (0x901828, sub_6C0A20) the pairs
+// are 0xB902CFAD..0xD835D0C8 (low sun) and 0x3DCFA673..0x59C373C3; otherwise
+// 0x0E1C797C..0x919B6689 and 0xA01A3942..0x94ABDFF0. The effect-begin code
+// (0x6D6AA0) then sets DiffuseColour = (min(diffuse.rgb, 1), 1) (0x6C6300,
+// scale 0x9018C4 = 1) and AmbientColour = (min(ambient.rgb, 1), 4)
+// (0x6C6450; w = TimeOfDay +0x3C, always 4).
+void SetTimeOfDayLighting(V3 sun, float cloud, PortWorldFog &f) {
+    const bool visual_treatment = true; // the port always applies it
+    unsigned int low_a = visual_treatment ? 0xb902cfad : 0x0e1c797c, low_b = visual_treatment ? 0xd835d0c8 : 0x919b6689;
+    unsigned int high_a = visual_treatment ? 0x3dcfa673 : 0xa01a3942, high_b = visual_treatment ? 0x59c373c3 : 0x94abdff0;
+    Attrib::Gen::timeofdaylighting la(low_a, 0, nullptr), lb(low_b, 0, nullptr), ha(high_a, 0, nullptr), hb(high_b, 0, nullptr);
+    float z = sun.z > 0.25f ? (sun.z > 0.5f ? 0.5f : sun.z) : 0.25f;
+    float low_weight = 1.0f - (z - 0.25f) * 4.0f;
+    auto blend = [&](const UMath::Vector4 &a0, const UMath::Vector4 &a1, const UMath::Vector4 &b0, const UMath::Vector4 &b1, float out[4]) {
+        const float lo[3] = {a0.x + (a1.x - a0.x) * cloud, a0.y + (a1.y - a0.y) * cloud, a0.z + (a1.z - a0.z) * cloud};
+        const float hi[3] = {b0.x + (b1.x - b0.x) * cloud, b0.y + (b1.y - b0.y) * cloud, b0.z + (b1.z - b0.z) * cloud};
+        for (int i = 0; i < 3; i++) {
+            out[i] = std::fmin(hi[i] + (lo[i] - hi[i]) * low_weight, 1.0f);
+        }
+    };
+    blend(la.DiffuseColour(), lb.DiffuseColour(), ha.DiffuseColour(), hb.DiffuseColour(), f.diffuse);
+    blend(la.AmbientColour(), lb.AmbientColour(), ha.AmbientColour(), hb.AmbientColour(), f.ambient);
+    f.diffuse[3] = 1.0f;
+    f.ambient[3] = 4.0f;
+    f.lit = 1;
+    static const bool trace = std::getenv("NFSMW_TRACE_FOG") != nullptr;
+    static int frame;
+    if (trace && frame++ % 300 == 0) {
+        std::fprintf(stderr, "[tod] cloud %.2f low weight %.2f diffuse (%.3f %.3f %.3f) ambient (%.3f %.3f %.3f) x4\n", cloud, low_weight, f.diffuse[0],
+                     f.diffuse[1], f.diffuse[2], f.ambient[0], f.ambient[1], f.ambient[2]);
+    }
+}
+
+void SetupFrameLighting(eView *view) {
+    V3 sun = TickSunDirection();
+    PortWorldFog f = {};
+    SetWorldFog(sun, f);
+    float cloud = view && view->Precipitation ? view->Precipitation->GetCloudIntensity() : 0.0f;
+    SetTimeOfDayLighting(sun, cloud, f);
+    PortMetal3DSetFog(&f);
 }
 
 } // namespace
@@ -465,7 +508,7 @@ bool RenderFrontEndScene() {
         return false;
     }
     PortMetal3DBeginFrame(view_proj);
-    SetupFrameLighting();
+    SetupFrameLighting(view);
     SetViewClip(view, view_proj);
     {
         bVector3 *eye = view->GetCamera()->GetPosition();
@@ -685,7 +728,7 @@ bool RenderWorldScene(int frame) {
         return false;
     }
     PortMetal3DBeginFrame(view_proj);
-    SetupFrameLighting();
+    SetupFrameLighting(view);
     SetViewClip(view, view_proj);
     bVector3 *eye = view->GetCamera()->GetPosition();
     float e[3] = {eye->x, eye->y, eye->z};

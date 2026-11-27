@@ -194,10 +194,17 @@ void PortMetal3DBeginFrame(const float view_proj[16]) {
 }
 
 void PortMetal3DSetFog(const PortWorldFog *fog) {
-    static const bool off = getenv("NFSMW_NO_FOG") != nullptr;
+    static const bool no_fog = getenv("NFSMW_NO_FOG") != nullptr;
+    static const bool no_light = getenv("NFSMW_NO_TOD_LIGHT") != nullptr;
     g3DBuilding.fog = {};
-    if (fog && !off) {
+    if (fog) {
         g3DBuilding.fog = *fog;
+        if (no_fog) {
+            g3DBuilding.fog.enabled = 0;
+        }
+        if (no_light) {
+            g3DBuilding.fog.lit = 0;
+        }
     }
 }
 
@@ -283,18 +290,20 @@ fragment float4 fe_fs(FEOut in [[stage_in]], texture2d<float> tex [[texture(0)]]
 // 3D meshes. Vertices are pulled from the raw 36-byte PC layout.
 struct MeshConst { float4x4 mvp; float4x4 world; uint stride; uint shade; uint effect; uint pad; float4 eye; };
 struct MeshOut { float4 pos [[position]]; float2 uv; float4 color; float3 normal; float3 world_pos; float3 local_normal; float3 local_pos;
-                 float3 extinction; float3 inscatter; };
+                 float4 d0; float3 d1; float3 inscatter; };
 
 // PortWorldFog (MetalBridge.h).
 struct WorldFog {
     float4 br_plus_bm, one_over_brbm, const1, const2, const3, light_dir;
     float fog_value;
     uint enabled;
+    float4 ambient, diffuse;
+    uint lit;
 };
 
-// Effects with the PC scattering terms (IDI_WORLD/WORLDREFLECT/WORLDNORMALMAP/
-// GLOSSYWINDOW/TREE_FX); WORLDBONE, CAR, WORLDMIN, WORLDNOFOG and WORLDPRELIT
-// have none.
+// Effects with the PC scattering and AmbientColour/DiffuseColour lighting
+// terms (IDI_WORLD/WORLDREFLECT/WORLDNORMALMAP/GLOSSYWINDOW/TREE_FX);
+// WORLDBONE, CAR, WORLDMIN, WORLDNOFOG and WORLDPRELIT have none.
 bool FoggedEffect(uint effect) {
     return effect == 0 || effect == 1 || effect == 3 || effect == 5 || effect == 6;
 }
@@ -343,10 +352,24 @@ vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffe
     uint argb = as_type<uint>(v[6]);
     o.color = float4((argb >> 16) & 0xff, (argb >> 8) & 0xff, argb & 0xff, argb >> 24) / 255.0;
     o.uv = float2(v[7], v[8]);
-    o.extinction = 1;
+    // Colour registers: oD0 (ambient) and oD1 (diffuse), clamped to 0..1 as
+    // vs_1_1 colour outputs are. Other effects: oD0 = vertex colour.
+    o.d0 = o.color;
+    o.d1 = 0;
     o.inscatter = 0;
-    if (fog.enabled && FoggedEffect(c.effect)) {
-        Scatter(o.world_pos, c.eye.xyz, fog, o.extinction, o.inscatter);
+    if (FoggedEffect(c.effect)) {
+        float3 extinction = 1;
+        if (fog.enabled) {
+            Scatter(o.world_pos, c.eye.xyz, fog, extinction, o.inscatter);
+        }
+        // IDI_WORLD_FX vs #13: oD0 = E * (AmbientColour.rgb * AmbientColour.w)
+        // * colour (alpha: colour alpha), oD1 = saturate(N.L) * DiffuseColour.
+        float3 ambient = fog.lit ? fog.ambient.rgb * fog.ambient.w : float3(1);
+        o.d0 = saturate(float4(extinction * ambient * o.color.rgb, o.color.a));
+        if (fog.lit) {
+            float3 n = normalize(o.normal);
+            o.d1 = saturate(saturate(dot(fog.light_dir.xyz, n)) * fog.diffuse.rgb);
+        }
     }
     return o;
 }
@@ -403,11 +426,10 @@ fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(
     } else if (c.effect == 4) {
         out = CarShade(in, t, c, m, l, (c.shade & 4) != 0);
     } else {
-        // PC WORLD / WORLDPRELIT: 2 x texture x vertex colour (rgb),
-        // texture alpha x vertex alpha. The fogged WORLD effects attenuate
-        // the vertex colour (oD0 = E x ambient x colour) and add the
-        // in-scatter after the x2 (ps: mad_x2 ..., add r0, r0, t2).
-        out = float4(saturate(2.0 * t.rgb * in.color.rgb * in.extinction + in.inscatter), t.a * in.color.a);
+        // PC WORLD (ps #12): 2 x texture x (oD0 + oD1) + in-scatter (mad_x2,
+        // then add t2); alpha texture x oD0 alpha. WORLDPRELIT and the
+        // unlit effects: oD0 = vertex colour, oD1 = 0.
+        out = float4(saturate(2.0 * t.rgb * (in.d0.rgb + in.d1) + in.inscatter), t.a * in.d0.a);
     }
     if ((c.shade & 2) && out.a < 0.5) {
         discard_fragment();
