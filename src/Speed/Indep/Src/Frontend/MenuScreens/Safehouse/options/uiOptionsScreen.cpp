@@ -1,5 +1,7 @@
 #include "uiOptionsScreen.hpp"
 
+#include <cstring>
+
 #include "Speed/Indep/Src/EAXSound/EAXSOund.hpp"
 #include "Speed/Indep/Src/Frontend/FEngHashes/FEHash_FeBonusCards.hpp"
 #include "Speed/Indep/Src/Frontend/FEngHashes/ScriptHashes.hpp"
@@ -39,6 +41,12 @@ UIOptionsScreen::UIOptionsScreen(ScreenConstructorData *sd) : UIWidgetMenu(sd) {
     OriginalVideoSettings = nullptr;
     OriginalGameplaySettings = nullptr;
     OriginalPlayerSettings = nullptr;
+#if defined(EA_PLATFORM_WIN32)
+    gPCVideoOptionsEdit = &mVideoOptions; // 0x54FD60
+    mVideoOptions.Options = nullptr;
+    mOriginalVideoOptions.Options = nullptr;
+    mAdvancedVideoOptions = false;
+#endif
 
     if (mCalledFromPauseMenu) {
         iMaxWidgetsOnScreen = 10;
@@ -59,6 +67,10 @@ UIOptionsScreen::~UIOptionsScreen() {
     delete OriginalVideoSettings;
     delete OriginalGameplaySettings;
     delete OriginalPlayerSettings;
+#if defined(EA_PLATFORM_WIN32)
+    delete mVideoOptions.Options;
+    delete mOriginalVideoOptions.Options;
+#endif
 }
 
 void UIOptionsScreen::NotificationMessage(u32 msg, FEObject *pobj, u32 param1, u32 param2) {
@@ -86,6 +98,7 @@ void UIOptionsScreen::NotificationMessage(u32 msg, FEObject *pobj, u32 param1, u
                                             first_dialog_button2, GetLocalizedString(0x8AEF5AE8));
             break;
         }
+#if !defined(EA_PLATFORM_WIN32)
         case __PAD_RTRIGGER__:
         case __PAD_LTRIGGER__:
             if (FEDatabase->GetOptionsSettings()->CurrentCategory == OC_PLAYER) {
@@ -107,6 +120,7 @@ void UIOptionsScreen::NotificationMessage(u32 msg, FEObject *pobj, u32 param1, u
         case 0x9A5AD46D:
             TogglePlayer(false);
             break;
+#endif
         case dialog_message_yes:
             if (!FEDatabase->GetOptionsSettings()->TheGameplaySettings.AutoSaveOn &&
                 FEDatabase->GetOptionsSettings()->CurrentCategory == OC_GAMEPLAY) {
@@ -116,6 +130,14 @@ void UIOptionsScreen::NotificationMessage(u32 msg, FEObject *pobj, u32 param1, u
             RestoreDefaults();
             break;
         case FEHASH_EXITCOMPLETE: {
+#if defined(EA_PLATFORM_WIN32)
+            // PC: leaving with changed video options applies them.
+            if (FEDatabase->GetOptionsSettings()->CurrentCategory == OC_VIDEO) {
+                if (!OptionsDidNotChange()) {
+                    ApplyVideoOptions();
+                }
+            } else
+#endif
             FEDatabase->SetOptionsDirty(FEDatabase->IsOptionsDirty() || !OptionsDidNotChange());
 
             if (mCalledFromPauseMenu) {
@@ -145,9 +167,49 @@ void UIOptionsScreen::NotificationMessage(u32 msg, FEObject *pobj, u32 param1, u
                 }
             }
             break;
+#if defined(EA_PLATFORM_WIN32)
+        case __PAD_ACCEPT__:
+            // PC: accepting changed video options applies them and asks to
+            // keep them, reverting after 10 seconds; unchanged ones just leave.
+            if (FEDatabase->GetOptionsSettings()->CurrentCategory != OC_VIDEO) {
+                break;
+            }
+            if (OptionsDidNotChange()) {
+                cFEng::Get()->QueuePackageMessage(0x587C018B, GetPackageName(), nullptr);
+            } else {
+                ApplyVideoOptions();
+                DialogInterface::ShowTwoButtonCountdown(GetPackageName(), mCalledFromPauseMenu ? "InGameDialog.fng" : "Dialog.fng",
+                                                        LANGUAGE_COMMON_YES, LANGUAGE_COMMON_NO, 0x4D0D83B9, 0x85347AE1, 0x85347AE1,
+                                                        first_dialog_button2, 10.0f, 0x07770CE7);
+            }
+            break;
+        case 0x4D0D83B9: // keep them
+            *mOriginalVideoOptions.Options = *mVideoOptions.Options;
+            mOriginalVideoOptions.PerformanceLevel = mVideoOptions.PerformanceLevel;
+            cFEng::Get()->QueuePackageMessage(0x587C018B, GetPackageName(), nullptr);
+            break;
+        case 0x85347AE1: // revert
+            RestoreOriginals();
+            cFEng::Get()->QueueGameMessage(0x7E998E5E, GetPackageName(), 0xFF);
+            break;
+        case 0x26DED57: // VOLevelOfDetail changed: the preset's resolution
+            mVideoOptions.Options->RacingResolution = 0;
+            if (mVideoOptions.PerformanceLevel > 3) {
+                mVideoOptions.Options->RacingResolution = 1;
+            }
+            cFEng::Get()->QueueGameMessage(0x7E998E5E, GetPackageName(), 0xFF);
+            break;
+        case 0x9CDD83CA: // Basic / Advanced
+            mAdvancedVideoOptions = !mAdvancedVideoOptions;
+            Setup();
+            break;
+        case __PAD_UP__:
+            break;
+#else
         case __PAD_UP__:
         case __PAD_ACCEPT__:
             break;
+#endif
     }
 }
 
@@ -230,13 +292,67 @@ void UIOptionsScreen::SetupVideo() {
         FEngSetLanguageHash(GetPackageName(), FEObj_Headertext, 0x48478029);
     }
 
+#if defined(EA_PLATFORM_WIN32)
+    // PC 0x5295F0: copies of the PC graphics options; Basic shows the Level
+    // Of Detail preset and the resolution, Advanced every option (those the
+    // device can't do disabled), and the toggle button says which is next.
+    if (mVideoOptions.Options == nullptr) {
+        mVideoOptions.Options = new ("PCGraphicsOptions", 0) PCGraphicsOptions(gPCGraphicsOptions);
+        mVideoOptions.PerformanceLevel = gPCPerformanceLevel;
+    }
+    if (mOriginalVideoOptions.Options == nullptr) {
+        mOriginalVideoOptions.Options = new ("PCGraphicsOptions", 0) PCGraphicsOptions(gPCGraphicsOptions);
+        mOriginalVideoOptions.PerformanceLevel = gPCPerformanceLevel;
+    }
+    const PCGraphicsOptions &max = gPCGraphicsOptionsMax;
+    if (!mAdvancedVideoOptions) {
+        AddSliderOption(new ("VOLevelOfDetail", 0) VOLevelOfDetail(true), true);
+        AddToggleOption(new ("VOScreenResolution", 0) VOScreenResolution(true), true);
+        FEngSetLanguageHash(GetPackageName(), 0xCE757C8A, 0x1459065C); // "Advanced"
+    } else {
+        AddToggleOption(new ("VOScreenResolution", 0) VOScreenResolution(true), true);
+        AddSliderOption(new ("DOFullScreenAA", 0) DOFullScreenAA(max.FSAALevel > 0), true);
+        AddSliderOption(new ("DOTextureFiltering", 0) DOTextureFiltering(max.TextureFiltering > 0), true);
+        AddToggleOption(new ("DOVSync", 0) DOVSync(true), true);
+        AddSliderOption(new ("DOWorldLOD", 0) DOWorldLOD(max.WorldLodLevel > 0), true);
+        AddSliderOption(new ("DORoadReflectDetail", 0) DORoadReflectDetail(max.RoadReflectionEnable > 0), true);
+        AddSliderOption(new ("DOShadowDetail", 0) DOShadowDetail(max.ShadowDetail > 0), true);
+        AddToggleOption(new ("DOCarLOD", 0) DOCarLOD(max.CarLodLevel > 0), true);
+        AddToggleOption(new ("DOCarReflectDetail", 0) DOCarReflectDetail(max.CarEnvironmentMapEnable > 0), true);
+        AddSliderOption(new ("DOCarReflectRate", 0) DOCarReflectRate(max.CarEnvironmentMapUpdateData > 0), true);
+        AddToggleOption(new ("DORainEnable", 0) DORainEnable(max.RainEnable > 0), true);
+        AddToggleOption(new ("DOOverBright", 0) DOOverBright(max.OverBrightEnable > 0), true);
+        AddToggleOption(new ("DOVisualTreatment", 0) DOVisualTreatment(max.VisualTreatment > 0), true);
+        FEngSetLanguageHash(GetPackageName(), 0xCE757C8A, 0x9C88B5C8); // "Basic"
+    }
+#else
     AddToggleOption(new ("VOWideScreen", 0) VOWideScreen(true), true);
 
     OriginalVideoSettings = new ("VideoSettings", 0) VideoSettings();
     *OriginalVideoSettings = *FEDatabase->GetVideoSettings();
 
     FEngSetScript(GetPackageName(), 0xAD6B204F, FEHASH_APPEAR, true);
+#endif
 }
+
+#if defined(EA_PLATFORM_WIN32)
+// sub_510300: the edited options become the game's; in Basic a changed Level
+// Of Detail applies its preset over them (keeping the chosen resolution).
+// Saved, and the display is reset (eDisplayFrame).
+void UIOptionsScreen::ApplyVideoOptions() {
+    gPCGraphicsOptions = *mVideoOptions.Options;
+    if (!mAdvancedVideoOptions) {
+        if (mOriginalVideoOptions.PerformanceLevel != mVideoOptions.PerformanceLevel) {
+            gPCPerformanceLevel = mVideoOptions.PerformanceLevel;
+            PCGraphicsOptionsApplyPerformanceLevel();
+        }
+        gPCGraphicsOptions.RacingResolution = mVideoOptions.Options->RacingResolution;
+    }
+    PCGraphicsOptionsSave();
+    gPCGraphicsOptionsChanged = true;
+    PCGraphicsOptionsResetDisplay();
+}
+#endif
 
 void UIOptionsScreen::SetupGameplay() {
     const u32 FEObj_Headertext = FEHASH_HEADERTEXT;
@@ -329,7 +445,16 @@ void UIOptionsScreen::RestoreDefaults() {
             FEDatabase->GetAudioSettings()->Default();
             break;
         case OC_VIDEO:
+#if defined(EA_PLATFORM_WIN32)
+            // PC 0x51D170: the game's options go to the defaults right away.
+            PCGraphicsOptionsDefault();
+            gPCGraphicsOptionsChanged = true;
+            PCGraphicsOptionsResetDisplay();
+            *mVideoOptions.Options = gPCGraphicsOptions;
+            mVideoOptions.PerformanceLevel = gPCPerformanceLevel;
+#else
             FEDatabase->GetVideoSettings()->Default();
+#endif
             break;
         case OC_GAMEPLAY:
             bOldAutoSaveVal = FEDatabase->GetGameplaySettings()->AutoSaveOn;
@@ -353,7 +478,12 @@ bool UIOptionsScreen::OptionsDidNotChange() {
         case OC_AUDIO:
             return *FEDatabase->GetAudioSettings() == *OriginalAudioSettings;
         case OC_VIDEO:
+#if defined(EA_PLATFORM_WIN32)
+            return std::memcmp(mVideoOptions.Options, mOriginalVideoOptions.Options, sizeof(PCGraphicsOptions)) == 0 &&
+                   mVideoOptions.PerformanceLevel == mOriginalVideoOptions.PerformanceLevel;
+#else
             return *FEDatabase->GetVideoSettings() == *OriginalVideoSettings;
+#endif
         case OC_GAMEPLAY:
             return *FEDatabase->GetGameplaySettings() == *OriginalGameplaySettings;
         case OC_PLAYER:
@@ -369,7 +499,14 @@ void UIOptionsScreen::RestoreOriginals() {
             *FEDatabase->GetAudioSettings() = *OriginalAudioSettings;
             break;
         case OC_VIDEO:
+#if defined(EA_PLATFORM_WIN32)
+            // PC 0x510450: back to the options on entry, applied again.
+            *mVideoOptions.Options = *mOriginalVideoOptions.Options;
+            mVideoOptions.PerformanceLevel = mOriginalVideoOptions.PerformanceLevel;
+            ApplyVideoOptions();
+#else
             *FEDatabase->GetVideoSettings() = *OriginalVideoSettings;
+#endif
             break;
         case OC_GAMEPLAY:
             *FEDatabase->GetGameplaySettings() = *OriginalGameplaySettings;

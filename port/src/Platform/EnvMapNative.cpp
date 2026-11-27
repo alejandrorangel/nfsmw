@@ -24,6 +24,7 @@
 #include "Speed/Indep/Src/Ecstasy/eMath.hpp"
 #include "Speed/Indep/Src/Frontend/FEManager.hpp"
 #include "Speed/Indep/bWare/Inc/bWare.hpp"
+#include "Speed/PC/Src/PCGraphicsOptions.hpp"
 
 #include "../Mac/MetalBridge.h"
 
@@ -39,17 +40,17 @@ namespace {
 
 eEnvMap *gEnvMap;
 
-// EnableEnvMap__009017B8, the "car reflection update rate" option: 0 off,
-// 1..3 faces per frame by the table at 0x8F9028 (1: one face a frame; 2: +X
-// and +Z every frame plus one of the others; 3: all six). NFSMW_ENVMAP=0..3;
-// the port defaults to 3.
+// EnableEnvMap__009017B8, the "Car Reflection Update Rate" option
+// (PCGraphicsOptions::CarEnvironmentMapEnable): 0 off, 1..3 faces per frame by
+// the table at 0x8F9028 (1: one face a frame; 2: +X and +Z every frame plus
+// one of the others; 3: all six). NFSMW_ENVMAP=0..3 overrides it.
 int EnvMapQuality() {
-    static int quality = [] {
+    static const int forced = [] {
         const char *e = std::getenv("NFSMW_ENVMAP");
-        int q = e ? std::atoi(e) : 3;
-        return q < 0 ? 0 : q > 3 ? 3 : q;
+        return e ? std::atoi(e) : -1;
     }();
-    return quality;
+    int q = forced >= 0 ? forced : gPCGraphicsOptions.CarEnvironmentMapEnable;
+    return q < 0 ? 0 : q > 3 ? 3 : q;
 }
 
 // 0x8F9018: frames per cycle; 0x8F9028: faces drawn on each frame.

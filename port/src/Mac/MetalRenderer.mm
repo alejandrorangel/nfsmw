@@ -2,6 +2,7 @@
 
 #include "MetalBridge.h"
 
+#include <atomic>
 #include <mutex>
 #include <vector>
 
@@ -232,6 +233,11 @@ void PortMetal3DSetFog(const PortWorldFog *fog) {
             g3DBuilding.fog.lit = 0;
         }
     }
+}
+
+static std::atomic<int> gTextureFiltering{1};
+void PortSetTextureFiltering(int level) {
+    gTextureFiltering = level < 0 ? 0 : level > 2 ? 2 : level;
 }
 
 void PortMetal3DSetTreatment(const PortVisualTreatment *treatment) {
@@ -553,8 +559,7 @@ float4 CarShade(MeshOut in, float4 t, constant MeshConst &c, constant Material &
 // draw has an EnvMapMatrix.
 fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(0)]], texturecube<float> env_map [[texture(1)]],
                         constant MeshConst &c [[buffer(0)]], constant Material &m [[buffer(1)]], constant Lights &l [[buffer(2)]],
-                        constant EnvMatrix &em [[buffer(3)]]) {
-    constexpr sampler s(filter::linear, mip_filter::linear, address::repeat);
+                        constant EnvMatrix &em [[buffer(3)]], sampler s [[sampler(0)]]) {
     float4 t = tex.sample(s, in.uv);
     float4 out;
     if (c.shade & 1) {
@@ -641,6 +646,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     id<MTLRenderPipelineState> _debugPipeline;
     id<MTLRenderPipelineState> _fePipelines[3]; // indexed by PortBlendMode
     id<MTLRenderPipelineState> _meshPipelines[3]; // opaque, alpha blend, additive
+    id<MTLSamplerState> _meshSamplers[3];         // by PC texture filtering (PortSetTextureFiltering)
     id<MTLDepthStencilState> _depthWrite;
     id<MTLDepthStencilState> _depthTest;
     id<MTLDepthStencilState> _depthOff;
@@ -736,6 +742,16 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
             if (!_treatmentPipeline) {
                 NSLog(@"NFSMW: treatment pipeline failed: %@", error);
             }
+        }
+        // PC 0x6C5EE9: texture filtering 0 linear min/mag with point mips,
+        // 1 linear mips, 2 anisotropic minification (caps MaxAnisotropy).
+        for (int i = 0; i < 3; i++) {
+            MTLSamplerDescriptor *sd = [MTLSamplerDescriptor new];
+            sd.minFilter = sd.magFilter = MTLSamplerMinMagFilterLinear;
+            sd.mipFilter = i == 0 ? MTLSamplerMipFilterNearest : MTLSamplerMipFilterLinear;
+            sd.maxAnisotropy = i == 2 ? 16 : 1;
+            sd.sAddressMode = sd.tAddressMode = MTLSamplerAddressModeRepeat;
+            _meshSamplers[i] = [_device newSamplerStateWithDescriptor:sd];
         }
         MTLDepthStencilDescriptor *dd = [MTLDepthStencilDescriptor new];
         dd.depthCompareFunction = MTLCompareFunctionLessEqual;
@@ -895,6 +911,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 [enc setVertexBytes:&c length:sizeof(c) atIndex:1];
                 [enc setVertexBytes:&fog length:sizeof(fog) atIndex:2];
                 [enc setFragmentTexture:(d.texture ? d.texture : _white) atIndex:0];
+                [enc setFragmentSamplerState:_meshSamplers[gTextureFiltering.load() % 3] atIndex:0];
                 [enc setFragmentTexture:(env_map ? env_map : _blackCube) atIndex:1];
                 [enc setFragmentBytes:d.envmap length:sizeof(d.envmap) atIndex:3];
                 [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];

@@ -5,6 +5,9 @@
 
 #include "Speed/Indep/Src/Frontend/Database/FEDatabase.hpp"
 #include "Speed/Indep/Src/Frontend/MenuScreens/Common/feUIWidgetMenu.hpp"
+#if defined(EA_PLATFORM_WIN32)
+#include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/options/uiOptionWidgets.hpp"
+#endif
 
 // total size: 0x15C
 class UIOptionsScreen : public UIWidgetMenu {
@@ -26,6 +29,9 @@ class UIOptionsScreen : public UIWidgetMenu {
     void RestoreOriginals();
     bool OptionsDidNotChange();
     void TogglePlayer(bool revert_changes);
+#if defined(EA_PLATFORM_WIN32)
+    void ApplyVideoOptions(); // sub_510300
+#endif
     bool ShouldShowAutoSave();
 
     void SetupDebug();
@@ -47,6 +53,13 @@ class UIOptionsScreen : public UIWidgetMenu {
     VideoSettings *OriginalVideoSettings;       // offset 0x150, size 0x4
     GameplaySettings *OriginalGameplaySettings; // offset 0x154, size 0x4
     PlayerSettings *OriginalPlayerSettings;     // offset 0x158, size 0x4
+#if defined(EA_PLATFORM_WIN32)
+    // PC: the video options being edited (+0x144/+0x148, gPCVideoOptionsEdit
+    // points here), the ones on entry (+0x14C/+0x150) and Basic/Advanced (+0x154).
+    PCVideoOptionsEdit mVideoOptions;
+    PCVideoOptionsEdit mOriginalVideoOptions;
+    bool mAdvancedVideoOptions;
+#endif
 };
 
 #endif

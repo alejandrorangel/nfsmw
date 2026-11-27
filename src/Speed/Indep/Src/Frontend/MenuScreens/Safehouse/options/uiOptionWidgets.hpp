@@ -155,6 +155,7 @@ class AOAudioMode : public FEToggleWidget {
     void Draw() override;
 };
 
+#if !defined(EA_PLATFORM_WIN32)
 // 0x64 made up name
 class VOScreenResolution : public FEToggleWidget {
   public:
@@ -163,6 +164,7 @@ class VOScreenResolution : public FEToggleWidget {
     void Act(const char *parent_pkg, uint32 data) override;
     void Draw() override;
 };
+#endif
 
 // 0x64
 class VOWideScreen : public FEToggleWidget {
@@ -322,5 +324,151 @@ class COConfig : public FEToggleWidget {
     void Act(const char *parent_pkg, uint32 data) override;
     void Draw() override;
 };
+
+#if defined(EA_PLATFORM_WIN32)
+#include "Speed/PC/Src/PCGraphicsOptions.hpp"
+
+// The PC video options screen's working copy (UIOptionsScreen +0x144 and
+// +0x148; the original is at +0x14C/+0x150).
+struct PCVideoOptionsEdit {
+    PCGraphicsOptions *Options; // copy of gPCGraphicsOptions
+    int PerformanceLevel;       // copy of gPCPerformanceLevel
+};
+extern PCVideoOptionsEdit *gPCVideoOptionsEdit; // 0x91CA20
+
+// 0x5C (ctor 0x51A7D0)
+class VOScreenResolution : public FEToggleWidget {
+  public:
+    VOScreenResolution(bool enabled) : FEToggleWidget(enabled) {}
+    ~VOScreenResolution() override {}
+    void Act(const char *parent_pkg, uint32 data) override;
+    void Draw() override;
+};
+
+// 0x5C (ctor 0x51A8F0)
+class DOVSync : public FEToggleWidget {
+  public:
+    DOVSync(bool enabled) : FEToggleWidget(enabled) {}
+    ~DOVSync() override {}
+    void Act(const char *parent_pkg, uint32 data) override;
+    void Draw() override;
+};
+
+// 0x5C (ctor 0x51A850)
+class DOCarLOD : public FEToggleWidget {
+  public:
+    DOCarLOD(bool enabled) : FEToggleWidget(enabled) {}
+    ~DOCarLOD() override {}
+    void Act(const char *parent_pkg, uint32 data) override;
+    void Draw() override;
+};
+
+// 0x5C (ctor 0x51A830)
+class DOCarReflectDetail : public FEToggleWidget {
+  public:
+    DOCarReflectDetail(bool enabled) : FEToggleWidget(enabled) {}
+    ~DOCarReflectDetail() override {}
+    void Act(const char *parent_pkg, uint32 data) override;
+    void Draw() override;
+};
+
+// 0x5C (ctor 0x51A930)
+class DORainEnable : public FEToggleWidget {
+  public:
+    DORainEnable(bool enabled) : FEToggleWidget(enabled) {}
+    ~DORainEnable() override {}
+    void Act(const char *parent_pkg, uint32 data) override;
+    void Draw() override;
+};
+
+// 0x5C (ctor 0x51A8D0)
+class DOOverBright : public FEToggleWidget {
+  public:
+    DOOverBright(bool enabled) : FEToggleWidget(enabled) {}
+    ~DOOverBright() override {}
+    void Act(const char *parent_pkg, uint32 data) override;
+    void Draw() override;
+};
+
+// 0x5C (ctor 0x51A950)
+class DOVisualTreatment : public FEToggleWidget {
+  public:
+    DOVisualTreatment(bool enabled) : FEToggleWidget(enabled) {}
+    ~DOVisualTreatment() override {}
+    void Act(const char *parent_pkg, uint32 data) override;
+    void Draw() override;
+};
+
+// 0x9C (ctor 0x51A7F0)
+class VOLevelOfDetail : public FESliderWidget {
+  public:
+    VOLevelOfDetail(bool enabled) : FESliderWidget(enabled) {}
+    ~VOLevelOfDetail() override {}
+    void Act(const char *parent_pkg, uint32 data) override;
+    void Draw() override;
+    void SetInitialValues() override;
+};
+
+// 0x9C (ctor 0x51A890)
+class DOFullScreenAA : public FESliderWidget {
+  public:
+    DOFullScreenAA(bool enabled) : FESliderWidget(enabled) {}
+    ~DOFullScreenAA() override {}
+    void Act(const char *parent_pkg, uint32 data) override;
+    void Draw() override;
+    void SetInitialValues() override;
+};
+
+// 0x9C (ctor 0x51A8B0)
+class DOTextureFiltering : public FESliderWidget {
+  public:
+    DOTextureFiltering(bool enabled) : FESliderWidget(enabled) {}
+    ~DOTextureFiltering() override {}
+    void Act(const char *parent_pkg, uint32 data) override;
+    void Draw() override;
+    void SetInitialValues() override;
+};
+
+// 0x9C (ctor 0x51A870)
+class DOWorldLOD : public FESliderWidget {
+  public:
+    DOWorldLOD(bool enabled) : FESliderWidget(enabled) {}
+    ~DOWorldLOD() override {}
+    void Act(const char *parent_pkg, uint32 data) override;
+    void Draw() override;
+    void SetInitialValues() override;
+};
+
+// 0x9C (ctor 0x51A910)
+class DORoadReflectDetail : public FESliderWidget {
+  public:
+    DORoadReflectDetail(bool enabled) : FESliderWidget(enabled) {}
+    ~DORoadReflectDetail() override {}
+    void Act(const char *parent_pkg, uint32 data) override;
+    void Draw() override;
+    void SetInitialValues() override;
+};
+
+// 0x9C (ctor 0x51A970)
+class DOShadowDetail : public FESliderWidget {
+  public:
+    DOShadowDetail(bool enabled) : FESliderWidget(enabled) {}
+    ~DOShadowDetail() override {}
+    void Act(const char *parent_pkg, uint32 data) override;
+    void Draw() override;
+    void SetInitialValues() override;
+};
+
+// 0x9C (ctor 0x51A810)
+class DOCarReflectRate : public FESliderWidget {
+  public:
+    DOCarReflectRate(bool enabled) : FESliderWidget(enabled) {}
+    ~DOCarReflectRate() override {}
+    void Act(const char *parent_pkg, uint32 data) override;
+    void Draw() override;
+    void SetInitialValues() override;
+};
+
+#endif
 
 #endif

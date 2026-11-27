@@ -14,6 +14,7 @@
 // Natively the Metal renderer does the passes (MetalRenderer.mm); this file
 // computes what sub_6D4EF0 and sub_6C3B20 hand to the effect.
 
+#include "Speed/PC/Src/PCGraphicsOptions.hpp"
 #include "Speed/Indep/Src/Ecstasy/Ecstasy.hpp"
 #include "Speed/Indep/Src/Ecstasy/Texture.hpp"
 #include "Speed/Indep/Src/World/VisualTreatment.h"
@@ -136,7 +137,9 @@ void PortVisualTreatmentFrame(int frame) {
         TextureInfo *gain = GetTextureInfo(bStringHash("UVESVIGNETTE"), 0, 0);
         std::fprintf(stderr, "[vt]   gain map UVESVIGNETTE %p (%dx%d)\n", (void *)gain, gain ? gain->Width : 0, gain ? gain->Height : 0);
     }
-    if (off) {
+    // sub_6D57C0: the treatment (sub_6D53D0) only with the Visual Treatment
+    // option (0x901828) on.
+    if (off || gPCGraphicsOptions.VisualTreatment == 0) {
         return;
     }
     static PortVisualTreatment params;

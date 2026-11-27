@@ -685,3 +685,159 @@ void COConfig::Draw() {
     FEngSetLanguageHash(GetTitleObject(), 0xBA7306AA);
     FEPrintf(GetDataObject(), "%d", val);
 }
+
+#if defined(EA_PLATFORM_WIN32)
+// The PC video options (UIOptionsScreen::SetupVideo 0x5295F0). They edit the
+// options screen's copy of the PC graphics options; the screen applies it.
+
+PCVideoOptionsEdit *gPCVideoOptionsEdit;
+
+namespace {
+
+const uint32 kLabelOn = 0x16FDEF36;  // "On"
+const uint32 kLabelOff = 0xF6BBD534; // "Off"
+const uint32 kLabelHigh = 0xCE32B239; // "High"
+const uint32 kLabelLow = 0xF6BBC9AB;  // "Low"
+
+PCGraphicsOptions *EditedOptions() {
+    return gPCVideoOptionsEdit->Options;
+}
+
+void FlipOption(int &option, uint32 data) {
+    if (data == __PAD_LEFT__ || data == __PAD_RIGHT__) {
+        option = option == 0;
+    }
+}
+
+} // namespace
+
+// 0x50F970
+void VOScreenResolution::Act(const char *parent_pkg, uint32 data) {
+    int res = EditedOptions()->RacingResolution;
+    int step;
+    if (data == __PAD_LEFT__) {
+        step = -1;
+    } else if (data == __PAD_RIGHT__) {
+        step = 1;
+    } else {
+        step = 0;
+    }
+    if (step != 0) {
+        do {
+            res += step;
+            if (res < 0) {
+                res = PC_NUM_RESOLUTIONS - 1;
+            } else if (res > PC_NUM_RESOLUTIONS - 1) {
+                res = 0;
+            }
+        } while (gPCResolutionAvailable[res] == 0);
+        EditedOptions()->RacingResolution = res;
+    }
+    Update(data);
+    Draw();
+}
+
+// 0x51B7A0
+void VOScreenResolution::Draw() {
+    FEngSetLanguageHash(GetTitleObject(), 0xC96D57C9);
+    uint32 hash = 0;
+    switch (EditedOptions()->RacingResolution) {
+        case 0:
+            hash = 0xDCCBD59E; // 640x480
+            break;
+        case 1:
+            hash = 0x6D6BB416; // 800x600
+            break;
+        case 2:
+            hash = 0xA7470774; // 1024x768
+            break;
+        case 3:
+            hash = 0x4EF21B32; // 1280x960
+            break;
+        case 4:
+            hash = 0x2D31055A; // 1280x1024
+            break;
+        case 5:
+            hash = 0x76667B12; // 1600x1200
+            break;
+    }
+    FEngSetLanguageHash(GetDataObject(), hash);
+}
+
+// 0x51B870: the Level Of Detail preset; a change makes the screen pick the
+// preset's resolution (UIOptionsScreen 0x26DED57).
+void VOLevelOfDetail::Act(const char *parent_pkg, uint32 data) {
+    UpdateSlider(data);
+    int old_level = gPCVideoOptionsEdit->PerformanceLevel;
+    gPCVideoOptionsEdit->PerformanceLevel = static_cast<int>(GetValue());
+    Update(data);
+    if (old_level != gPCVideoOptionsEdit->PerformanceLevel) {
+        cFEng::Get()->QueueGameMessage(0x26DED57, parent_pkg, 0xFF);
+    }
+}
+
+// 0x51B8E0
+void VOLevelOfDetail::Draw() {
+    FEngSetLanguageHash(GetTitleObject(), 0x05A66554);
+    SetValue(static_cast<float>(gPCVideoOptionsEdit->PerformanceLevel));
+    DrawSlider();
+}
+
+// 0x50F9E0
+void VOLevelOfDetail::SetInitialValues() {
+    SetSliderValues(1.0f, 5.0f, 1.0f, static_cast<float>(gPCVideoOptionsEdit->PerformanceLevel));
+}
+
+#define PC_VIDEO_SLIDER(cls, field, title, act_addr, draw_addr, init_addr)                                                     \
+    /* act_addr */                                                                                                            \
+    void cls::Act(const char *parent_pkg, uint32 data) {                                                                      \
+        UpdateSlider(data);                                                                                                   \
+        EditedOptions()->field = static_cast<int>(GetValue());                                                                \
+        Update(data);                                                                                                         \
+        Draw();                                                                                                               \
+    }                                                                                                                         \
+    /* draw_addr */                                                                                                           \
+    void cls::Draw() {                                                                                                        \
+        FEngSetLanguageHash(GetTitleObject(), title);                                                                         \
+        SetValue(static_cast<float>(EditedOptions()->field));                                                                 \
+        DrawSlider();                                                                                                         \
+    }                                                                                                                         \
+    /* init_addr: 0 .. the device's maximum */                                                                                \
+    void cls::SetInitialValues() {                                                                                            \
+        SetSliderValues(0.0f, static_cast<float>(gPCGraphicsOptionsMax.field), 1.0f, static_cast<float>(EditedOptions()->field)); \
+    }
+
+#define PC_VIDEO_TOGGLE(cls, field, title, on, off, act_addr, draw_addr)                                                       \
+    /* act_addr */                                                                                                            \
+    void cls::Act(const char *parent_pkg, uint32 data) {                                                                      \
+        FlipOption(EditedOptions()->field, data);                                                                             \
+        Update(data);                                                                                                         \
+        Draw();                                                                                                               \
+    }                                                                                                                         \
+    /* draw_addr */                                                                                                           \
+    void cls::Draw() {                                                                                                        \
+        FEngSetLanguageHash(GetTitleObject(), title);                                                                         \
+        FEngSetLanguageHash(GetDataObject(), EditedOptions()->field != 0 ? on : off);                                         \
+    }
+
+// "Full Screen Anti-Aliasing", "Texture Filtering", "World Level Of Detail",
+// "Road Reflection Detail", "Shadow Detail", "Car Reflection Update Rate".
+PC_VIDEO_SLIDER(DOFullScreenAA, FSAALevel, 0xE7A04885, 0x50FA10, 0x51B940, 0x50FA50)
+PC_VIDEO_SLIDER(DOTextureFiltering, TextureFiltering, 0xFD068897, 0x50FA80, 0x51B9A0, 0x50FAC0)
+PC_VIDEO_SLIDER(DOWorldLOD, WorldLodLevel, 0xA271A8E9, 0x50FDB0, 0x51BE20, 0x50FDF0)
+PC_VIDEO_SLIDER(DORoadReflectDetail, RoadReflectionEnable, 0x9032DF3F, 0x50FF60, 0x51C0C0, 0x50FFA0)
+PC_VIDEO_SLIDER(DOShadowDetail, ShadowDetail, 0x1052ED5B, 0x50FFD0, 0x51C120, 0x510010)
+PC_VIDEO_SLIDER(DOCarReflectRate, CarEnvironmentMapEnable, 0xF2E2D84A, 0x50FB40, 0x51BA90, 0x50FB80)
+
+// "Vsync", "Car Geometry Detail", "Car Reflection Detail", "Rain Effect",
+// "Over Bright", "Visual Treatment".
+PC_VIDEO_TOGGLE(DOVSync, VSyncOn, 0x6CEB9CB6, kLabelOn, kLabelOff, 0x50FCF0, 0x51BD30)
+PC_VIDEO_TOGGLE(DOCarLOD, CarLodLevel, 0x5F560D76, kLabelHigh, kLabelLow, 0x50FBB0, 0x51BAF0)
+PC_VIDEO_TOGGLE(DOCarReflectDetail, CarEnvironmentMapUpdateData, 0xBDE7DACF, kLabelHigh, kLabelLow, 0x50FAF0, 0x51BA00)
+PC_VIDEO_TOGGLE(DORainEnable, RainEnable, 0xD41A8B13, kLabelOn, kLabelOff, 0x50FE70, 0x51BF10)
+PC_VIDEO_TOGGLE(DOOverBright, OverBrightEnable, 0x70A7555E, kLabelOn, kLabelOff, 0x50FCA0, 0x51BCA0)
+PC_VIDEO_TOGGLE(DOVisualTreatment, VisualTreatment, 0x1DE776AA, kLabelHigh, kLabelLow, 0x50FF10, 0x51C030)
+
+#undef PC_VIDEO_SLIDER
+#undef PC_VIDEO_TOGGLE
+#endif

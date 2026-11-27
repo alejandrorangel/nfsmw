@@ -1524,7 +1524,13 @@ void FESoundControl(bool bOn, const char *name) {
     }
 
     unsigned int key = Attrib::StringHash32(name);
-    Attrib::StringKey FengList[37] = {
+#if defined(EA_PLATFORM_WIN32)
+    // PC 0x4C2340: two more in-game packages, handled like the pause menu.
+    const int kNumFengs = 39;
+#else
+    const int kNumFengs = 37;
+#endif
+    Attrib::StringKey FengList[kNumFengs] = {
         "Pause_Main.fng",        "Pause_Options.fng",     "Pause_Controller.fng",    "InGamePhotoMaster.fng",
         "EA_Trax.fng",           "FadeScreen.fng",        "SMS_Message.fng",         "BUSTED_OVERLAY.fng",
         "SixDaysLater.fng",      "InGame_MC_Main_GC.fng", "InGameAnyMovie.fng",      "Pause_Performance_Tuning.fng",
@@ -1535,11 +1541,14 @@ void FESoundControl(bool bOn, const char *name) {
         "WS_LS_PSA.fng",         "WS_LS_IntroFMV.fng",    "WS_MW_LS_AttractFMV.fng", "PostRace_MilestoneRewards.fng",
         "PostRace_Pursuit.fng",  "Game_StartRace",        "InGameMilestones.fng",    "InGameBounty.fng",
         "InGameRaceSheet.fng",
+#if defined(EA_PLATFORM_WIN32)
+        "Pause_PC_Controller.fng", "Pause_PCDisplayOptions.fng",
+#endif
     };
 
     int namehash = static_cast<int>(bStringHash(name));
     int index = -1;
-    for (int n = 0; n < 37; n++) {
+    for (int n = 0; n < kNumFengs; n++) {
         if (key == FengList[n].GetHash32()) {
             index = n;
             break;
@@ -1552,6 +1561,10 @@ void FESoundControl(bool bOn, const char *name) {
             case 1:
             case 2:
             case 11:
+#if defined(EA_PLATFORM_WIN32)
+            case 37:
+            case 38:
+#endif
 #ifndef EA_BUILD_A124
                 g_pEAXSound->m_bPause_MainFNG = bOn;
 #endif

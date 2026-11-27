@@ -159,7 +159,7 @@ void PortInputInstallKeyboardMonitor() {
 }
 
 // Scripted key presses for automated runs, each held for 0.2 s (or /<hold> s):
-//   NFSMW_AUTO_KEYS=<seconds>:<key>[/<hold>][,...]  keys: enter esc space up down left right
+//   NFSMW_AUTO_KEYS=<seconds>:<key>[/<hold>][,...]  keys: enter esc space up down left right 0..9
 //   NFSMW_AUTO_ENTER=<seconds>[,...]       shorthand for enter presses
 struct AutoKey {
     double time;
@@ -176,6 +176,9 @@ static int AutoKeyCode(const char *name) {
         if (strncmp(name, n.name, strlen(n.name)) == 0) {
             return n.key;
         }
+    }
+    if (name[0] >= '0' && name[0] <= '9') {
+        return PORT_KEY_0 + (name[0] - '0');
     }
     return -1;
 }

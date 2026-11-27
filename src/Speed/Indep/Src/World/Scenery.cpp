@@ -1,3 +1,6 @@
+#if defined(EA_PLATFORM_WIN32)
+#include "Speed/PC/Src/PCGraphicsOptions.hpp"
+#endif
 #include "Scenery.hpp"
 #include "Speed/Indep/Libs/Support/Utility/UStandard.h"
 #include "Speed/Indep/Src/Misc/Timer.hpp"
@@ -1174,6 +1177,12 @@ void GrandSceneryCullInfo::StuffScenery(eView *view, int stuff_flags) {
         exclusive_flags = 0x1000000;
     }
 
+#if defined(EA_PLATFORM_WIN32)
+    // PC: World Level Of Detail below its maximum (eDisplayFrame 0x6E7305 sets
+    // 0x982B34, ___eDisplayFrame 0x6DE324 makes it 0x982B9C = 0x800) drops
+    // the high-detail scenery and keeps the low-detail stand-ins (0x724086).
+    const bool low_world_detail = gPCGraphicsOptions.WorldLodLevel < 3;
+#endif
     for (int n = 0; n < this->NumCullInfos; n++) {
         SceneryCullInfo *scenery_cull_info = &this->SceneryCullInfos[n];
         if (scenery_cull_info->pView != view) {
@@ -1181,6 +1190,17 @@ void GrandSceneryCullInfo::StuffScenery(eView *view, int stuff_flags) {
         }
 
         for (SceneryDrawInfo *info = scenery_cull_info->pFirstDrawInfo; info < scenery_cull_info->pCurrentDrawInfo; info++) {
+#if defined(EA_PLATFORM_WIN32)
+            {
+                unsigned int instance_flags = info->SceneryInst->ExcludeFlags;
+                if ((instance_flags & 0x80000) != 0 && low_world_detail) {
+                    continue;
+                }
+                if ((instance_flags & 0x40000) != 0 && !low_world_detail && (instance_flags & 0x100) == 0) {
+                    continue;
+                }
+            }
+#endif
             // They store data in the lower bits of the pointer
             // *free real estate*
             eVisibleState vis_state = static_cast<eVisibleState>(reinterpret_cast<uintptr_t>(info->pModel) & 3);

@@ -5,6 +5,7 @@
 // It checks solid loading, textures and the Metal 3D path before the car
 // viewer (which places the real frontend car) is ported.
 
+#include "Speed/PC/Src/PCGraphicsOptions.hpp"
 #include "Speed/Indep/Src/Ecstasy/Ecstasy.hpp"
 #include "Speed/Indep/Src/Ecstasy/EcstasyData.hpp"
 #include "Speed/Indep/Src/Ecstasy/Texture.hpp"
@@ -369,7 +370,7 @@ void SetWorldFog(V3 sun, PortWorldFog &f) {
 // scale 0x9018C4 = 1) and AmbientColour = (min(ambient.rgb, 1), 4)
 // (0x6C6450; w = TimeOfDay +0x3C, always 4).
 void SetTimeOfDayLighting(V3 sun, float cloud, PortWorldFog &f) {
-    const bool visual_treatment = true; // the port always applies it
+    const bool visual_treatment = gPCGraphicsOptions.VisualTreatment != 0; // sub_6C0A20
     unsigned int low_a = visual_treatment ? 0xb902cfad : 0x0e1c797c, low_b = visual_treatment ? 0xd835d0c8 : 0x919b6689;
     unsigned int high_a = visual_treatment ? 0x3dcfa673 : 0xa01a3942, high_b = visual_treatment ? 0x59c373c3 : 0x94abdff0;
     Attrib::Gen::timeofdaylighting la(low_a, 0, nullptr), lb(low_b, 0, nullptr), ha(high_a, 0, nullptr), hb(high_b, 0, nullptr);
@@ -826,8 +827,9 @@ bool RenderWorldScene(int frame) {
 
     gWorldCullInfo.NumCullInfos = 0;
     SetupCullInfo(view, &gWorldCullInfo.SceneryCullInfos[gWorldCullInfo.NumCullInfos++], 0x6000);
-    // The env-map views (sub_6BFDD0 culls each active one with 0x1100 at
-    // shadow detail 0x901830 < 2; the high preset has 1).
+    // The env-map views: sub_6BFDD0 culls each active one with 0x1100 at
+    // Shadow Detail (0x901830) < 2, else 0x1000.
+    const int shadow_detail = gPCGraphicsOptions.ShadowDetail;
     eEnvMap *envmap = PortEnvMapQuality() != 0 ? eGetEnvMap() : nullptr;
     if (envmap) {
         UpdateEnvironmentMapCameras(); // eDisplayFrame 0x6E736A
@@ -837,7 +839,7 @@ bool RenderWorldScene(int frame) {
             M44 face_proj;
             if (face && face->IsActive() && SquareViewProjectionFor(face, face_proj)) {
                 SetViewClip(face, face_proj);
-                SetupCullInfo(face, &gWorldCullInfo.SceneryCullInfos[gWorldCullInfo.NumCullInfos++], 0x1100);
+                SetupCullInfo(face, &gWorldCullInfo.SceneryCullInfos[gWorldCullInfo.NumCullInfos++], shadow_detail < 2 ? 0x1100 : 0x1000);
             }
         }
     }
@@ -846,9 +848,11 @@ bool RenderWorldScene(int frame) {
     gSceneCalls = gSceneNoSolid = 0;
     int envmap_draws = 0;
     if (envmap) {
-        // ___eDisplayFrame 0x6DE675: each active face gets the scenery with
-        // stuff flags 0 (0x9017BC, the high preset's 2; the sky layer and
+        // ___eDisplayFrame 0x6DE675: each active face gets the sky and the
+        // scenery (0x6DE7A4): stuff flags 0 with Car Reflection Detail
+        // (0x9017BC) on, else 0x1000 at Shadow Detail < 2, else none (the
         // light flares the PC also draws here are not ported yet).
+        const int reflection_detail = gPCGraphicsOptions.CarEnvironmentMapUpdateData;
         for (int i = 0; i < 6; i++) {
             eView *face = envmap->Views[i];
             M44 face_proj;
@@ -858,7 +862,11 @@ bool RenderWorldScene(int frame) {
                 PortMetal3DBeginEnvFace(i, face_proj, face_eye);
                 // 0x6DE741: StuffSkyLayer(face, SKY_LAYER_LOWREZ, ...).
                 StuffSkyLayer(face, SKY_LAYER_LOWREZ);
-                gWorldCullInfo.StuffScenery(face, 0);
+                if (reflection_detail != 0) {
+                    gWorldCullInfo.StuffScenery(face, 0);
+                } else if (shadow_detail < 2) {
+                    gWorldCullInfo.StuffScenery(face, 0x1000);
+                }
                 PortMetal3DEndEnvFace();
             }
         }

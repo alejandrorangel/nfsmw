@@ -150,3 +150,11 @@ void PortMetalReleaseBuffer(void *buffer);
 // Maps a point in the view (0..1 from the top-left) to the frontend's 640x480
 // virtual screen, using the aspect mode of the last frame drawn.
 void PortMetalViewToFEScreen(float u, float v, float *x, float *y);
+
+// The PC display mode (graphics options): the window's content size in points
+// (0 x 0 keeps the window as it is) and vsync. Any thread.
+void PortSetDisplayMode(int width, int height, bool vsync);
+// Whether a width x height window fits the main screen.
+int PortDisplayModeFits(int width, int height);
+// PC texture filtering for the 3D meshes: 0 bilinear, 1 trilinear, 2 anisotropic.
+void PortSetTextureFiltering(int level);

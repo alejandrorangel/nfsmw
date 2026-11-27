@@ -4,6 +4,7 @@
 #import <MetalKit/MetalKit.h>
 
 #import "MetalRenderer.h"
+#include "MetalBridge.h"
 
 #include <pthread.h>
 #include <unistd.h>
@@ -78,6 +79,31 @@ static void StartGameThread() {
     pthread_attr_destroy(&attr);
 }
 
+// The game window and the main screen's usable size (points), for the PC
+// display mode (graphics options; GraphicsOptionsNative.cpp).
+static NSWindow *gWindow;
+static MTKView *gView;
+static NSSize gScreenSize;
+
+int PortDisplayModeFits(int width, int height) {
+    return width <= gScreenSize.width && height <= gScreenSize.height;
+}
+
+void PortSetDisplayMode(int width, int height, bool vsync) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      if (gView) {
+          ((CAMetalLayer *)gView.layer).displaySyncEnabled = vsync;
+      }
+      if (gWindow && width > 0 && height > 0 && (gWindow.styleMask & NSWindowStyleMaskFullScreen) == 0) {
+          NSSize size = NSMakeSize(width, height);
+          if (!NSEqualSizes(gWindow.contentView.frame.size, size)) {
+              [gWindow setContentSize:size];
+              [gWindow center];
+          }
+      }
+    });
+}
+
 @interface AppDelegate : NSObject <NSApplicationDelegate>
 @end
 
@@ -107,6 +133,9 @@ static void StartGameThread() {
     view.delegate = _renderer;
 
     _window.contentView = view;
+    gWindow = _window;
+    gView = view;
+    gScreenSize = NSScreen.mainScreen ? NSScreen.mainScreen.visibleFrame.size : NSMakeSize(1280, 800);
     [_window center];
     [_window makeKeyAndOrderFront:nil];
     NSLog(@"NFSMW: Metal device %@", device.name);

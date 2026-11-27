@@ -426,6 +426,9 @@ static ScreenFactoryDatum ScreenFactoryData[] = {
     {"FadeScreen.fng", CreateFadeScreen},
     {"WorldMapMain.fng", CreateWorldMap},
     {"Pause_Options.fng", CreateOptionsScreen},
+#if defined(EA_PLATFORM_WIN32)
+    {"Pause_PCDisplayOptions.fng", CreateOptionsScreen},
+#endif
     {"HUD_SingleRace.fng", nullptr},
     {"HUD_Drag.fng", nullptr},
     {"InGameAnyMovie.fng", InGameAnyMovieScreen::Create},
@@ -525,10 +528,14 @@ static ScreenFactoryDatum ScreenFactoryData[] = {
     {"Loading_Tips.fng", CreateLoadingTipsScreen},
     {"loading_boot.fng", nullptr},
     {"LS_LangSelect.fng", CreateLanguageSelectScreen},
+#if !defined(EA_PLATFORM_WIN32)
+    // The PC table (0x8F4320) has no screens for these; it loads them as
+    // plain packages (LoadingScreen's ctor 0x58EF50 has no callers).
     {"Loading.fng", CreateLoadingScreen},
     {"WS_Loading.fng", CreateLoadingScreen},
     {"Loading_Controller.fng", CreateLoadingControllerScreen},
     {"WS_Loading_Controller.fng", CreateLoadingControllerScreen},
+#endif
     {"UI_OptionsController.fng", CreateOptionsControllerScreen},
     {"Pause_Controller.fng", CreateOptionsControllerScreen},
     {"PostRace_Results.fng", CreatePostRaceResultsScreen},

@@ -74,8 +74,19 @@ void UIOptionsMain::NotificationMessage(u32 msg, FEObject *pobj, u32 param1, u32
             }
             if (PrevButtonMessage == __BUTTON_PRESSED__) {
                 switch (FEDatabase->GetOptionsSettings()->CurrentCategory) {
+#if defined(EA_PLATFORM_WIN32)
+                    case OC_VIDEO: // PC 0x545642: the PC display options screens
+                        if (mCalledFromPauseMenu && !FEDatabase->IsOnlineMode() && !FEDatabase->IsLANMode()) {
+                            cFEng::Get()->QueuePackageSwitch("Pause_PCDisplayOptions.fng", 1, 0, false);
+                        } else {
+                            cFEng::Get()->QueuePackageSwitch("OptionsPCDisplay.fng", 0, 0, false);
+                        }
+                        break;
+#endif
                     case OC_AUDIO:
+#if !defined(EA_PLATFORM_WIN32)
                     case OC_VIDEO:
+#endif
                     case OC_GAMEPLAY:
                     case OC_PLAYER:
                     case OC_ONLINE:
