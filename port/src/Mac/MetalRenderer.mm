@@ -300,7 +300,7 @@ void PortMetal3DAddParticles(void *texture, uint32_t flags, const float world[16
             g3DBuilding.particle_verts.push_back(quads[q * 4 + k]);
         }
     }
-    g3DBuilding.particles.push_back(p);
+    g3DBuilding.particles.push_back(std::move(p));
 }
 
 void PortMetal3DSetRainDrops(void *displace, const PortRainDrop *drops, int count) {
@@ -526,7 +526,7 @@ void PortMetal3DAdd(const Port3DDraw *draw) {
         memcpy(d.lights, draw->lights, sizeof(d.lights));
         memcpy(d.envmap, draw->envmap, sizeof(d.envmap));
         d.shadow_level = draw->shadow_level;
-        g3DTarget->push_back(d);
+        g3DTarget->push_back(std::move(d));
     }
 }
 
