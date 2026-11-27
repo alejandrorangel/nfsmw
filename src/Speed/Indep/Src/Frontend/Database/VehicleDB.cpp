@@ -30,7 +30,11 @@
 
 #include <string.h>
 
+#if defined(EA_PORT_NATIVE)
+int g_MaximumMaximumTimesBusted = 5; // PC: 0x8F4314 (was a zero-filled link stub)
+#else
 extern int g_MaximumMaximumTimesBusted;
+#endif
 extern float g_fImpoundPercentageOfOriginalCost;
 extern TextureInfo *GetTextureInfo(unsigned int hash, int, int);
 extern bool DoesStringExist(unsigned int hash);

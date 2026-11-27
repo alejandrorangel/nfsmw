@@ -34,6 +34,17 @@ extern bool MinimapShowNonPursuitCops;
 extern bool MinimapShowPursuitCops;
 extern RaceParameters TheRaceParameters;
 
+#if defined(EA_PORT_NATIVE)
+// Values from speed.exe 1.3 (the link stubs zero-filled them, which hid the
+// pursuit cop icons and divided the speed zoom by zero).
+float MinimapPivotX = 0.0f;           // PC: 0x91CF04 (bss)
+float MinimapPivotY = 0.0f;           // PC: 0x91CF08 (bss)
+float MinimapDispX = 0.0f;            // PC: 0x91CF0C (bss)
+float MinimapMaxSpeed = 100.0f;       // PC: 0x8F3AB0
+bool MinimapShowNonPursuitCops = false; // PC: 0x91CF00 (bss)
+bool MinimapShowPursuitCops = true;   // PC: 0x8F3AAC
+#endif
+
 Minimap::GameplayIconInfo Minimap::kGameplayIconInfo[GIcon::kType_Count]; // size: 0x0, address: 0x8041BCA0, Decl: 69
 
 void GetVehicleVectors(bVector2 *pos, bVector2 *dir, ISimable *isimable) {
