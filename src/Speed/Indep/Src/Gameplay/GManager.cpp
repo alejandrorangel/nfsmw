@@ -893,6 +893,47 @@ void GManager::ResetTimers() {
     }
 }
 
+// PC: 0x5E4A40. (Re)starts the named timer, else takes a stopped one.
+bool GManager::SetTimer(const char *name, float interval) {
+    const uint32 hash = bStringHash(name);
+    for (unsigned int i = 0; i < 8; i++) {
+        if (mTimers[i].mNameHash == hash) {
+            mTimers[i].mInterval = interval;
+            mTimers[i].mElapsed = 0.0f;
+            mTimers[i].mRunning = true;
+            return true;
+        }
+    }
+    for (unsigned int i = 0; i < 8; i++) {
+        if (!mTimers[i].mRunning) {
+            bSafeStrCpy(mTimers[i].mName, name, 0x13);
+            mTimers[i].mNameHash = bStringHash(mTimers[i].mName);
+            mTimers[i].mInterval = interval;
+            mTimers[i].mElapsed = 0.0f;
+            mTimers[i].mRunning = true;
+            return true;
+        }
+    }
+    return false;
+}
+
+// PC: 0x5E4AD0
+void GManager::KillTimer(const char *name) {
+    const uint32 hash = bStringHash(name);
+    for (unsigned int i = 0; i < 8; i++) {
+        if (mTimers[i].mNameHash == hash) {
+            mTimers[i].mRunning = false;
+            mTimers[i].mElapsed = 0.0f;
+            return;
+        }
+    }
+}
+
+// PC: 0x5DDA40
+unsigned int GManager::GetNumMilestones() {
+    return mNumMilestones;
+}
+
 // PC: 0x5E4C40
 unsigned int GManager::SaveTimerInfo(SavedTimerInfo *saveInfo) {
     for (unsigned int i = 0; i < 8; i++) {
