@@ -72,6 +72,7 @@ int ETerminateMusic_MakeEvent_LuaBinding(lua_State *luaState);
 int EEnterBin_MakeEvent_LuaBinding(lua_State *luaState);
 int EAddSMS_MakeEvent_LuaBinding(lua_State *luaState);
 int ECellCall_MakeEvent_LuaBinding(lua_State *luaState);
+int EWorldMapOn_MakeEvent_LuaBinding(lua_State *luaState);
 
 namespace {
 
@@ -87,6 +88,7 @@ const LuaBindingEntry kLuaBindings[] = {
     {"EEnterBin", EEnterBin_MakeEvent_LuaBinding},
     {"EAddSMS", EAddSMS_MakeEvent_LuaBinding},
     {"ECellCall", ECellCall_MakeEvent_LuaBinding},
+    {"EWorldMapOn", EWorldMapOn_MakeEvent_LuaBinding},
 };
 
 } // namespace

@@ -307,6 +307,7 @@ void SetHumanAI(bool on) {
 // Free roam: the SMS inbox and messages (GManager::UpdatePendingSMS opens
 // them when a text arrives) close with escape a second after they open.
 bool gEventEscape = false;
+int gEventKey = -1; // a PortKey to hold this frame
 int gControlFrame = 0;
 
 void FreeRoamScreens() {
@@ -525,6 +526,13 @@ void MilestoneUpdate() {
                 std::fprintf(stderr, "[benchmark] no free roam after the safehouse\n");
                 Finish();
             }
+        }
+        // Back in free roam: the world map (M, the HUD's d-pad left) and the
+        // rap sheet (B, d-pad down), each closed with escape.
+        if (back_frame >= 0) {
+            const int since_back = gBenchFrame - back_frame;
+            gEventKey = since_back >= 60 && since_back < 66 ? PORT_KEY_A + ('M' - 'A') : since_back >= 300 && since_back < 306 ? PORT_KEY_A + ('B' - 'A') : -1;
+            gEventEscape = (since_back >= 200 && since_back < 206) || (since_back >= 440 && since_back < 446);
         }
         if (back_frame >= 0 && gBenchFrame - back_frame == 600) {
             LogMilestones("back in free roam");
@@ -752,6 +760,9 @@ bool PortBenchmarkInput(PortInputState *state) {
     }
     if (gEventEscape) {
         state->keys[PORT_KEY_ESCAPE] = 1.0f;
+    }
+    if (gEventKey >= 0 && gEventKey < PORT_KEY_COUNT) {
+        state->keys[gEventKey] = 1.0f;
     }
     return true;
 }

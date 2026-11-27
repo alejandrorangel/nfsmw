@@ -77,6 +77,14 @@
 #include "Speed/Indep/Src/Generated/Events/ECellCall.cpp"
 
 #include "Speed/Indep/Src/Generated/Events/EReportMilestoneAtStake.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/ERaceSheetOn.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/ERaceSheetOff.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EWorldMapOn.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EWorldMapOff.cpp"
 #endif
 
 #include "Speed/Indep/Src/Input/Common/action.cpp"
