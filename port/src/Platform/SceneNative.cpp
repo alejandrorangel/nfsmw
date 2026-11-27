@@ -89,6 +89,30 @@ void *MetalTextureOf(TextureInfo *t) {
     return t->GetPlatInfo()->MetalTexture;
 }
 
+// Car effect constants from a light material (see Port3DDraw::material).
+void MaterialConstants(const eLightMaterial *light_material, float out[20]) {
+    if (light_material == nullptr) {
+        const float defaults[20] = {1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 8};
+        std::memcpy(out, defaults, sizeof(defaults));
+        return;
+    }
+    const eLightMaterialData &d = light_material->feData;
+    float dmin[4] = {d.DiffuseMinScale * d.DiffuseMinR, d.DiffuseMinScale * d.DiffuseMinG, d.DiffuseMinScale * d.DiffuseMinB, d.DiffuseMinA};
+    float dmax[4] = {d.DiffuseMaxScale * d.DiffuseMaxR, d.DiffuseMaxScale * d.DiffuseMaxG, d.DiffuseMaxScale * d.DiffuseMaxB, d.DiffuseMaxA};
+    float smin[4] = {d.SpecularMinScale * d.SpecularMinR, d.SpecularMinScale * d.SpecularMinG, d.SpecularMinScale * d.SpecularMinB, 0};
+    float smax[4] = {d.SpecularMaxScale * d.SpecularMaxR, d.SpecularMaxScale * d.SpecularMaxG, d.SpecularMaxScale * d.SpecularMaxB, 0};
+    for (int i = 0; i < 4; i++) {
+        out[i] = dmin[i];
+        out[4 + i] = dmax[i] - dmin[i];
+        out[8 + i] = smin[i];
+        out[12 + i] = smax[i] - smin[i];
+    }
+    out[16] = d.EnvmapMinScale;
+    out[17] = d.EnvmapMaxScale - d.EnvmapMinScale;
+    out[18] = d.EnvmapPower;
+    out[19] = d.SpecularPower;
+}
+
 void DrawSolid(eSolid *solid, const M44 world) {
     eSolidPlatInfo *info = solid->GetPlatInfo();
     if (info == nullptr) {
@@ -104,6 +128,12 @@ void DrawSolid(eSolid *solid, const M44 world) {
         d.texture = MetalTextureOf(texture);
         d.first_index = group.FirstIndex;
         d.effect = group.Effect;
+        int light_index = group.TextureSlots[5];
+        const eLightMaterial *light_material = nullptr;
+        if (light_index < solid->NumLightMaterials && solid->LightMaterialTable) {
+            light_material = solid->LightMaterialTable[light_index].LightMaterial;
+        }
+        MaterialConstants(light_material, d.material);
         d.num_indices = group.NumIndices;
         if (texture && texture->AlphaBlendType == TEXBLEND_ADDATIVE) {
             d.flags = PORT_3D_ADDITIVE;
@@ -321,6 +351,11 @@ bool RenderFrontEndScene() {
     }
     PortMetal3DBeginFrame(view_proj);
     SetViewClip(view, view_proj);
+    {
+        bVector3 *eye = view->GetCamera()->GetPosition();
+        float e[3] = {eye->x, eye->y, eye->z};
+        PortMetal3DSetEye(e);
+    }
     gSceneLog = log;
     std::memcpy(gSceneViewProj, view_proj, sizeof(M44));
     if (log) {
@@ -352,6 +387,19 @@ bool RenderFrontEndScene() {
             materials++;
         }
         std::fprintf(stderr, "[scene] %d light materials\n", materials);
+        static bool dumped;
+        if (!dumped) {
+            dumped = true;
+            int n = 0;
+            for (eLightMaterial *m = LightMaterialList.GetHead(); m != LightMaterialList.EndOfList() && n < 12; m = m->GetNext(), n++) {
+                const eLightMaterialData &d = m->feData;
+                std::fprintf(stderr,
+                             "[mat] %-24.28s diff %.2f*(%.2f %.2f %.2f)..%.2f*(%.2f %.2f %.2f) a %.2f..%.2f spec %.2f*(%.2f %.2f %.2f)..%.2f pow %.1f env %.2f..%.2f pow %.2f metal %.2f\n",
+                             m->Name, d.DiffuseMinScale, d.DiffuseMinR, d.DiffuseMinG, d.DiffuseMinB, d.DiffuseMaxScale, d.DiffuseMaxR, d.DiffuseMaxG,
+                             d.DiffuseMaxB, d.DiffuseMinA, d.DiffuseMaxA, d.SpecularMinScale, d.SpecularMinR, d.SpecularMinG, d.SpecularMinB,
+                             d.SpecularMaxScale, d.SpecularPower, d.EnvmapMinScale, d.EnvmapMaxScale, d.EnvmapPower, d.MetallicScale);
+            }
+        }
         GarageCarLoader *loader = GetGarageCarLoader();
         std::fprintf(stderr, "[scene] garage loader: loading %d current %d switched %d\n", loader->IsThereALoadingRideInfo(),
                      loader->IsThereACurrentRideInfo(), loader->HasSwitched());

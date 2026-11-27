@@ -55,10 +55,15 @@ struct Port3DDraw {
     uint32_t flags;  // PORT_3D_*
     uint32_t effect; // PC effect index (eSolidPlatNative.hpp PORT_EFFECT_*)
     float world[16];
+    // Light material (car effect constants): DiffuseMin, DiffuseRange,
+    // SpecularMin, SpecularRange (rgba each), then EnvmapMin, EnvmapRange,
+    // EnvmapPower, SpecularPower.
+    float material[20];
 };
 enum { PORT_3D_ALPHA_BLEND = 1, PORT_3D_ADDITIVE = 2, PORT_3D_ALPHA_TEST = 4 };
 
 void PortMetal3DBeginFrame(const float view_proj[16]);
+void PortMetal3DSetEye(const float eye[3]); // world-space camera position
 float PortMetalViewAspect(); // drawable width / height
 void PortMetal3DSetOverlay(bool on_top); // debug: draw this frame's 3D over the frontend
 void PortMetal3DAdd(const Port3DDraw *draw);
