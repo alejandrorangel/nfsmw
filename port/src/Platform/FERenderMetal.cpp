@@ -10,12 +10,14 @@
 #include "Speed/Indep/Src/Ecstasy/EcstasyData.hpp"
 #include "Speed/Indep/Src/Ecstasy/Texture.hpp"
 #include "Speed/Indep/Src/Frontend/FEManager.hpp"
+#include "Speed/Indep/Src/Misc/GameFlow.hpp"
 
 #include "../Mac/MetalBridge.h"
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <time.h>
 #include <unistd.h>
 
 namespace {
@@ -87,11 +89,37 @@ static int RenderFrontend() {
 
 // The PC eDisplayFrame (0x6E7220) renders the world views, then the frontend.
 // Only the frontend exists natively so far.
+void PortTraceGameFlow(int frame) {
+    const GameFlowManager &g = TheGameFlowManager;
+    std::fprintf(stderr, "[flow] frame %d state=%d single=%s looping=%s waiting=%d(%s)\n", frame, g.CurrentGameFlowState,
+                 g.pSingleFunctionName ? g.pSingleFunctionName : "-", g.pLoopingFunctionName ? g.pLoopingFunctionName : "-",
+                 g.WaitingForCallback, g.pCallbackName ? g.pCallbackName : "-");
+}
+
+// The original presented with vsync, which paced the game loop; pace frames
+// to the display rate (60 Hz) here so the loop doesn't spin.
+static void PaceFrame() {
+    static uint64_t next_ns;
+    const uint64_t period_ns = 1000000000ull / 60;
+    uint64_t now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+    if (next_ns == 0 || now > next_ns + period_ns) {
+        next_ns = now; // first frame, or we fell behind: resync
+    }
+    if (next_ns > now) {
+        usleep(static_cast<useconds_t>((next_ns - now) / 1000));
+    }
+    next_ns += period_ns;
+}
+
 void eDisplayFrame() {
     int quads = RenderFrontend();
+    PaceFrame();
 
     static int frame = 0;
     frame++;
+    if (std::getenv("NFSMW_TRACE_FLOW") && frame % 60 == 0) {
+        PortTraceGameFlow(frame);
+    }
     if (std::getenv("NFSMW_TRACE_FRAMES")) {
         std::fprintf(stderr, "[frame] %d: %d FE quads\n", frame, quads);
     }

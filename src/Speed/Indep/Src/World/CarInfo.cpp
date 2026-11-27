@@ -1599,8 +1599,26 @@ bTList<PresetCar> PresetCarList;
 
 int LoaderFEPresetCars(bChunk *chunk) {
     if (chunk->GetID() == BCHUNK_FE_CAR_PRESETS) {
+#if defined(EA_PORT_NATIVE)
+        // On disk each record starts with a 32-bit bTNode (8 bytes) and is
+        // 0x290 long (0x28C rounded to the uint64 alignment); copy the records
+        // into a native array. The first disk record's link slots remember the
+        // array for the unloader.
+        const int payload = static_cast<int>(sizeof(PresetCar::PartNameHashes)) + 0x58;
+        const int disk_size = (8 + payload + 7) & ~7;
+        int num_presets = chunk->GetSize() / disk_size;
+        char *disk = chunk->GetData();
+        PresetCar *native = static_cast<PresetCar *>(bMalloc(num_presets * sizeof(PresetCar), "PresetCar (native)", 0, 0));
+        bMemSet(native, 0, num_presets * sizeof(PresetCar));
+        for (int n = 0; n < num_presets; n++) {
+            bMemCpy(native[n].CarTypeName, disk + n * disk_size + 8, payload);
+        }
+        bMemCpy(disk, &native, sizeof(native));
+        PresetCar *preset_car = native;
+#else
         int num_presets = chunk->GetSize() / sizeof(PresetCar);
         PresetCar *preset_car = reinterpret_cast<PresetCar *>(chunk->GetData());
+#endif
 
         while (num_presets-- != 0) {
             for (int i = 0; i < CARSLOTID_NUM; i++) {
@@ -1627,6 +1645,11 @@ int UnloaderFEPresetCars(bChunk *chunk) {
         while (!PresetCarList.IsEmpty()) {
             PresetCarList.RemoveHead();
         }
+#if defined(EA_PORT_NATIVE)
+        PresetCar *native;
+        bMemCpy(&native, chunk->GetData(), sizeof(native));
+        bFree(native);
+#endif
 
         return 1;
     }

@@ -13,7 +13,11 @@
 
 void *LoadingTips::mLoadingTipsScreenPtr;
 bool LoadingTips::mDoneLoading;
+#if defined(EA_PLATFORM_WIN32)
+bool LoadingTips::mDoneShowingLoadingTips = true; // initialised .data in speed.exe 1.3 (0x8F3F38)
+#else
 bool LoadingTips::mDoneShowingLoadingTips;
+#endif
 
 static void LoadingTips_FinishLoadingTexBridge(uint32 p) {
     LoadingTips *ls = static_cast<LoadingTips *>(FEngFindScreen("Loading_Tips.fng"));

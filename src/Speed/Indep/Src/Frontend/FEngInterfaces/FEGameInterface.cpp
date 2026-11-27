@@ -79,7 +79,7 @@ bool cFEngGameInterface::LoadResources(FEPackage *pPackage, i32 Count, FEResourc
             case 4: {
                 void *mem = bMalloc(256, "Movie filename", 0, 0);
                 bStrNCpy(static_cast<char *>(mem), filename, 256);
-                pList[i].Handle = reinterpret_cast<u32>(mem);
+                pList[i].Handle = reinterpret_cast<uintptr_t>(mem);
                 pList[i].UserParam = 0;
                 break;
             }

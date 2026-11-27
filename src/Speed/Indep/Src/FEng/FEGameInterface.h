@@ -23,7 +23,7 @@ typedef struct {
     u32 Type;              // offset 0x8, size 0x4, Decl: 37
     u32 Flags;             // offset 0xC, size 0x4, Decl: 38
 
-    u32 Handle;    // offset 0x10, size 0x4, Decl: 41
+    uintptr_t Handle; // offset 0x10, size 0x4, Decl: 41 (a hash, or a pointer for movie names)
     u32 UserParam; // offset 0x14, size 0x4, Decl: 42
 } FEResourceRequest;
 

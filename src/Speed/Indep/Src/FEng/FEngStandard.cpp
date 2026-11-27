@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <string.h>
 
 #include "Speed/Indep/Src/FEng/FEngStandard.h"
@@ -47,6 +48,16 @@ void *FEngMalloc(unsigned int size) {
 }
 
 void *FEngMalloc(unsigned int size, const char *pFilename, int Line) {
+#if defined(EA_PORT_NATIVE)
+    // Frontend allocations use the system heap natively: the FEng memory pool
+    // gets corrupted by its own bookkeeping on 64-bit (no overflow from FEng
+    // code shows up under libgmalloc), and it's only an optimisation.
+    // NFSMW_FENG_POOL=1 restores the pool to debug that. delete/bFree route by address.
+    static const bool system_heap = getenv("NFSMW_FENG_POOL") == nullptr;
+    if (system_heap) {
+        return malloc(size != 0 ? size : 1);
+    }
+#endif
     int pool_num = 0;
     if (FEngMemoryPoolNumber != -1) {
         if (bLargestMalloc(FEngMemoryPoolNumber) > static_cast<int>(size) + 0x40) {

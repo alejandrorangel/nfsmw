@@ -841,6 +841,11 @@ void MoveFileIntoVirtualMemoryThenLoadChunks(intptr_t param, int err) {
 }
 
 void UnloadFileFromVirtualMemory(VMFile *vm_file) {
+#if defined(EA_PLATFORM_WIN32)
+    if (vm_file == nullptr) {
+        return; // never loaded: PC has no virtual memory files
+    }
+#endif
     UnloadChunks(static_cast<bChunk *>(vm_file->mVirtMemAddr), vm_file->mSizeOfChunks, vm_file->mFilename);
     bFree(vm_file->mVirtMemAddr);
     vm_file->mFilename[0] = '\0';
@@ -854,6 +859,11 @@ void UnloadFileFromVirtualMemory(VMFile *vm_file) {
 }
 
 VMFile *LoadFileIntoVirtualMemory(const char *filename, bool compressed, bool use_trackstreampool_as_temp) {
+#if defined(EA_PLATFORM_WIN32)
+    // GameCube ARAM bundles (*_VM_NGC.*); the PC build has no virtual memory
+    // functions at all and ships none of these files.
+    return nullptr;
+#endif
     VMFile *vm_file = GetVMFile();
     if (vm_file == nullptr) {
         return nullptr;

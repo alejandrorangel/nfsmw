@@ -185,9 +185,16 @@ int bGetFixTickerDifference(unsigned int start_ticks, unsigned int end_ticks) {
 
 void bInitTicker(float min_wraparound_time) {}
 
+#if defined(EA_PORT_NATIVE)
+#include <time.h>
+#endif
+
 unsigned int bGetTicker() {
 #ifdef EA_PLATFORM_GAMECUBE
     return OSGetTick();
+#elif defined(EA_PORT_NATIVE)
+    // Microseconds from the monotonic clock; wraps like the console ticker.
+    return static_cast<unsigned int>(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1000);
 #else
     return 0;
 #endif
@@ -201,6 +208,8 @@ float bGetTickerDifference(unsigned int start_ticks, unsigned int end_ticks) {
     }
 #ifdef EA_PLATFORM_GAMECUBE
     return OSTicksToMicroseconds(start_ticks) * 0.001f;
+#elif defined(EA_PORT_NATIVE)
+    return static_cast<float>(start_ticks) * 0.001f; // ticks are microseconds
 #else
     return 0;
 #endif

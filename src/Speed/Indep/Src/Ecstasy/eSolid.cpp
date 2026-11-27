@@ -195,6 +195,18 @@ ePositionMarker *eSolid::GetPostionMarker(uint32 namehash /* r31 */) {
     return nullptr;
 }
 
+#if defined(EA_PORT_NATIVE)
+// Native copies of the pack header records: on disk the header starts with a
+// 32-bit bTNode and has 32-bit pointer slots, the index entries are 8 bytes and
+// the streaming entries 0x18. The disk header's link slots remember the native
+// header for the unloader.
+static eSolidListHeader *PortNativeSolidListHeader(bChunk *header_chunk) {
+    eSolidListHeader *native;
+    bMemCpy(&native, header_chunk->GetData(), sizeof(native));
+    return native;
+}
+#endif
+
 eSolidListHeader *InternalUnloaderSolidHeaderChunks(bChunk *chunk) {
     if (chunk->GetID() != BCHUNK_MESH_CONTAINER_INFO) {
         return nullptr;
@@ -206,7 +218,11 @@ eSolidListHeader *InternalUnloaderSolidHeaderChunks(bChunk *chunk) {
         uint32 current_chunk_id = current_chunk->GetID();
 
         if (current_chunk_id == BCHUNK_MESH_CONTAINER_HEADER) {
+#if defined(EA_PORT_NATIVE)
+            solid_list_header = PortNativeSolidListHeader(current_chunk);
+#else
             solid_list_header = reinterpret_cast<eSolidListHeader *>(current_chunk->GetData());
+#endif
             solid_list_header->Remove();
             EmptySolidTextureFixupInfo(solid_list_header);
             LoadedSolidStats.NumLoadedLists--;
@@ -221,6 +237,46 @@ eSolidListHeader *InternalUnloaderSolidHeaderChunks(bChunk *chunk) {
     return solid_list_header;
 }
 
+#if defined(EA_PORT_NATIVE)
+eSolidListHeader *InternalLoaderSolidHeaderChunks(bChunk *chunk) {
+    eSolidListHeader *solid_list_header = nullptr;
+    for (bChunk *c = chunk->GetFirstChunk(); c < chunk->GetLastChunk(); c = c->GetNext()) {
+        uint32 id = c->GetID();
+        char *disk = c->GetData();
+        if (id == BCHUNK_MESH_CONTAINER_HEADER) {
+            solid_list_header = static_cast<eSolidListHeader *>(bMalloc(sizeof(eSolidListHeader), "eSolidListHeader (native)", 0, 0));
+            bMemSet(solid_list_header, 0, sizeof(eSolidListHeader));
+            bMemCpy(&solid_list_header->Version, disk + 0x08, 0x6C); // Version .. EndianSwapped
+            bMemCpy(&solid_list_header->NumTexturePacks, disk + 0x7C, 4);
+            bMemCpy(disk, &solid_list_header, sizeof(solid_list_header));
+            SolidListHeaderList.AddTail(solid_list_header);
+            LoadedSolidStats.NumLoadedLists++;
+        } else if (id == BCHUNK_MESH_CONTAINER_KEYS) {
+            int n = solid_list_header->NumSolids;
+            solid_list_header->SolidIndexEntryTable = static_cast<eSolidIndexEntry *>(bMalloc(n * sizeof(eSolidIndexEntry), "eSolidIndexEntry (native)", 0, 0));
+            bMemSet(solid_list_header->SolidIndexEntryTable, 0, n * sizeof(eSolidIndexEntry));
+            for (int i = 0; i < n; i++) {
+                bMemCpy(&solid_list_header->SolidIndexEntryTable[i].NameHash, disk + i * 8, 4);
+            }
+        } else if (id == BCHUNK_MESH_CONTAINER_OFFSETS) {
+            int n = solid_list_header->NumSolids;
+            solid_list_header->SolidStreamEntryTable = static_cast<eStreamingEntry *>(bMalloc(n * sizeof(eStreamingEntry), "eStreamingEntry (native)", 0, 0));
+            bMemSet(solid_list_header->SolidStreamEntryTable, 0, n * sizeof(eStreamingEntry));
+            for (int i = 0; i < n; i++) {
+                bMemCpy(&solid_list_header->SolidStreamEntryTable[i], disk + i * 0x18, 0x14);
+            }
+        } else if (id == BCHUNK_MESH_CONTAINER_EMPTY) {
+            eLoadSolidListPlatChunks(c);
+        }
+    }
+    if (solid_list_header) {
+        solid_list_header->EndianSwapped = 1;
+        solid_list_header->TexturePackList.InitList();
+        solid_list_header->DefaultTextureList.InitList();
+    }
+    return solid_list_header;
+}
+#else
 eSolidListHeader *InternalLoaderSolidHeaderChunks(bChunk *chunk) {
     eSolidListHeader *solid_list_header = nullptr;
     bChunk *current_chunk = chunk->GetFirstChunk();
@@ -261,6 +317,7 @@ eSolidListHeader *InternalLoaderSolidHeaderChunks(bChunk *chunk) {
     solid_list_header->DefaultTextureList.InitList();
     return solid_list_header;
 }
+#endif
 
 eSolid *InternalLoaderSolidChunks(bChunk *chunk /* r14 */, eSolidListHeader *solid_list_header /* r1+0x8 */) {}
 
@@ -386,7 +443,8 @@ eSolidIndexEntry *GetSolidIndexEntry(eSolidListHeader *list_header, uint32 name_
     if (!list_header) {
         return nullptr;
     } else {
-        return reinterpret_cast<eSolidIndexEntry *>(ScanHashTableKey32(name_hash, list_header->SolidIndexEntryTable, list_header->NumSolids, 0, 8));
+        return reinterpret_cast<eSolidIndexEntry *>(
+            ScanHashTableKey32(name_hash, list_header->SolidIndexEntryTable, list_header->NumSolids, 0, sizeof(eSolidIndexEntry)));
     }
 }
 

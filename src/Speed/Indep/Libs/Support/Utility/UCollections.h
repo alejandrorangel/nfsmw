@@ -245,9 +245,21 @@ template <typename T, typename Tag> class Container {
     Elements _mElements;
 };
 
+#if defined(EA_PORT_NATIVE)
+// Generic definitions for every instantiation (see UListable.h).
+template <typename T> T *Singleton<T>::mInstance = nullptr;
+template <typename Handle, typename T, int Size> uintptr_t Instanceable<Handle, T, Size>::_mHNext = 0;
+template <typename Handle, typename T, int Size> typename Instanceable<Handle, T, Size>::_List Instanceable<Handle, T, Size>::_mList;
+template <typename T, int Size> typename GarbageNode<T, Size>::Collector GarbageNode<T, Size>::_mCollector;
+#endif
+
 }; // namespace Collections
 }; // namespace UTL
 
+#if defined(EA_PORT_NATIVE)
+#define IMPLEMENT_INSTANCABLE(HANDLETYPE, TYPE)
+#else
 #define IMPLEMENT_INSTANCABLE(HANDLETYPE,TYPE) template<> UTL::Collections::Instanceable<HANDLETYPE,TYPE,TYPE::InstanceLimit>::_List UTL::Collections::Instanceable<HANDLETYPE,TYPE,TYPE::InstanceLimit>::_mList=UTL::Collections::Instanceable<HANDLETYPE,TYPE,TYPE::InstanceLimit>::_List(); template<> uintptr_t UTL::Collections::Instanceable<HANDLETYPE,TYPE,TYPE::InstanceLimit>::_mHNext=0;
+#endif
 
 #endif

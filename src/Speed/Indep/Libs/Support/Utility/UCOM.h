@@ -188,7 +188,23 @@ template <typename T, typename U, typename V> class Factory {
     // }
 };
 
+#if defined(EA_PORT_NATIVE)
+#define IMPLEMENT_FACTORY(_Factory_)
+
+template <typename T, typename U, typename V> typename Factory<T, U, V>::Prototype *Factory<T, U, V>::Prototype::mHead = nullptr;
+
+// Commented out (TODO) in the decomp; registered prototypes are matched by signature.
+template <typename T, typename U, typename V> U *Factory<T, U, V>::CreateInstance(V sig, T params) {
+    for (const Prototype *f = Prototype::GetHead(); f != nullptr; f = f->GetNext()) {
+        if (f->mSignature == sig) {
+            return f->mConstructor(params);
+        }
+    }
+    return nullptr;
+}
+#else
 #define IMPLEMENT_FACTORY(_Factory_) template <> _Factory_::Prototype *_Factory_::Prototype::mHead = NULL;
+#endif
 
 } // namespace COM
 } // namespace UTL

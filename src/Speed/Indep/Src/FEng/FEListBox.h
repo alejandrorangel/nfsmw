@@ -30,7 +30,7 @@ static const u32 FENG_HASH_SCROLLDOWN = 0xE10814A6;  // size: 0x4, Decl: 58
 // total size: 0xC
 // Decl: 62
 struct ListBoxResource {
-    u32 Handle;        // offset 0x0, size 0x4, Decl: 63
+    uintptr_t Handle;  // offset 0x0, size 0x4, Decl: 63
     u32 UserParam;     // offset 0x4, size 0x4, Decl: 64
     u32 ResourceIndex; // offset 0x8, size 0x4, Decl: 65
 

@@ -7,6 +7,19 @@
 #include "Speed/Indep/Src/EAXSound/EAXSOund.hpp"
 #include "Speed/Indep/Src/Frontend/FECarViewer.hpp"
 
+#if defined(EA_PLATFORM_WIN32)
+// speed.exe 1.3 boot flows (0x8F3C58..0x8F3CD0): PC save-profile screens
+// (MC_*.fng, not the GameCube MC_*_GC.fng) and the disc check.
+const char *sBootFlowNTSC[] = {"MC_Bootup.fng", "LS_EAlogo.fng", "LS_PSA.fng", "MW_LS_AttractFMV.fng",
+                               "MW_LS_Splash.fng", "MC_Main.fng", "MainMenu.fng"};
+const char *sBootFlowPAL[] = {"DiscErrorPC.fng", "MC_Bootup.fng", "LS_EAlogo.fng", "LS_PSA.fng",
+                              "MW_LS_AttractFMV.fng", "MW_LS_Splash.fng", "MC_Main.fng", "MainMenu.fng"};
+const char *sBootFlowWideScreen[] = {"DiscErrorPC.fng", "MC_Bootup.fng", "LS_EAlogo.fng", "LS_PSA.fng",
+                                     "MW_LS_Splash.fng", "MC_Main.fng", "MainMenu.fng"};
+const char *sBootFlowPALWidescreen[] = {"DiscErrorPC.fng", "MC_Bootup.fng", "LS_EAlogo.fng", "LS_PSA.fng",
+                                        "MW_LS_AttractFMV.fng", "MW_LS_Splash.fng", "MC_Main.fng", "MainMenu.fng"};
+#define BOOTFLOW_COUNT(table) static_cast<int>(sizeof(table) / sizeof(table[0]))
+#else
 const char *sBootFlowNTSC[] = {"MC_Bootup_GC.fng", "LS_EAlogo.fng",  "LS_PSA.fng",  "MW_LS_AttractFMV.fng",
                                "MW_LS_Splash.fng", "MC_Main_GC.fng", "MainMenu.fng"};
 const char *sBootFlowPAL[] = {"MC_Bootup_GC.fng", "LS_EAlogo.fng",  "LS_PSA.fng",  "MW_LS_AttractFMV.fng",
@@ -15,6 +28,8 @@ const char *sBootFlowWideScreen[] = {"MC_Bootup_GC.fng", "LS_EAlogo.fng",  "LS_P
                                      "MW_LS_Splash.fng", "MC_Main_GC.fng", "MainMenu.fng"};
 const char *sBootFlowPALWidescreen[] = {"MC_Bootup_GC.fng", "LS_EAlogo.fng",  "LS_PSA.fng",  "MW_LS_AttractFMV.fng",
                                         "MW_LS_Splash.fng", "MC_Main_GC.fng", "MainMenu.fng"};
+#define BOOTFLOW_COUNT(table) 7
+#endif
 
 BootFlowManager *BootFlowManager::mInstance;
 
@@ -40,7 +55,7 @@ BootFlowManager *BootFlowManager::Get() {
 BootFlowManager::BootFlowManager() {
     if (!BuildRegion::IsPal()) {
         if (eIsWidescreen()) {
-            for (int i = 0; i < 7; i++) {
+            for (int i = 0; i < BOOTFLOW_COUNT(sBootFlowWideScreen); i++) {
                 bool add_screen = true;
 
                 if (bStrICmp(sBootFlowWideScreen[i], "WS_LS_EA_hidef.fng") == 0) {
@@ -52,7 +67,7 @@ BootFlowManager::BootFlowManager() {
                 }
             }
         } else {
-            for (int i = 0; i < 7; i++) {
+            for (int i = 0; i < BOOTFLOW_COUNT(sBootFlowNTSC); i++) {
                 if (*sBootFlowNTSC[i] != '\0') {
                     BootFlowScreens.AddTail(new ("BootFlowScreen", 0) BootFlowScreen(sBootFlowNTSC[i]));
                 }
@@ -60,7 +75,7 @@ BootFlowManager::BootFlowManager() {
         }
     } else {
         if (eIsWidescreen()) {
-            for (int i = 0; i < 7; i++) {
+            for (int i = 0; i < BOOTFLOW_COUNT(sBootFlowPALWidescreen); i++) {
                 bool add_screen = true;
 
                 if (bStrICmp(sBootFlowPALWidescreen[i], "LS_LangSelect.fng") == 0 && !BuildRegion::ShowLanguageSelect()) {
@@ -72,7 +87,7 @@ BootFlowManager::BootFlowManager() {
                 }
             }
         } else {
-            for (int i = 0; i < 7; i++) {
+            for (int i = 0; i < BOOTFLOW_COUNT(sBootFlowPAL); i++) {
                 bool add_screen = true;
 
                 if (bStrICmp(sBootFlowPAL[i], "LS_LangSelect.fng") == 0 && !BuildRegion::ShowLanguageSelect()) {

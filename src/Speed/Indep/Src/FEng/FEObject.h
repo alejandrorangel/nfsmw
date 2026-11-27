@@ -95,7 +95,7 @@ class FEObject : public FEMinNode {
 
     u16 RenderContext; // offset 0x20, size 0x2, Decl: 145
     u16 ResourceIndex; // offset 0x22, size 0x2, Decl: 146
-    u32 Handle;        // offset 0x24, size 0x4, Decl: 147
+    uintptr_t Handle;  // offset 0x24, size 0x4, Decl: 147 (a hash, or a pointer for movie names)
     u32 UserParam;     // offset 0x28, size 0x4, Decl: 148
 
     u8 *pData;    // offset 0x2C, size 0x4, Decl: 150

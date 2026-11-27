@@ -135,7 +135,11 @@ void cFEngJoyInput::SetRequiredJoy(JoystickPort port, bool required) {
 bool cFEngJoyInput::CheckUnplugged() {
     bool unplugged = false;
     if (!TheGameFlowManager.IsInGame() && !FEManager::Get()->IsAllowingControllerError()) {
+#if defined(EA_PORT_NATIVE) // PC clears port 0's flag (speed.exe 1.3 @ 0x559280); NONE indexes mActionQ[-1]
+        SetRequiredJoy(static_cast<JoystickPort>(0), false);
+#else
         SetRequiredJoy(JOYSTICK_PORT_NONE, false);
+#endif
     } else {
         bool is_splitscreen = FEDatabase->IsSplitScreenMode();
 

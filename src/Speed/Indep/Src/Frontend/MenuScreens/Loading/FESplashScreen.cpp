@@ -33,6 +33,19 @@ SplashScreen::SplashScreen(ScreenConstructorData *sd)
         FEngSetInvisible(GetPackageName(), FEObj_ESRBicon);
     }
 
+#if defined(EA_PLATFORM_WIN32)
+    // PC (speed.exe 1.3 @ 0x5A3030): PC license text, and the console
+    // "press start" prompt objects stay hidden.
+    const u32 FEObj_LicenseBlurbPC = 0xc6cc55a4;
+    FEngSetVisible(GetPackageName(), FEObj_LicenseBlurbPC);
+    FEngSetInvisible(GetPackageName(), FEObj_startclick);
+    FEngSetInvisible(GetPackageName(), FEObj_mouseclick);
+
+    pObject = FEngFindObject(GetPackageName(), FEObj_mouseclick);
+
+    FEngSetInvisible(GetPackageName(), FEObj_mousebutton);
+    FEngSetLanguageHash(GetPackageName(), FEObj_LicenseBlurbPC, 0x9b580b7e);
+#else
     FEngSetVisible(GetPackageName(), FEObj_LicenseBlurb);
     FEngSetInvisible(GetPackageName(), FEObj_startclick);
     FEngSetInvisible(GetPackageName(), FEObj_mouseclick);
@@ -44,6 +57,7 @@ SplashScreen::SplashScreen(ScreenConstructorData *sd)
 
     FEngSetLanguageHash(GetPackageName(), FEObj_mousebutton, 0x9ba134fc);
     FEngSetLanguageHash(GetPackageName(), FEObj_LicenseBlurb, 0x9b580a55);
+#endif
 
     if (pObject != nullptr) {
         if ((pObject->Flags & FF_IsButton) != 0) {

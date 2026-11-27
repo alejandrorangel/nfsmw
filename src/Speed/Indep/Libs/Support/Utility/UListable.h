@@ -8,6 +8,14 @@
 #include "UTLVector.h"
 #include <types.h>
 
+#if defined(EA_PORT_NATIVE)
+// Natively every instantiation gets the generic definitions at the end of this
+// file (the decomp only defines some of them), so the per-type macros vanish.
+#define IMPLEMENT_LISTABLE(_class_)
+#define IMPLEMENT_LISTABLESET(TYPE, ENUMERATORTYPE, NUMBUCKETS)
+#define IMPLEMENT_COUNTABLE(TYPE)
+#define IMPLEMENT_SINGLETON(TYPE)
+#else
 #define IMPLEMENT_LISTABLE(_class_)                                                                                                                  \
     template <>                                                                                                                                      \
     UTL::Collections::Listable<_class_, _class_::List::Limit>::List UTL::Collections::Listable<_class_, _class_::List::Limit>::_mTable =             \
@@ -21,6 +29,7 @@
 
 #define IMPLEMENT_COUNTABLE(TYPE) template <> int UTL::Collections::Countable<TYPE>::_mCount = 0;
 #define IMPLEMENT_SINGLETON(TYPE) template <> TYPE *UTL::Collections::Singleton<TYPE>::mInstance = NULL;
+#endif
 
 namespace UTL {
 namespace Collections {
@@ -208,6 +217,13 @@ template <typename T> class Countable {
         return _mCount;
     }
 };
+
+#if defined(EA_PORT_NATIVE)
+template <typename T, int U> typename Listable<T, U>::List Listable<T, U>::_mTable;
+template <typename T, int ListSize, typename Enum, std::size_t EnumMax>
+typename ListableSet<T, ListSize, Enum, EnumMax>::_ListSet ListableSet<T, ListSize, Enum, EnumMax>::_mLists;
+template <typename T> int Countable<T>::_mCount = 0;
+#endif
 
 }; // namespace Collections
 }; // namespace UTL

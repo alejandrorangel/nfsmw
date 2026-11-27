@@ -32,6 +32,9 @@ class GameFlowManager {
     GameFlowManager();
     ~GameFlowManager() {}
 
+#if defined(EA_PORT_NATIVE)
+    friend void PortTraceGameFlow(int frame); // port/src/Platform/FERenderMetal.cpp
+#endif
     void SetSingleFunction(void (*function)(int32), const char *debug_name, int param);
 
     // Decl: 36

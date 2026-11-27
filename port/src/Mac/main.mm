@@ -13,12 +13,23 @@ extern int NFSMW_GameMain(int argc, char **argv);
 // bWare main memory pool. The original platform startup created it before
 // InitializeEverything(), which assumes pool 0 already exists.
 extern void bMemoryInit();
+// Game config switch (Misc/Config.cpp). Audio has no native backend yet.
+extern int IsSoundEnabled;
+extern int IsMemcardEnabled; // save system: the decomp's layer is GameCube-specific
+// Keyboard events -> game input (InputMac.mm).
+extern void PortInputInstallKeyboardMonitor();
 
 static int g_argc;
 static char **g_argv;
 
 static void *GameThread(void *) {
     pthread_setname_np("NFSMW game");
+    if (getenv("NFSMW_SOUND") == nullptr) {
+        IsSoundEnabled = 0; // the game also turns off streaming, speech and NIS audio
+    }
+    if (getenv("NFSMW_MEMCARD") == nullptr) {
+        IsMemcardEnabled = 0; // no saves until the PC profile layer is ported
+    }
     bMemoryInit();
     int rc = NFSMW_GameMain(g_argc, g_argv);
     NSLog(@"NFSMW: game main returned %d", rc);
@@ -91,6 +102,7 @@ static void StartGameThread() {
     [_window makeKeyAndOrderFront:nil];
     NSLog(@"NFSMW: Metal device %@", device.name);
 
+    PortInputInstallKeyboardMonitor();
     StartGameThread();
 }
 
