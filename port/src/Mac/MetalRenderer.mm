@@ -1638,7 +1638,12 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 }
                 memcpy(c.world, d.world, sizeof(c.world));
                 [enc setRenderPipelineState:[self meshPipeline:mode]];
-                [enc setDepthStencilState:(mode == 0 && blended != 2 ? _depthWrite : _depthTest)];
+                // D3D default ZWRITEENABLE stays on: no PC effect technique
+                // turns it off, so alpha-blended car glass writes depth too
+                // (otherwise the sky's alpha pass shows through the windows
+                // and over bright blooms them). Additive draws (glows) and the
+                // sky alpha pass only test.
+                [enc setDepthStencilState:(mode != 2 && blended != 2 && d.effect != 19 ? _depthWrite : _depthTest)];
                 [enc setVertexBuffer:d.vertex_buffer offset:0 atIndex:0];
                 [enc setVertexBytes:&c length:sizeof(c) atIndex:1];
                 [enc setVertexBytes:&fog length:sizeof(fog) atIndex:2];
