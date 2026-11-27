@@ -295,25 +295,27 @@ SimTask::SimTask(unsigned int priority, float rate, Sim::ITaskable *handler, flo
     Link();
 }
 
-// UNSOLVED, probably wrong functionally, the branching is annoying
+// Keeps the task list sorted by priority; a new task goes after the existing
+// ones of the same priority. (PC 0x6E89A0)
 void SimTask::Link() {
     if (!mRoot) {
         mRoot = this;
         return;
     }
     SimTask *p = mRoot;
-    while (mPriority > p->mPriority) {
-        p = p->mTail;
-        mTail = p;
-        mHead = p->mHead;
-        if (p == mRoot) {
-            mRoot = this;
-        }
-        if (mHead) {
-            mHead->mTail = this;
-        }
-        if (mTail) {
-            mTail->mHead = this;
+    while (p) {
+        if (p->mPriority > mPriority) {
+            mTail = p;
+            mHead = p->mHead;
+            if (p == mRoot) {
+                mRoot = this;
+            }
+            if (mHead) {
+                mHead->mTail = this;
+            }
+            if (mTail) {
+                mTail->mHead = this;
+            }
             return;
         }
         if (!p->mTail) {
@@ -321,6 +323,7 @@ void SimTask::Link() {
             p->mTail = this;
             return;
         }
+        p = p->mTail;
     }
 }
 
