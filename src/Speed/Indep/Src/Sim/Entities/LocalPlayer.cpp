@@ -35,6 +35,16 @@
 #include "Speed/Indep/bWare/Inc/bMath.hpp"
 #include "Speed/Indep/bWare/Inc/bWare.hpp"
 
+#if defined(EA_PORT_NATIVE)
+// PC 0x6FD280. QuickGame::CreatePlayers creates "LocalPlayer" through the
+// entity factory; the decomp has neither Construct nor the registration.
+Sim::IEntity *LocalPlayer::Construct(Sim::Param params) {
+    return new LocalPlayer(params);
+}
+
+Sim::IEntity::Prototype _LocalPlayer(UCrc32("LocalPlayer"), LocalPlayer::Construct);
+#endif
+
 LocalPlayer::LocalPlayer(Sim::Param params)
     : IPlayer(this),            //
       mSettingIndex(-1),        //

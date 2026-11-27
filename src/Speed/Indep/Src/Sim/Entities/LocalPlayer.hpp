@@ -19,6 +19,9 @@ class LocalPlayer : public Sim::Entity, public IPlayer, public Sim::Collision::I
   public:
     USE_FASTALLOC(LocalPlayer);
     LocalPlayer(Sim::Param params);
+#if defined(EA_PORT_NATIVE)
+    static Sim::IEntity *Construct(Sim::Param params);
+#endif
 
     // Overrides
     // IPlayer

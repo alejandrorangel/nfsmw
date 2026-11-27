@@ -18,6 +18,82 @@
 #include "Speed/Indep/Src/World/RaceParameters.hpp"
 #include "Speed/Indep/Src/World/TrackStreamer.hpp"
 
+#if defined(EA_PORT_NATIVE)
+// Reconstructed from the PC build (speed.exe 1.3); kept out of the matching
+// console build. The member functions are at the end of the file.
+#include "Speed/Indep/Src/Camera/Camera.hpp"
+#include "Speed/Indep/Src/Camera/Movers/TrackCop.hpp"
+#include "Speed/Indep/Src/Ecstasy/Ecstasy.hpp"
+#include "Speed/Indep/Src/Frontend/Database/FEDatabase.hpp"
+#include "Speed/Indep/Src/Frontend/Database/VehicleDB.hpp"
+#include "Speed/Indep/Src/Frontend/FECarViewer.hpp"
+#include "Speed/Indep/Src/Frontend/FEManager.hpp"
+#include "Speed/Indep/Src/Frontend/MenuScreens/InGame/InGameMovieScreen.hpp"
+#include "Speed/Indep/Src/Frontend/MenuScreens/Loading/FELoadingTips.hpp"
+#include "Speed/Indep/Src/Gameplay/GManager.h"
+#include "Speed/Indep/Src/Generated/AttribSys/Classes/pvehicle.h"
+#include "Speed/Indep/Src/Interfaces/IFengHud.h"
+#include "Speed/Indep/Src/Interfaces/SimActivities/ICopMgr.h"
+#include "Speed/Indep/Src/Interfaces/Simables/IAI.h"
+#include "Speed/Indep/Src/Interfaces/Simables/IAudible.h"
+#include "Speed/Indep/Src/Interfaces/Simables/IRenderable.h"
+#include "Speed/Indep/Src/Interfaces/Simables/ISimable.h"
+#include "Speed/Indep/Src/Interfaces/Simables/IVehicle.h"
+#include "Speed/Indep/Src/Physics/PhysicsInfo.hpp"
+#include "Speed/Indep/Src/Physics/PhysicsUpgrades.hpp"
+#include "Speed/Indep/Src/Physics/PVehicle.h"
+#include "Speed/Indep/Src/World/CarInfo.hpp"
+#include "Speed/Indep/Src/World/WCollisionMgr.h"
+#include "Speed/Indep/Src/World/WWorld.h"
+#include "Speed/Indep/bWare/Inc/Strings.hpp"
+#include "Speed/Indep/bWare/Inc/bWare.hpp"
+
+extern const char *SkipFEPlayerCar;
+extern const char *SkipFEPlayer2Car;
+extern float SkipFEPlayerPerformance;
+PresetCar *FindFEPresetCar(unsigned int key);
+
+float Tweak_GameSpeed = 1.0f;
+
+// The car a player spawns in (local to QuickGame.cpp; layout from the PS2 symbols).
+// total size: 0x1B4
+struct CarBuilder {
+    CarBuilder()
+        : Key(0),                 //
+          Flags(0xB),             //
+          Customization(nullptr), //
+          Performance(nullptr),   //
+          mPerformance(0.0f, 0.0f, 0.0f) {}
+
+    // PC 0x6EEE80
+    void Match(const Physics::Info::Performance &perf) {
+        Attrib::Gen::pvehicle test(Key, 0, nullptr);
+        if (Physics::Upgrades::MatchPerformance(test, perf)) {
+            mPerformance = perf;
+            Performance = &mPerformance;
+        } else {
+            Performance = nullptr;
+        }
+    }
+
+    // PC 0x6F2800 (Physics::Info::Performance(amount) inlined: each rating clamped to [0, 1])
+    void Match(float amount) {
+        if (amount > 0.0f) {
+            float a = UMath::Clamp(amount, 0.0f, 1.0f);
+            Physics::Info::Performance perf(a, a, a);
+            Match(perf);
+        }
+    }
+
+    Attrib::Key Key;                         // offset 0x0, size 0x4
+    unsigned int Flags;                      // offset 0x4, size 0x4
+    FECustomizationRecord *Customization;    // offset 0x8, size 0x4
+    Physics::Info::Performance *Performance; // offset 0xC, size 0x4
+    FECustomizationRecord mCustomization;    // offset 0x10, size 0x198
+    Physics::Info::Performance mPerformance; // offset 0x1A8, size 0xC
+};
+#endif
+
 QuickGame::QuickGame(Sim::Param params)
     : Sim::Activity(4),                      //
       Sim::ITimeManager(this),               //
@@ -164,8 +240,265 @@ void QuickGame::OnBeginState() {
     }
 }
 
-// Requires MenuScreen stuff
-// bool QuickGame::CanSimulate() {}
+#if defined(EA_PORT_NATIVE)
+// PC 0x6EF150 (labelled OnManageState in the PC symbols)
+bool QuickGame::CanSimulate() {
+    if (TrackCopCameraMover_IdleSim) {
+        return false;
+    }
+    if (InGameAnyMovieScreen::IsPlaying()) {
+        return false;
+    }
+    if (INIS::Exists()) {
+        if (!INIS::Get()->IsLoaded() || INIS::Get()->InMovie()) {
+            return false;
+        }
+    }
+    if (GRaceStatus::Exists() && GRaceStatus::Get().IsLoading()) {
+        return false;
+    }
+    if (GManager::Exists() && GManager::Get().GetIsWarping()) {
+        return false;
+    }
+    if (FEManager::Get() && FEManager::ShouldPauseSimulation(true)) {
+        return false;
+    }
+    return true;
+}
+
+// PC 0x6EEF20
+bool QuickGame::IsStateDone() const {
+    switch (mState) {
+        case RACESTATE_LOADING_WORLD:
+            if (TheTrackStreamer.IsLoadingInProgress()) {
+                return false;
+            }
+            break;
+        case RACESTATE_LOADING_PLAYER_AUDIO: {
+            const IVehicle::List &racers = IVehicle::GetList(VEHICLE_RACERS);
+            for (IVehicle::List::const_iterator iter = racers.begin(); iter != racers.end(); ++iter) {
+                IVehicle *vehicle = *iter;
+                IAudible *audible;
+                if (vehicle && vehicle->QueryInterface(&audible) && !audible->IsAudible()) {
+                    return false;
+                }
+            }
+            break;
+        }
+        case RACESTATE_LOADING_PLAYER_MODELS: {
+            const IVehicle::List &racers = IVehicle::GetList(VEHICLE_RACERS);
+            for (IVehicle::List::const_iterator iter = racers.begin(); iter != racers.end(); ++iter) {
+                IVehicle *vehicle = *iter;
+                IRenderable *renderable;
+                if (vehicle && vehicle->QueryInterface(&renderable) && !renderable->IsRenderable()) {
+                    return false;
+                }
+            }
+            break;
+        }
+        case RACESTATE_LOADING_UI: {
+            const IHud::List &huds = IHud::GetList();
+            for (IHud::List::const_iterator iter = huds.begin(); iter != huds.end(); ++iter) {
+                IHud *hud = *iter;
+                if (!hud->AreResourcesLoaded()) {
+                    return false;
+                }
+            }
+            break;
+        }
+        case RACESTATE_LOADING_OPPONENT_AUDIO:
+            if (GRaceStatus::Exists() && GRaceStatus::Get().IsAudioLoading()) {
+                return false;
+            }
+            break;
+        case RACESTATE_LOADING_OPPONENT_MODELS:
+            if (GRaceStatus::Exists() && GRaceStatus::Get().IsModelsLoading()) {
+                return false;
+            }
+            // free roam: wait for the queued pursuit's cop before starting
+            if (!GRaceDatabase::Get().GetStartupRace() && GManager::Get().GetStartFreeRoamPursuit()) {
+                ICopMgr::Get()->LockoutCops(false);
+                ICopMgr::Get()->PursueAtHeatLevel(static_cast<int>(GManager::Get().GetQueuedPursuitHeat()));
+                if (!ICopMgr::Get()->PlayerPursuitHasCop()) {
+                    return false;
+                }
+                GManager::Get().ClearQueuedFreeRoamPursuit();
+            }
+            break;
+        case RACESTATE_LOADING_WAIT_FOR_USER_INPUT:
+            if (!LoadingTips::IsDoneShowingLoadingTips()) {
+                LoadingTips::SetDoneLoading(true);
+                return false;
+            }
+            break;
+        case RACESTATE_LOADING_NIS:
+            if (INIS::Exists() && !INIS::Get()->IsLoaded()) {
+                return false;
+            }
+            break;
+        default:
+            break;
+    }
+    return true;
+}
+
+// PC 0x6F4D10
+float QuickGame::OnManageTime(float real_time_delta, float sim_speed) {
+    if (Tweak_GameSpeed != 1.0f) {
+        return Tweak_GameSpeed;
+    }
+
+    IPlayer *player1 = IPlayer::First(PLAYER_LOCAL);
+    float target_speed = 1.0f;
+    float delta_speed;
+
+    Camera *camera = eGetView(EVIEW_PLAYER1, false)->GetCamera();
+    if (camera) {
+        target_speed = camera->GetSimTimeMultiplier();
+    }
+
+    if (Sim::GetUserMode() == Sim::USER_SPLIT_SCREEN) {
+        return 1.0f;
+    }
+
+    if (target_speed >= 1.0f) {
+        if (!INIS::Exists()) {
+            if (player1 && player1->InGameBreaker()) {
+                mInGameBreaker = true;
+                target_speed = 0.25f;
+                delta_speed = 2.0f;
+                goto blend;
+            }
+            if (mInGameBreaker && sim_speed < 1.0f) {
+                target_speed = 1.0f;
+                delta_speed = 0.5f;
+                goto blend;
+            }
+        }
+        target_speed = 1.0f;
+    } else if (target_speed <= 0.01f) {
+        target_speed = 0.01f;
+    }
+    delta_speed = 0.0f;
+    mInGameBreaker = false;
+
+blend:
+    if (target_speed != sim_speed) {
+        if (delta_speed > 0.0f) {
+            if (target_speed <= sim_speed) {
+                return UMath::Max(sim_speed - delta_speed * real_time_delta, target_speed);
+            }
+            return UMath::Min(delta_speed * real_time_delta + sim_speed, target_speed);
+        }
+        sim_speed = target_speed;
+    }
+    return sim_speed;
+}
+
+// PC 0x6F88E0
+bool QuickGame::InGameBreaker() const {
+    return mInGameBreaker;
+}
+
+// PC 0x6F47A0
+void QuickGame::CreateCars(const UMath::Vector3 &startLoc) {
+    UMath::Vector3 initialPos = startLoc;
+    UMath::Vector3 initialVec = mStartDirection;
+    if (!WWorld::Get().IsValid()) {
+        initialPos = UMath::Vector3::kZero;
+    }
+
+    float height = 0.0f;
+    if (WCollisionMgr(0, 3).GetWorldHeightAtPoint(initialPos, height, nullptr)) {
+        initialPos.y = height + 1.0f;
+    }
+
+    float Heat = 1.0f;
+    CarBuilder player_1;
+    if (SkipFE && SkipFEPlayerCar && *SkipFEPlayerCar) {
+        player_1.Key = Attrib::StringToKey(SkipFEPlayerCar);
+        player_1.Match(SkipFEPlayerPerformance);
+    } else {
+        GRaceCustom *startupRace = GRaceDatabase::Get().GetStartupRace();
+        if (startupRace) {
+            const char *presetRide = startupRace->GetPlayerCarType();
+            if (presetRide && *presetRide) {
+                PresetCar *preset = FindFEPresetCar(bStringHashUpper(presetRide));
+                if (preset) {
+                    player_1.Key = static_cast<Attrib::Key>(preset->VehicleKey);
+                    player_1.Flags |= 0x10;
+                    FECustomizationRecord preset_customization;
+                    preset_customization.BecomePreset(preset);
+                    player_1.mCustomization = preset_customization;
+                    player_1.Customization = &player_1.mCustomization;
+                    player_1.Match(startupRace->GetPlayerCarPerformance());
+                }
+            }
+        }
+
+        if (player_1.Key == 0) {
+            uint32 player_car = FEDatabase->GetQuickRaceSettings(GRace::kRaceType_NumTypes)->GetSelectedCar(0);
+            if (FEDatabase->IsCareerMode()) {
+                CareerSettings *career = FEDatabase->GetCareerSettings();
+                player_car = career->GetCurrentCar();
+                FEPlayerCarDB *stable = FEDatabase->GetPlayerCarStable(0);
+                if (career && stable) {
+                    FECarRecord *fe_car = stable->GetCarByIndex(player_car);
+                    if (fe_car) {
+                        FECareerRecord *fe_career = stable->GetCareerRecordByHandle(fe_car->CareerHandle);
+                        if (fe_career) {
+                            Heat = UMath::Max(1.0f, fe_career->GetVehicleHeat());
+                        }
+                    }
+                }
+            }
+            FEPlayerCarDB *stable = FEDatabase->GetPlayerCarStable(0);
+            FECarRecord *record = stable->GetCarRecordByHandle(player_car);
+            player_1.Key = record->VehicleKey;
+            FECustomizationRecord *crecord = stable->GetCustomizationRecordByHandle(record->Customization);
+            if (crecord) {
+                player_1.mCustomization = *crecord;
+                player_1.Customization = &player_1.mCustomization;
+            }
+        }
+    }
+
+    CarBuilder player_2;
+    if (Sim::GetUserMode() == Sim::USER_SPLIT_SCREEN) {
+        if (!SkipFE) {
+            player_2.Key = Attrib::StringToKey(FEDatabase->SplitScreenCarType);
+            if (FEDatabase->SplitScreenCustomization) {
+                player_2.mCustomization = *FEDatabase->SplitScreenCustomization;
+                player_2.Customization = &player_2.mCustomization;
+                bFree(FEDatabase->SplitScreenCustomization);
+            }
+        } else {
+            player_2.Key = Attrib::StringToKey(SkipFEPlayer2Car);
+        }
+    }
+
+    CarViewer::haveLoadedOnce = false;
+
+    ISimable *icar = UTL::COM::Factory<Sim::Param, ISimable, UCrc32>::CreateInstance(
+        UCrc32("PVehicle"),
+        VehicleParams(this, DRIVER_HUMAN, player_1.Key, initialVec, initialPos, player_1.Flags, player_1.Customization, player_1.Performance));
+    icar->Attach(IPlayer::First(PLAYER_LOCAL));
+    IPerpetrator *perpetrator;
+    if (icar->QueryInterface(&perpetrator)) {
+        perpetrator->SetHeat(Heat);
+    }
+
+    if (player_2.Key != 0) {
+        initialPos.x += initialVec.x * 5.0f;
+        initialPos.y += initialVec.y * 5.0f;
+        initialPos.z += initialVec.z * 5.0f;
+        icar = UTL::COM::Factory<Sim::Param, ISimable, UCrc32>::CreateInstance(
+            UCrc32("PVehicle"),
+            VehicleParams(this, DRIVER_HUMAN, player_2.Key, initialVec, initialPos, player_2.Flags, player_2.Customization, player_2.Performance));
+        icar->Attach(IPlayer::Last(PLAYER_LOCAL));
+    }
+}
+#endif
 
 Sim::State QuickGame::OnManageState(Sim::State state) {
     if ((state == Sim::STATE_INITIALIZING || state == Sim::STATE_NONE) && mState < RACESTATE_READY) {

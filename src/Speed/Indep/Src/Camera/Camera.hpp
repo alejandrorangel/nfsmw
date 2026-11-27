@@ -263,7 +263,9 @@ class Camera {
         this->CurrentKey.SimTimeMultiplier = multiplier;
     }
 
-    // float GetSimTimeMultiplier() {}
+    float GetSimTimeMultiplier() {
+        return this->CurrentKey.SimTimeMultiplier;
+    }
 
   private:
     CameraParams CurrentKey;  // offset 0x0, size 0xD4

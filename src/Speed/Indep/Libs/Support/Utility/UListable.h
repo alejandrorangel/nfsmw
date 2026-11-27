@@ -223,6 +223,24 @@ template <typename T, int U> typename Listable<T, U>::List Listable<T, U>::_mTab
 template <typename T, int ListSize, typename Enum, std::size_t EnumMax>
 typename ListableSet<T, ListSize, Enum, EnumMax>::_ListSet ListableSet<T, ListSize, Enum, EnumMax>::_mLists;
 template <typename T> int Countable<T>::_mCount = 0;
+
+// Declared above but never defined in the decomp; link stubs returned 0/null,
+// so e.g. IPlayer::First(PLAYER_LOCAL) never found the player.
+template <typename T, int ListSize, typename Enum, std::size_t EnumMax> int ListableSet<T, ListSize, Enum, EnumMax>::Count(Enum idx) {
+    return _mLists._buckets[idx].size();
+}
+
+template <typename T, int ListSize, typename Enum, std::size_t EnumMax>
+typename ListableSet<T, ListSize, Enum, EnumMax>::iterator ListableSet<T, ListSize, Enum, EnumMax>::First(Enum idx) {
+    const List &l = _mLists._buckets[idx];
+    return l.empty() ? nullptr : *l.begin();
+}
+
+template <typename T, int ListSize, typename Enum, std::size_t EnumMax>
+typename ListableSet<T, ListSize, Enum, EnumMax>::iterator ListableSet<T, ListSize, Enum, EnumMax>::Last(Enum idx) {
+    const List &l = _mLists._buckets[idx];
+    return l.empty() ? nullptr : *(l.end() - 1);
+}
 #endif
 
 }; // namespace Collections
