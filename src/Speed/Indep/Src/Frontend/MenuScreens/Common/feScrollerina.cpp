@@ -433,6 +433,68 @@ void Scrollerina::DrawScrollBar() {
     }
 }
 
+#ifdef EA_PLATFORM_WIN32
+// PC 0x586680: the node holding this string.
+ScrollerDatumNode *ScrollerDatum::Find(const char *to_find) {
+    for (ScrollerDatumNode *node = Strings.GetHead(); node != Strings.EndOfList(); node = node->GetNext()) {
+        if (bStrICmp(node->String, to_find) == 0) {
+            return node;
+        }
+    }
+    return nullptr;
+}
+
+// PC 0x586950
+ScrollerDatum *Scrollerina::FindDatum(const char *to_find) {
+    for (ScrollerDatum *datum = Data.GetHead(); datum != Data.EndOfList(); datum = datum->GetNext()) {
+        if (datum->Find(to_find) != nullptr) {
+            return datum;
+        }
+    }
+    return nullptr;
+}
+
+// PC 0x586D90: the selected datum's first string.
+const char *Scrollerina::GetActiveSelection() {
+    if (Data.IsEmpty() || SelectedDatum == nullptr) {
+        return nullptr;
+    }
+    ScrollerDatumNode *node = SelectedDatum->Strings.GetHead();
+    return node != SelectedDatum->Strings.EndOfList() ? node->String : "";
+}
+
+// PC 0x586D40
+void Scrollerina::DeleteScrollerData() {
+    while (!Data.IsEmpty()) {
+        ScrollerDatum *datum = Data.GetHead();
+        datum->Remove();
+        delete datum;
+    }
+    SelectedDatum = nullptr;
+    TopDatum = nullptr;
+    iNumData = 0;
+}
+
+// PC 0x5A8D10: select the index'th datum after the head (a view reset and
+// that many scrolls).
+void Scrollerina::SetSelectedDatum(uint32 index) {
+    if (!Slots.IsEmpty()) {
+        TopDatum = Data.GetHead();
+        SelectedDatum = TopDatum;
+        SelectedSlot = Slots.GetHead();
+    }
+    for (; index != 0; index--) {
+        if (!bWrapped) {
+            g_pEAXSound->PlayUISoundFX(SelectedDatum == Data.GetTail() ? UISND_COMMON_WRONG : UISND_COMMON_UP);
+            Scroll(eSD_NEXT);
+        } else {
+            g_pEAXSound->PlayUISoundFX(UISND_COMMON_UP);
+            ScrollWrapped(eSD_NEXT);
+        }
+    }
+}
+#endif
+
 void Scrollerina::Update(bool print) {
     if (print) {
         Print();
@@ -464,6 +526,29 @@ void Scrollerina::Disable(ScrollerDatum *datum) {
     }
     datum->Disable();
     ScrollerSlot *slot = FindSlotWithDatum(datum);
+#ifdef EA_PLATFORM_WIN32
+    // PC 0x5A5790: moves the selection off the datum without wrapping (so a
+    // list with nothing enabled doesn't spin), then disables its slot unless
+    // the selection landed on the end slot it moved toward.
+    if (slot == nullptr) {
+        return;
+    }
+    if (datum == SelectedDatum) {
+        ScrollerSlot *end;
+        if (Scroll(eSD_NEXT)) {
+            end = Slots.GetTail();
+        } else if (Scroll(eSD_PREV)) {
+            end = Slots.GetHead();
+        } else {
+            return;
+        }
+        if (slot == end) {
+            return;
+        }
+    }
+    slot->Disable();
+    return;
+#endif
     if (slot != nullptr) {
         if (datum == SelectedDatum) {
             if (!ScrollWrapped(eSD_NEXT)) {

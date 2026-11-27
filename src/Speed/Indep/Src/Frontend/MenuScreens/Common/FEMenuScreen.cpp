@@ -15,6 +15,10 @@
 #ifdef EA_PLATFORM_WIN32
 #include "Speed/Indep/Src/Frontend/MenuScreens/Common/feDialogBox.hpp"
 #include "Speed/Indep/Src/Misc/GameFlow.hpp"
+#ifdef EA_PLATFORM_WIN32
+#include "Speed/Indep/Src/Frontend/MenuScreens/Online/uiOnlinePC.hpp"
+#include "Speed/Indep/Src/Online/PCOnline.hpp"
+#endif
 #endif
 
 extern KeyboardEditString gKeyboardManager;
@@ -109,6 +113,19 @@ void MenuScreen::BaseNotify(u32 Message, FEObject *pObject, u32 Param1, u32 Para
     } else if (Message == 0xbe34e004) {
         extern int ExitTheGameFlag;
         ExitTheGameFlag = 1;
+    } else if (Message == 0xcac20c24) {
+        // OK on a lobby error dialog: back to the LAN server list, or to the
+        // EA login.
+        LobbyReset();
+        LobbyDisconnect();
+        if (FEDatabase->IsLANMode()) {
+            gPCOnlineSettings.LastState = gPCOnlineSettings.State;
+            gPCOnlineSettings.State = 0;
+            gPCOnlineSettings.StateAux = 0;
+            cFEng::Get()->QueuePackageSwitch("UI_PC_LAN_ServerSelect.fng", 0, 0, false);
+        } else if (OnlineLoginScreenManager::Get() != nullptr) {
+            OnlineLoginScreenManager::Get()->ChangeToScreen("OLEALogin.fng");
+        }
     }
 #endif
 

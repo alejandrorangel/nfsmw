@@ -108,6 +108,7 @@ add_library(nfsmw_platform OBJECT
     src/Platform/LightFlaresNative.cpp
     src/Platform/ScreenEffectsNative.cpp
     src/Platform/ShadowMapMeshNative.cpp
+    src/Net/PCOnlineNative.cpp
     src/Game/SelectCarCameraMover.cpp
     src/Game/CameraDriveNative.cpp
     src/Game/RainNative.cpp

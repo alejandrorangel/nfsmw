@@ -16,6 +16,7 @@
 #ifdef EA_PLATFORM_WIN32
 #include "Speed/Indep/Src/Frontend/FEManager.hpp"
 #include "Speed/Indep/Src/Frontend/FEngFrontend.hpp"
+#include "Speed/Indep/Src/Frontend/MenuScreens/Online/uiOnlinePC.hpp"
 #endif
 
 const char *gOnlineMainMenu = "OL_MAIN.fng";
@@ -47,10 +48,6 @@ class MainCustomize : public IconOption {
 #ifdef EA_PLATFORM_WIN32
 #ifndef EA_PORT_NATIVE
 void AllocOnlineMemoryPool();
-class OnlineLoginScreenManager {
-  public:
-    static void EnterFront(const char *pkg_name);
-};
 #endif
 
 // PC: MainLAN::React 0x51AD70
@@ -63,7 +60,7 @@ class MainLAN : public IconOption {
             return;
         FEDatabase->SetGameMode(eFE_GAME_MODE_LAN);
 #ifndef EA_PORT_NATIVE
-        AllocOnlineMemoryPool();
+        AllocOnlineMemoryPool(); // the online memory pool isn't needed natively
 #endif
         FEDatabase->SetPlayersJoystickPort(0, FEngMapJoyParamToJoyport(param1));
     }
@@ -154,15 +151,11 @@ void UIMain::NotificationMessage(u32 msg, FEObject *obj, u32 param1, u32 param2)
     IconScrollerMenu::NotificationMessage(msg, obj, param1, param2);
     switch (msg) {
         case 0xc6c6b68f:
-#ifdef EA_PORT_NATIVE
-            // TODO(port): online isn't ported (PC: AllocOnlineMemoryPool +
-            // OnlineLoginScreenManager::EnterFront); come back to the menu.
-            FEDatabase->ClearGameMode(eFE_GAME_MODE_ONLINE);
-            cFEng::Get()->QueuePackageSwitch("MainMenu.fng", 0, 0, false);
-#else
+#ifndef EA_PORT_NATIVE
+            // The online memory pool isn't needed natively (plain heap).
             AllocOnlineMemoryPool();
-            OnlineLoginScreenManager::EnterFront(GetPackageName());
 #endif
+            OnlineLoginScreenManager::EnterFront(GetPackageName());
             break;
         case 0x1265ece9:
             GarageMainScreen::GetInstance()->UpdateCurrentCameraView(false);
@@ -190,26 +183,11 @@ void UIMain::NotificationMessage(u32 msg, FEObject *obj, u32 param1, u32 param2)
             } else if (FEDatabase->IsChallengeMode()) {
                 cFEng::Get()->QueuePackageSwitch("ChallengeSeries.fng", 0, 0, false);
             } else if (FEDatabase->IsLANMode()) {
-#ifdef EA_PORT_NATIVE
-                // TODO(port): the PC LAN screens (UI_PC_LAN_ServerSelect.fng,
-                // UI_PC_LAN.fng) have no screen classes natively; stay on the
-                // main menu instead.
-                FEDatabase->ClearGameMode(eFE_GAME_MODE_LAN);
-                cFEng::Get()->QueuePackageSwitch("MainMenu.fng", 0, 0, false);
-#else
                 cFEng::Get()->QueuePackageSwitch("UI_PC_LAN_ServerSelect.fng", 0, 0, false);
-#endif
             } else if (FEDatabase->IsOnlineMode()) {
-#ifdef EA_PORT_NATIVE
-                // TODO(port): PC queues 0xD05FC3A3 to itself here (autosave
-                // off), then enters the online login flow on 0xC6C6B68F.
-                // Online isn't ported, so stay on the main menu and leave
-                // autosave alone.
-                FEDatabase->ClearGameMode(eFE_GAME_MODE_ONLINE);
-                cFEng::Get()->QueuePackageSwitch("MainMenu.fng", 0, 0, false);
-#else
+                // autosave off (0xD05FC3A3); the FNG then sends 0xC6C6B68F,
+                // the online login flow
                 cFEng::Get()->QueueGameMessage(0xd05fc3a3, GetPackageName(), 0xff);
-#endif
             } else if (FEDatabase->IsCustomizeMode()) {
                 cFEng::Get()->QueuePackageSwitch("MyCarsManager.fng", 0, 0, false);
             }

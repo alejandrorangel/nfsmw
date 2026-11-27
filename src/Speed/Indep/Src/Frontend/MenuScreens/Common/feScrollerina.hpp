@@ -228,6 +228,9 @@ class Scrollerina {
         FindSize();
     }
     void UpdateMouse();
+    uint32 GetDatumIndex(ScrollerDatum *datum) {
+        return GetNodeIndex(datum);
+    }
 #endif
 
   protected:

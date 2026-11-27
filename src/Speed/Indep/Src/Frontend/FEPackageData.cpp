@@ -56,6 +56,7 @@
 #if defined(EA_PLATFORM_WIN32)
 #include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/options/uiOptionsPCController.hpp"
 #include "Speed/Indep/Src/Frontend/MenuScreens/Loading/FEDiscErrorPC.hpp"
+#include "Speed/Indep/Src/Frontend/MenuScreens/Online/uiOnlinePC.hpp"
 #endif
 #include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/options/uiOptionsScreen.hpp"
 #include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/quickrace/uiQRBrief.hpp"
@@ -147,7 +148,7 @@ static MenuScreen *CreateCommonPauseMenu(ScreenConstructorData *sd) {
     return new ("PauseMenu", 0) PauseMenu(sd);
 }
 
-#if ONLINE_SUPPORT
+#if ONLINE_SUPPORT && !defined(EA_PLATFORM_WIN32)
 static MenuScreen *CreateOLConnectingScreen(ScreenConstructorData *sd) {}
 #endif
 
@@ -568,6 +569,52 @@ static ScreenFactoryDatum ScreenFactoryData[] = {
     {"PostRace_Pursuit.fng", CreatePostRacePursuitScreen},
     {"PostRace_MilestoneRewards.fng", CreatePostRaceMilestonesScreen},
 #if defined(EA_PLATFORM_WIN32)
+    // PC 0x8F4708..0x8F4858: the online and LAN screens. TODO(port): the ones
+    // without a constructor here (lobby rooms, game rooms, rankings, EA
+    // Messenger, account creation, ...) need a lobby server and stay plain
+    // packages.
+    {"UI_OL_Disconnect_BG.fng", nullptr},       // 0x5201E0
+    {"UI_OL_WebOffer2.fng", nullptr},           // 0x5203D0
+    {"OL_News_and_Terms.fng", nullptr},         // 0x570A60
+    {"OL_LobbyRoom.fng", nullptr},              // 0x563B20
+    {"OL_GameRoom.fng", nullptr},               // 0x561BF0
+    {"OL_GameRoom_Player_Details.fng", nullptr}, // 0x556250
+    {"OL_GameRoom_Edit_Race.fng", nullptr},     // 0x556890
+    {"OL_GameRoom_Car_Select.fng", nullptr},    // 0x563B90
+    {"UI_OLViewTrack.fng", nullptr},            // 0x561DA0
+    {"OL_MAIN.fng", nullptr},                   // 0x571BC0
+    {"OL_Quickrace_Main.fng", nullptr},         // 0x554A70
+    {"UI_DateEntry.fng", nullptr},              // 0x589050
+    {"OL_Dialog.fng", nullptr},
+    {"OL_Dialog_Stacked_Buttons.fng", nullptr},
+    {"UI_OLISPConnect.fng", CreateOLConnectingScreen}, // 0x570910
+    {"OL_Find_Session.fng", nullptr},           // 0x5709F0
+    {"UI_OLFilters.fng", nullptr},              // 0x54BB10
+    {"UI_PC_LAN_ServerSelect.fng", CreateUIPCLanServerSelect}, // 0x562A30
+    {"UI_PC_LAN.fng", CreateUIPCLan},           // 0x559030
+    {"OL_PC_REGISTRATION.fng", nullptr},        // 0x5356E0
+    {"UI_OLX_OptiMatch_Available.fng", nullptr}, // 0x563B20
+    {"UI_OLX_OptiMatch_Filters.fng", nullptr},  // 0x54BB10
+    {"OLX_Connecting2XBL.fng", CreateOLConnectingScreen}, // 0x570910
+    {"OL_Rankings.fng", nullptr},               // 0x561D40
+    {"OL_Rankings_Personal.fng", nullptr},      // 0x55EAE0
+    {"OL_Rankings_Personal_Overlay.fng", nullptr}, // 0x55EAE0
+    {"OL_Rankings_Leaderboard.fng", nullptr},   // 0x563C50
+    {"OL_EAMessenger.fng", nullptr},            // 0x563BF0
+    {"PC_OL_SEARCH.fng", nullptr},              // 0x557750
+    {"OL_FriendDialogue.fng", nullptr},         // 0x562300
+    {"OLX_Message.fng", nullptr},               // 0x557DC0
+    {"OLX_FindResults.fng", nullptr},           // 0x557D50
+    {"OL_Feedback.fng", nullptr},               // 0x558290
+    {"OL_Challenge.fng", nullptr},              // 0x5600F0
+    {"OL_SelectPersona.fng", nullptr},          // 0x5540D0
+    {"OL_Create_Account.fng", nullptr},         // 0x535680
+    {"UI_OLX_Info_Sharing.fng", nullptr},       // 0x54A850
+    {"OL_Create_Account_Country.fng", nullptr}, // 0x54A8B0
+    {"UI_OLAgeVerif.fng", nullptr},             // 0x554130
+    {"OL_UseExisting.fng", nullptr},            // 0x54A7B0
+    {"OL_ForgotAccountName.fng", nullptr},      // 0x5499E0
+    {"OLEALogin.fng", CreateUIOLEALoginScreen}, // 0x55BF10
     {"DiscErrorPC.fng", CreateDiscErrorPC},
 #endif
     {"MC_ProfileManager.fng", CreateUIProfileManager},
