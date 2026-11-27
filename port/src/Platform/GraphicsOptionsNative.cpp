@@ -109,6 +109,12 @@ void ApplyPreset() {
         // so the top preset uses the slider's maximum (3). The slider still
         // works as on PC.
         o.CarEnvironmentMapEnable = 3;
+        // Same deviation for the rest of the quality sliders PC's top preset
+        // leaves below their maxima: anisotropic texture filtering (sharper
+        // roads at grazing angles) and the full world level of detail (the
+        // high-detail scenery set instead of the low-detail stand-ins).
+        o.TextureFiltering = 2;
+        o.WorldLodLevel = 3;
     }
     if (gPCGraphicsOptionsMax.VisualTreatment != 0) {
         o.VisualTreatment = 1;
