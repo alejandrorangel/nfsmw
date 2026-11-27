@@ -93,6 +93,7 @@ void PortMetalSetDebugTexture(void *texture) {
 // ---------------------------------------------------------------------------
 struct FEBatch {
     id<MTLTexture> texture; // nil = untextured
+    id<MTLTexture> mask;    // nil = unmasked
     PortBlendMode blend;
     uint32_t first;
     uint32_t count;
@@ -137,10 +138,15 @@ void PortMetalFEBeginFrame() {
 }
 
 void PortMetalFEAddQuad(void *texture, PortBlendMode blend, const PortFEVertex quad[4]) {
+    PortMetalFEAddMaskedQuad(texture, nullptr, blend, quad);
+}
+
+void PortMetalFEAddMaskedQuad(void *texture, void *mask, PortBlendMode blend, const PortFEVertex quad[4]) {
     id<MTLTexture> t = (__bridge id<MTLTexture>)texture;
+    id<MTLTexture> m = (__bridge id<MTLTexture>)mask;
     FEFrame &f = gFEBuilding;
-    if (f.batches.empty() || f.batches.back().texture != t || f.batches.back().blend != blend) {
-        f.batches.push_back({t, blend, (uint32_t)f.vertices.size(), 0});
+    if (f.batches.empty() || f.batches.back().texture != t || f.batches.back().mask != m || f.batches.back().blend != blend) {
+        f.batches.push_back({t, m, blend, (uint32_t)f.vertices.size(), 0});
     }
     static const int order[6] = {0, 1, 2, 0, 2, 3};
     for (int i : order) {
@@ -352,8 +358,8 @@ vertex VOut debug_vs(uint vid [[vertex_id]], constant float2 &scale [[buffer(0)]
     return o;
 }
 
-struct FEVertex { packed_float2 pos; packed_float2 uv; uchar4 rgba; };
-struct FEOut { float4 pos [[position]]; float2 uv; float4 color; };
+struct FEVertex { packed_float2 pos; packed_float2 uv; uchar4 rgba; packed_float2 muv; };
+struct FEOut { float4 pos [[position]]; float2 uv; float4 color; float2 muv; };
 
 vertex FEOut fe_vs(uint vid [[vertex_id]], const device FEVertex *verts [[buffer(0)]], constant float2 &scale [[buffer(1)]]) {
     FEVertex v = verts[vid];
@@ -362,12 +368,18 @@ vertex FEOut fe_vs(uint vid [[vertex_id]], const device FEVertex *verts [[buffer
     o.uv = float2(v.uv);
     // Console-style colour: RGB 0x80 = 1.0 (the PC renderer used MODULATE2X).
     o.color = float4(float3(v.rgba.xyz) * (2.0 / 255.0), v.rgba.w / 255.0);
+    o.muv = float2(v.muv);
     return o;
 }
 
-fragment float4 fe_fs(FEOut in [[stage_in]], texture2d<float> tex [[texture(0)]]) {
+// IDI_FE_FX / IDI_FE_MASK_FX (ps #0: alpha also times the mask's alpha, the
+// mask sampled clamped at the second UV set). Unmasked batches bind white.
+fragment float4 fe_fs(FEOut in [[stage_in]], texture2d<float> tex [[texture(0)]], texture2d<float> mask [[texture(1)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear, address::clamp_to_edge);
-    return in.color * tex.sample(s, in.uv);
+    constexpr sampler ms(filter::linear, mip_filter::linear, address::clamp_to_edge);
+    float4 c = in.color * tex.sample(s, in.uv);
+    c.a *= mask.sample(ms, in.muv).a;
+    return c;
 }
 
 // 3D meshes. Vertices are pulled from the raw 36-byte PC layout.
@@ -1089,6 +1101,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         for (const FEBatch &b : fe.batches) {
             [enc setRenderPipelineState:_fePipelines[b.blend]];
             [enc setFragmentTexture:(b.texture ? b.texture : _white) atIndex:0];
+            [enc setFragmentTexture:(b.mask ? b.mask : _white) atIndex:1];
             [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:b.first vertexCount:b.count];
         }
     }

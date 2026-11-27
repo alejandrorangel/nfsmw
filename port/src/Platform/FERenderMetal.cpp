@@ -52,8 +52,15 @@ void SubmitPoly(ePoly *poly, TextureInfo *texture_info, TextureInfo *mask = null
         quad[i].u = poly->UVs[i][0];
         quad[i].v = poly->UVs[i][1];
         std::memcpy(quad[i].rgba, poly->Colours[i], 4);
+        quad[i].mu = poly->UVsMask[i][0];
+        quad[i].mv = poly->UVsMask[i][1];
     }
-    PortMetalFEAddQuad(MetalTextureOf(texture_info), BlendFor(texture_info), quad);
+    void *mask_texture = MetalTextureOf(mask);
+    if (mask_texture) {
+        PortMetalFEAddMaskedQuad(MetalTextureOf(texture_info), mask_texture, BlendFor(texture_info), quad);
+    } else {
+        PortMetalFEAddQuad(MetalTextureOf(texture_info), BlendFor(texture_info), quad);
+    }
     if (std::getenv("NFSMW_TRACE_FE")) {
         std::fprintf(stderr, "[fe] tex=%s mask=%s flags=%#x\n", texture_info ? texture_info->DebugName : "(none)",
                      mask ? mask->DebugName : "-", poly->GetFlags());
@@ -76,7 +83,7 @@ void eViewPlatInterface::FERender(ePoly *poly, TextureInfo *texture_info, int us
 }
 
 void eViewPlatInterface::FERender(ePoly *poly, TextureInfo *texture_info, TextureInfo *texture_info_mask, int use_previous_data) {
-    SubmitPoly(poly, texture_info, texture_info_mask); // TODO: multi-texture mask (0x6D1930)
+    SubmitPoly(poly, texture_info, texture_info_mask); // 0x6D1930: IDI_FE_MASK_FX
 }
 
 extern float RealTimeElapsed;

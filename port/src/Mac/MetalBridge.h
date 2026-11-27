@@ -35,11 +35,15 @@ struct PortFEVertex {
     float x, y;            // clip space
     float u, v;
     unsigned char rgba[4]; // ePoly colour: R, G, B at half scale (0x80 = 1.0), A full
+    float mu, mv;          // mask texture coordinates (ePoly::UVsMask)
 };
 
 void PortMetalFEBeginFrame();
 // Quad corners in order 0..3 around the perimeter (triangulated 0-1-2, 0-2-3).
 void PortMetalFEAddQuad(void *texture, PortBlendMode blend, const PortFEVertex quad[4]);
+// IDI_FE_MASK_FX (eViewPlatInterface::Render 0x6D1930): as above, with the
+// alpha also multiplied by the mask texture's alpha at the mask coordinates.
+void PortMetalFEAddMaskedQuad(void *texture, void *mask, PortBlendMode blend, const PortFEVertex quad[4]);
 // Returns the number of quads published.
 int PortMetalFEEndFrame();
 
