@@ -25,11 +25,41 @@ bool IsNaN(const float f) {
 #endif
 }
 
+#if defined(EA_PORT_NATIVE)
+bool IsNaN(const UMath::Vector3 &v) {
+    return IsNaN(v.x) || IsNaN(v.y) || IsNaN(v.z);
+}
+bool IsNaN(const UMath::Vector4 &v) {
+    return IsNaN(v.x) || IsNaN(v.y) || IsNaN(v.z) || IsNaN(v.w);
+}
+bool IsNaN(const UMath::Matrix3 &v) {
+    const float *f = reinterpret_cast<const float *>(&v);
+    for (unsigned int i = 0; i < sizeof(v) / sizeof(float); i++) {
+        if (IsNaN(f[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+bool IsNaN(const UMath::Matrix4 &v) {
+    return IsNaN(v.v0) || IsNaN(v.v1) || IsNaN(v.v2) || IsNaN(v.v3);
+}
+
+// The constants every UMath user reads; never defined in the decomp, so the
+// link stubs zero-filled them (an all-zero Matrix4::kIdentity, ...).
+const Vector2 Vector2::kZero = {0.0f, 0.0f};
+const Vector3 Vector3::kZero = {0.0f, 0.0f, 0.0f};
+const Vector4 Vector4::kZero = {0.0f, 0.0f, 0.0f, 0.0f};
+const Vector4 Vector4::kIdentity = {0.0f, 0.0f, 0.0f, 1.0f};
+const Matrix4 Matrix4::kIdentity = {{1.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 1.0f}};
+float Infinity = 3.4028235e38f;
+#else
 // STRIPPED
 bool IsNaN(const UMath::Vector3 &v) {}
 bool IsNaN(const UMath::Vector4 &v) {}
 bool IsNaN(const UMath::Matrix3 &v) {}
 bool IsNaN(const UMath::Matrix4 &v) {}
+#endif
 //...
 
 } // namespace UMath
