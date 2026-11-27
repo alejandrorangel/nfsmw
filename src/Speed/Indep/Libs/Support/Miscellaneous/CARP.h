@@ -15,6 +15,19 @@ namespace CARP {
 
 struct Map {};
 
+struct EventList;
+struct EventSeqAction;
+struct EventSeqState;
+struct EventSeqSystem;
+struct StimulusFilter;
+
+// Slots that ResolveTagReferences turns from a tag into a pointer (see
+// TagReference). They are 4 bytes in the loaded data, so natively they hold a
+// PortPtr32.
+typedef PORT_PTR32(const EventList) EventListRef;
+typedef PORT_PTR32(const EventSeqState) EventSeqStateRef;
+typedef PORT_PTR32(const EventSeqSystem) EventSeqSystemRef;
+
 // TODO fix the order of these
 
 // total size: 0x10
@@ -63,8 +76,8 @@ struct EventSeqAction {
         return reinterpret_cast<float *>(&this->GetTagList()[this->mNumTags]);
     }
 
-    EventList **GetEventListArray() {
-        return reinterpret_cast<EventList **>(&this->GetTimeList()[this->mNumTimes]);
+    EventListRef *GetEventListArray() {
+        return reinterpret_cast<EventListRef *>(&this->GetTimeList()[this->mNumTimes]);
     }
 
     const uint32 *GetTagList() const {
@@ -75,13 +88,13 @@ struct EventSeqAction {
         return reinterpret_cast<const float *>(&this->GetTagList()[this->mNumTags]);
     }
 
-    const EventList *const *GetEventListArray() const {
-        return reinterpret_cast<const EventList *const *>(&this->GetTimeList()[this->mNumTimes]);
+    const EventListRef *GetEventListArray() const {
+        return reinterpret_cast<const EventListRef *>(&this->GetTimeList()[this->mNumTimes]);
     }
 
     const EventList *GetEventList(bool tagIndex, unsigned int index) const {
         unsigned int actualIndex = index;
-        const EventList *const *eventLists = this->GetEventListArray();
+        const EventListRef *eventLists = this->GetEventListArray();
 
         if (!tagIndex) {
             actualIndex += this->mNumTags;
@@ -121,7 +134,7 @@ struct EventSeqAction {
 // total size: 0x8
 struct EventSeqResponse {
     uint32 mEndState;           // offset 0x0, size 0x4
-    EventSeqAction *mActionSeq; // offset 0x4, size 0x4
+    PORT_PTR32(EventSeqAction) mActionSeq; // offset 0x4, size 0x4
 };
 
 struct Expression {
@@ -205,7 +218,7 @@ struct EventSeqState {
     }
 
     uint32 mNumStimuli;      // offset 0x0, size 0x4
-    StimulusFilter *mFilter; // offset 0x4, size 0x4
+    PORT_PTR32(StimulusFilter) mFilter; // offset 0x4, size 0x4
 };
 
 // total size: 0xC
@@ -214,16 +227,16 @@ struct EventSeqSystem {
         return reinterpret_cast<uint32 *>(&this[1]);
     }
 
-    EventSeqState **GetStates() {
-        return reinterpret_cast<EventSeqState **>(&this->GetStateIDs()[this->mNumStates]);
+    EventSeqStateRef *GetStates() {
+        return reinterpret_cast<EventSeqStateRef *>(&this->GetStateIDs()[this->mNumStates]);
     }
 
     const uint32 *GetStateIDs() const {
         return reinterpret_cast<const uint32 *>(&this[1]);
     }
 
-    const EventSeqState *const *GetStates() const {
-        return reinterpret_cast<const EventSeqState *const *>(&this->GetStateIDs()[this->mNumStates]);
+    const EventSeqStateRef *GetStates() const {
+        return reinterpret_cast<const EventSeqStateRef *>(&this->GetStateIDs()[this->mNumStates]);
     }
 
     // Decl: 353
@@ -244,9 +257,13 @@ struct EventSeqSystem {
 };
 
 struct EventSeqEngine {
-    unsigned int *GetSystemIDs() {}
+    unsigned int *GetSystemIDs() {
+        return &this->mNumSystems + 1;
+    }
 
-    EventSeqSystem **GetSystems() {}
+    EventSeqSystemRef *GetSystems() {
+        return reinterpret_cast<EventSeqSystemRef *>(&this->GetSystemIDs()[this->mNumSystems]);
+    }
 
     const unsigned int FindSystemIndex(unsigned int ident) const {}
 
@@ -256,20 +273,25 @@ struct EventSeqEngine {
         return &this->mNumSystems + 1;
     }
 
-    const EventSeqSystem *const *GetSystems() const {
-        return reinterpret_cast<const EventSeqSystem *const *>(&this->GetSystemIDs()[this->mNumSystems]);
+    const EventSeqSystemRef *GetSystems() const {
+        return reinterpret_cast<const EventSeqSystemRef *>(&this->GetSystemIDs()[this->mNumSystems]);
     }
 
-    const char *mName;  // offset 0x0, size 0x4
+    PORT_PTR32(const char) mName; // offset 0x0, size 0x4
     uint32 mNumSystems; // offset 0x4, size 0x4
 };
 
+// A 4-byte slot in loaded CARP data that holds a UData tag until
+// ResolveTagReferences constructs a TagReference over it, which replaces the
+// tag with a pointer to that UData's data (-1: the containing group, unknown:
+// null). Natively the pointer is stored as PortPtr32 bits, so the fields
+// these slots alias are PORT_PTR32.
 // total size: 0x4
 struct TagReference {
     unsigned int fData; // offset 0x0, size 0x4
 
     TagReference() {}
-    TagReference(unsigned int tag) {}
+    TagReference(unsigned int tag) : fData(tag) {}
 
     TagReference(const UGroup *context);
 };
@@ -282,7 +304,7 @@ struct CollisionInstance {
     float fHeight;                                      // offset 0x14, size 0x4
     unsigned short fGroupNumber;                        // offset 0x18, size 0x2
     unsigned short fRenderInstanceInd;                  // offset 0x1A, size 0x2
-    mutable const WCollisionArticle *fCollisionArticle; // offset 0x1C, size 0x4
+    mutable PORT_PTR32(const WCollisionArticle) fCollisionArticle; // offset 0x1C, size 0x4
     bVector4 fInvMatRow2Length;                         // offset 0x20, size 0x10
     bVector4 fInvPosRadius;                             // offset 0x30, size 0x10
 };
@@ -329,10 +351,21 @@ union ExprValType { // 0x4
     /* 0x0 */ bool b;
 };
 
+typedef void (*UDataTagResolverFunc)(const UData *d, const UGroup *context);
+
+void InitResolvers();
+void AddUDataTagResolver(unsigned int dataTag, UDataTagResolverFunc dtrFunc);
 unsigned int ResolveTagReferences(const UGroup *g, unsigned int deltaAddress);
 ExprValType ExpressionEvaluator(const Expression *expr, ExprValType (*lookup)(unsigned int, unsigned int, const void *, const ExprValType *),
                                 const void *context, const ExprValType *values);
 
 }; // namespace CARP
+
+#if defined(EA_PORT_NATIVE)
+static_assert(sizeof(CARP::EventSeqEngine) == 0x8, "EventSeqEngine header is loaded in place");
+static_assert(sizeof(CARP::EventSeqResponse) == 0x8, "EventSeqResponse is loaded in place");
+static_assert(sizeof(CARP::EventSeqState) == 0x8, "EventSeqState header is loaded in place");
+static_assert(sizeof(CARP::CollisionInstance) == 0x40, "CollisionInstance is loaded in place");
+#endif
 
 #endif

@@ -176,15 +176,16 @@ public:
         float externalTime,
         float rate
     ) : UTL::COM::Object(*baseObj), IEngine(baseObj) {
-        void *block;
-        const CARP::EventSeqSystem *const *sysData = engineData->GetSystems();
+        // PC: 0x6451A0
+        const CARP::EventSeqSystemRef *sysData = engineData->GetSystems();
 
         this->mContext = context;
         this->mEngine = const_cast<CARP::EventSeqEngine *>(engineData);
         this->mVerbose = false;
         this->mNumSystems = engineData->mNumSystems;
 
-        new (this->mEngine) System(this, sysData[engineData->mNumSystems], externalTime, rate);
+        void *block = gFastMem.Alloc(this->mNumSystems * sizeof(System), "EventSequencerSystems");
+        this->mSystems = static_cast<System *>(block);
 
         for (unsigned int i = 0; i < engineData->mNumSystems; i++) {
             new (&this->mSystems[i]) System(this, sysData[i], externalTime, rate);

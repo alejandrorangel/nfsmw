@@ -62,8 +62,12 @@ void WCollisionArticle::Resolve() {
         for (int ind = 0; ind < this->fNumSurfaces; ++ind) {
             char *dataStart = reinterpret_cast<char *>(reinterpret_cast<char *>(&this[1]) + this->fStripsSize + this->fEdgesSize);
             unsigned int hash = reinterpret_cast<unsigned int *>(dataStart)[ind];
-            // TODO 64 bit, gotta reallocate and use uintptr_t
+#if defined(EA_PORT_NATIVE)
+            // the slots are 4 bytes: keep the pointer as PortPtr32 bits (see GetSurface)
+            reinterpret_cast<unsigned int *>(dataStart)[ind] = PortPtr32Encode(SimSurface::Lookup(hash));
+#else
             reinterpret_cast<unsigned int *>(dataStart)[ind] = reinterpret_cast<unsigned int>(SimSurface::Lookup(hash));
+#endif
         }
         this->fResolvedFlag = true;
     }
@@ -108,7 +112,7 @@ void WCollisionPack::Resolve(const UGroup *cGroup, unsigned int deltaAddress) {
 #endif
         } else if (cInst->fCollisionArticle) {
             cInst->fCollisionArticle =
-                reinterpret_cast<const WCollisionArticle *>(reinterpret_cast<const char *>(cInst->fCollisionArticle) + deltaAddress);
+                reinterpret_cast<const WCollisionArticle *>(reinterpret_cast<const char *>(static_cast<const WCollisionArticle *>(cInst->fCollisionArticle)) + deltaAddress);
         }
     }
 }

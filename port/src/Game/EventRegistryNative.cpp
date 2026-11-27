@@ -28,3 +28,13 @@ void (*RegisterEvent::LookupEvent(unsigned int tag))(const void *) {
     }
     return nullptr;
 }
+
+// ResolveEvent (PC 0x633760) uses the same key order table to pick from
+// gResolveEventCallbacks (0x8F61C8): 115 of the 161 events have one, which
+// turns tag references in the event's static data into pointers. None are
+// reconstructed yet (their StaticData would also need PORT_PTR32 fields), so
+// event lists in CARP data keep their tags.
+// TODO(port): resolvers for the events that get reconstructed.
+void (*RegisterEvent::ResolveEvent(unsigned int tag))(void *, const struct UGroup *) {
+    return nullptr;
+}

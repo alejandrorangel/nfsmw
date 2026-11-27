@@ -92,10 +92,14 @@ struct WCollisionArticle {
     void Resolve();
 
     const Attrib::Collection *GetSurface(unsigned int ind) const {
-        // TODO 64 bit
         const char *dataStart = reinterpret_cast<const char *>(&this[1]) + this->fStripsSize + this->fEdgesSize;
         unsigned int ref = reinterpret_cast<const unsigned int *>(dataStart)[ind];
+#if defined(EA_PORT_NATIVE)
+        // 4-byte slots: Resolve() stores PortPtr32 bits natively
+        return static_cast<const Attrib::Collection *>(PortPtr32Decode(ref));
+#else
         return reinterpret_cast<const Attrib::Collection *>(ref);
+#endif
     }
 
     const WCollisionBarrier *GetBarrier(unsigned int ind) const {
