@@ -10,6 +10,7 @@
 #include "Speed/Indep/Src/Ecstasy/EcstasyData.hpp"
 #include "Speed/Indep/Src/Ecstasy/Texture.hpp"
 #include "Speed/Indep/Src/Frontend/FEManager.hpp"
+#include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngMouse.hpp"
 #include "Speed/Indep/Src/Misc/GameFlow.hpp"
 
 #include "../Mac/MetalBridge.h"
@@ -180,6 +181,8 @@ void eDisplayFrame() {
     // conns compare it against their last render frame).
     extern uint32 eFrameCounter;
     eFrameCounter++;
+    // 0x6E7667: then the mouse state (FEMSG_MOUSE_CHANGED etc.) for the next frame.
+    gFEMouseState.Update();
     PaceFrame();
     ft.last_end = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
 

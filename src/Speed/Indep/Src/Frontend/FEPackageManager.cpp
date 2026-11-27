@@ -1,6 +1,7 @@
 #include "Speed/Indep/Src/Frontend/FEPackageManager.hpp"
 #include "Speed/Indep/Src/Frontend/FEngFrontend.hpp"
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterface.hpp"
+#include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngMouse.hpp"
 #include "Speed/Indep/Src/Misc/LZCompress.hpp"
 #include "Speed/Indep/bWare/Inc/bWare.hpp"
 #include "Speed/Indep/bWare/Inc/Strings.hpp"
@@ -237,6 +238,12 @@ void FEPackageManager::ErrorTick() {
 }
 
 void FEPackageManager::Tick() {
+#if defined(EA_PLATFORM_WIN32)
+    // PC (speed.exe 1.3 @ 0x5A8C20): screens hear about mouse input first.
+    if (gFEMouseState.HasChanged()) {
+        BroadcastMessage(FEMSG_MOUSE_CHANGED);
+    }
+#endif
     BroadcastMessage(FEMSG_SCREEN_TICK);
 }
 

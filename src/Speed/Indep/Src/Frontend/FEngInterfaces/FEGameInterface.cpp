@@ -3,6 +3,7 @@
 #include "Speed/Indep/Src/FEng/FEGameInterface.h"
 #include "Speed/Indep/Src/FEng/FEList.h"
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterfaceFEObjects.hpp"
+#include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngMouse.hpp"
 #include "Speed/Indep/Src/Frontend/FEngRender.hpp"
 #include "Speed/Indep/Src/Frontend/FEJoyInput.hpp"
 #include "Speed/Indep/Src/Frontend/FEPackageManager.hpp"
@@ -248,11 +249,15 @@ u32 cFEngGameInterface::GetJoyPadMask(u8 feng_pad_index) {
     return cFEngJoyInput::mInstance->GetJoyPadMask(feng_pad_index);
 }
 
-#if defined(EA_PORT_NATIVE)
-void PortGetFEMouseInfo(FEMouseInfo &Info); // port/src/Platform/InputNative.cpp
-
+#if defined(EA_PLATFORM_WIN32)
+// PC (speed.exe 1.3 @ 0x516870): the cursor relative to the screen centre;
+// bit 0 left, bit 1 right button. The PC leaves WheelDelta alone (FEngine
+// passes an uninitialised local); it is cleared here.
 void cFEngGameInterface::GetMouseInfo(FEMouseInfo &Info) {
-    PortGetFEMouseInfo(Info);
+    Info.XPos = static_cast<i16>(static_cast<float>(gFEMouseState.X) - 320.0f);
+    Info.YPos = static_cast<i16>(static_cast<float>(gFEMouseState.Y) - 240.0f);
+    Info.WheelDelta = 0;
+    Info.ButtonMask = static_cast<u16>((gFEMouseState.RightDown << 1) | gFEMouseState.LeftDown);
 }
 #else
 void cFEngGameInterface::GetMouseInfo(FEMouseInfo &Info) {}

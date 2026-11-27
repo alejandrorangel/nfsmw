@@ -10,6 +10,7 @@
 #include "Speed/Indep/Src/Frontend/MenuScreens/InGame/FEPkg_MU_Keyboard.hpp"
 #include "Speed/Indep/Src/Misc/Timer.hpp"
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterfaceFEObjects.hpp"
+#include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngMouse.hpp"
 #include "Speed/Indep/bWare/Inc/bMath.hpp"
 
 extern float g_KBDelaySeconds;
@@ -110,6 +111,11 @@ void UIWidgetMenu::NotificationMessage(u32 msg, FEObject *pobj, u32 param1, u32 
         case FEMSG_DECLINE_EDITED_TEXT:
             bAllowScroll = true;
             return;
+#ifdef EA_PLATFORM_WIN32
+        case FEMSG_MOUSE_CHANGED: // PC (speed.exe 1.3 @ 0x5A96C0)
+            UpdateMouse();
+            return;
+#endif
         case FEMSG_EXIT_STARTED:
         default:
             return;
@@ -553,3 +559,90 @@ uint32 UIWidgetMenu::GetWidgetIndex(FEWidget *opt) {
     }
     return 0;
 }
+
+#ifdef EA_PLATFORM_WIN32
+// PC (speed.exe 1.3 @ 0x5A5D40): scroll the view by widgets without moving
+// the selection (which then needs a sync before it can move).
+void UIWidgetMenu::ScrollView(int dir) {
+    if (Options.IsEmpty() || iIndexToAdd < iMaxWidgetsOnScreen) {
+        return;
+    }
+    FEWidget *old_top = pViewTop;
+    while (dir > 0 && GetWidgetIndex(pViewTop) < iIndexToAdd - iMaxWidgetsOnScreen) {
+        pViewTop = pViewTop->GetNext();
+        dir--;
+    }
+    while (dir < 0 && pViewTop != Options.GetHead()) {
+        pViewTop = pViewTop->GetPrev();
+        dir++;
+    }
+    if (old_top != pViewTop) {
+        uint32 current = GetWidgetIndex(pCurrentOption);
+        uint32 top = GetWidgetIndex(pViewTop);
+        bViewNeedsSync = !(top <= current && current < iMaxWidgetsOnScreen + top);
+        Reposition();
+    }
+}
+
+// PC (speed.exe 1.3 @ 0x5882B0; name is a guess): the visible widget whose
+// rectangle holds a point (relative to the widget group).
+FEWidget *UIWidgetMenu::GetWidgetAt(float x, float y) {
+    for (FEWidget *w = Options.GetHead(); w != Options.EndOfList(); w = w->GetNext()) {
+        if (!w->IsHidden()) {
+            bVector2 top_left;
+            bVector2 size;
+            w->GetTopLeft(top_left);
+            w->GetSize(size);
+            if (FEngTestForIntersection(x, y, top_left, size)) {
+                return w;
+            }
+        }
+    }
+    return nullptr;
+}
+
+// PC (speed.exe 1.3 @ 0x5A8DB0; name is a guess), on FEMSG_MOUSE_CHANGED:
+// a click selects a widget, a click on the selected one lets it handle the
+// click (CheckMouse), a click on the done button accepts; moving over the done
+// button highlights it; the wheel scrolls the view.
+void UIWidgetMenu::UpdateMouse() {
+    float mouse_x, mouse_y;
+    FEngGetMousePos(mouse_x, mouse_y);
+    float center_x = 0.0f, center_y = 0.0f;
+    FEObject *group = FEngFindObject(GetPackageName(), 0x78B4E2A9);
+    if (group != nullptr) { // the PC doesn't check
+        FEngGetCenter(group, center_x, center_y);
+    }
+    mouse_x -= center_x;
+    mouse_y -= center_y;
+    if (!gFEMouseState.LeftPressed) {
+        if (gFEMouseState.Wheel == 0) {
+            if ((gFEMouseState.DeltaX != 0 || gFEMouseState.DeltaY != 0) && GetWidgetAt(mouse_x, mouse_y) == nullptr &&
+                FEngTestForIntersection(mouse_x, mouse_y, pDone) && bAllowScroll) {
+                if (pCurrentOption != nullptr) {
+                    pCurrentOption->UnsetFocus();
+                    pCurrentOption = nullptr;
+                }
+                FEngSetCurrentButton(GetPackageName(), pDone->NameHash);
+            }
+        } else if (static_cast<float>(gFEMouseState.Wheel) > 0.0f) {
+            ScrollView(-1);
+        } else if (static_cast<float>(gFEMouseState.Wheel) < 0.0f) {
+            ScrollView(1);
+        }
+    } else {
+        FEWidget *w = GetWidgetAt(mouse_x, mouse_y);
+        if (w != nullptr && w->IsEnabled()) {
+            if (pCurrentOption != nullptr && w == pCurrentOption) {
+                pCurrentOption->CheckMouse(GetPackageName(), mouse_x, mouse_y);
+                return;
+            }
+            SetOption(w);
+            return;
+        }
+        if (bAllowScroll && FEngTestForIntersection(mouse_x, mouse_y, pDone)) {
+            cFEng::Get()->QueueGameMessage(__PAD_ACCEPT__, GetPackageName(), 0xFF);
+        }
+    }
+}
+#endif

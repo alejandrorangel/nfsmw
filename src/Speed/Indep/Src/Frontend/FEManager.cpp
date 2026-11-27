@@ -19,6 +19,7 @@
 #include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/career/uiRepSheetRivalFlow.hpp"
 #include "Speed/Indep/Src/Frontend/MoviePlayer/MoviePlayer.hpp"
 #include "Speed/Indep/Src/Frontend/FEngRender.hpp"
+#include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngMouse.hpp"
 #include "Speed/Indep/Src/Gameplay/GRaceStatus.h"
 #include "Speed/Indep/Src/Generated/Messages/MControlPathfinder.h"
 #include "Speed/Indep/Src/Input/IOModule.h"
@@ -301,6 +302,10 @@ void FEManager::StopFE() {
 void FEManager::Render() {
     if (DrawFEng) {
         cFEng::Get()->DrawForeground();
+#if defined(EA_PLATFORM_WIN32)
+        // PC (speed.exe 1.3 @ 0x516F70): the mouse cursor goes over everything.
+        FEngDrawMouseCursor(gFEMouseState.X, gFEMouseState.Y);
+#endif
     }
 }
 

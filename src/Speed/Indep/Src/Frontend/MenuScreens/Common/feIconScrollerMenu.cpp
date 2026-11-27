@@ -10,6 +10,7 @@
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterfaceFEButtons.hpp"
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterfaceFEImages.hpp"
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterfaceFEObjects.hpp"
+#include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngMouse.hpp"
 #include "Speed/Indep/Src/Frontend/MenuScreens/Common/FEAnyTutorialScreen.hpp"
 #include "Speed/Indep/Src/Frontend/MenuScreens/Common/feWidget.hpp"
 #include "Speed/Indep/Src/Misc/Point.hpp"
@@ -121,6 +122,26 @@ bool IconPanel::SetSelection(IconOption *option) {
     }
     return false;
 }
+
+#ifdef EA_PLATFORM_WIN32
+// PC (speed.exe 1.3 @ 0x587190): select the option under the cursor; true if
+// the selection changed.
+bool IconPanel::UpdateMouse() {
+    float mouse_x, mouse_y;
+    FEngGetMousePos(mouse_x, mouse_y);
+    for (IconOption *opt = Options.GetHead(); opt != Options.EndOfList(); opt = opt->GetNext()) {
+        if (FEngTestForIntersection(mouse_x, mouse_y, opt->FEngObject)) {
+            if (opt == pCurrentNode) {
+                return false;
+            }
+            SetSelection(opt);
+            bJustScrolled = true;
+            return true;
+        }
+    }
+    return false;
+}
+#endif
 
 void IconPanel::SetInitialPos() {
     float num_opts = static_cast<float>(Options.CountElements());
@@ -439,6 +460,41 @@ bool IconScroller::SetSelection(IconOption *option) {
 
     return false;
 }
+
+#ifdef EA_PLATFORM_WIN32
+// PC (speed.exe 1.3 @ 0x592F10): the wheel over the scroll region scrolls,
+// with the same package messages as the arrow keys (wheel away from the user
+// = left). True if the cursor is over the region.
+bool IconScroller::UpdateMouse() {
+    ScrollBar.UpdateMouse();
+    if (pScrollRegion == nullptr) {
+        return false;
+    }
+    float mouse_x, mouse_y;
+    FEngGetMousePos(mouse_x, mouse_y);
+    if (!FEngTestForIntersection(mouse_x, mouse_y, pScrollRegion)) {
+        return false;
+    }
+    float wheel;
+    FEngGetMouseWheel(wheel);
+    eScrollDir dir;
+    if (wheel < 0.0f) {
+        cFEng::Get()->QueuePackageMessage(__RIGHT__, pPackageName, nullptr);
+        dir = eSD_NEXT;
+    } else if (wheel > 0.0f) {
+        cFEng::Get()->QueuePackageMessage(__LEFT__, pPackageName, nullptr);
+        dir = eSD_PREV;
+    } else {
+        return true;
+    }
+    if (bWrap) {
+        ScrollWrapped(dir);
+    } else {
+        Scroll(dir);
+    }
+    return true;
+}
+#endif
 
 void IconScroller::RemoveAll() {
     for (IconOption *opt = Options.GetHead(); opt != Options.EndOfList(); opt = opt->GetNext()) {
@@ -765,6 +821,27 @@ void IconScrollerMenu::NotificationMessage(u32 msg, FEObject *pobj, u32 param1, 
             }
             return;
         }
+#ifdef EA_PLATFORM_WIN32
+        // PC (speed.exe 1.3 @ 0x587D30): holding the left button over the
+        // selected icon presses it; afterwards the cursor over it releases.
+        case FEMSG_MOUSE_CHANGED: {
+            float mouse_x, mouse_y;
+            FEngGetMousePos(mouse_x, mouse_y);
+            if (FEngTestForIntersection(mouse_x, mouse_y, Options.GetMaster())) {
+                if (gFEMouseState.LeftDown) {
+                    cFEng::Get()->QueuePackageMessage(__BUTTON_PRESSED__, GetPackageName(), Options.GetCurrentOption()->FEngObject);
+                    bWasLeftMouseDown = true;
+                } else if (bWasLeftMouseDown) {
+                    // The PC never clears bWasLeftMouseDown.
+                    cFEng::Get()->QueuePackageMessage(__BUTTON_RELEASED__, GetPackageName(), Options.GetCurrentOption()->FEngObject);
+                }
+            }
+            if (Options.UpdateMouse()) {
+                RefreshHeader();
+            }
+            return;
+        }
+#endif
         case FEMSG_MOVIE_FINISHED: {
             const u32 FEObj_MASTERBLASTER = 0x99344537;
             const u32 FEObj_Init = FEHASH_INIT;

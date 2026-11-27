@@ -62,6 +62,10 @@ class UIWidgetMenu : public MenuScreen {
     }
 
     uint32 GetWidgetIndex(FEWidget *opt);
+#ifdef EA_PLATFORM_WIN32
+    FEWidget *GetWidgetAt(float x, float y);
+    void UpdateMouse();
+#endif
     FEInputWidget *GetCurrentInputWidget() {};
 
     bTList<FEWidget> Options;    // offset 0x2C, size 0x8

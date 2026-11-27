@@ -534,6 +534,13 @@ class FEScrollBar {
     bool IsVisible() {                       // Decl: 530
         return bVisible;
     }
+#ifdef EA_PLATFORM_WIN32
+    // What the last UpdateMouse asks the owner to scroll by: eSD_NONE, a row
+    // (+/-1, arrows), a page (eSD_PAGE_PREV/NEXT, backing) or rows (handle).
+    int GetMouseScroll() {
+        return iMouseScroll;
+    }
+#endif
 
   private:
     void SetPosResized(int num_view_items, int num_list_items,
@@ -566,6 +573,9 @@ class FEScrollBar {
     FEObject *pSecondArrow;      // offset 0x58, size 0x4, Decl: 577
     FEObject *pFirstBackingEnd;  // offset 0x5C, size 0x4, Decl: 578
     FEObject *pSecondBackingEnd; // offset 0x60, size 0x4, Decl: 579
+#ifdef EA_PLATFORM_WIN32
+    int iMouseScroll; // PC offset 0x58 (name is a guess)
+#endif
 };
 
 // total size: 0x54

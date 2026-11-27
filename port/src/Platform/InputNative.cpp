@@ -16,9 +16,8 @@
 #include "Speed/Indep/Tools/AttribSys/Runtime/AttribSys.h"
 
 #include "../Mac/InputBridge.h"
-#include "Speed/Indep/Src/FEng/FEMouse.h"
+#include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngMouse.hpp"
 
-#include <cmath>
 
 #include <cstdio>
 #include <cstdlib>
@@ -298,13 +297,42 @@ bool IsJoystickTypeWheel(JoystickPort port) {
     return false;
 }
 
-// cFEngGameInterface::GetMouseInfo (PC: speed.exe 1.3 @ 0x516870): cursor in the
-// 640x480 frontend screen, relative to its centre; bit 0 left, bit 1 right button.
-void PortGetFEMouseInfo(FEMouseInfo &Info) {
+// The PC mouse state (speed.exe 1.3 @ 0x987F50), from Win32 GetCursorPos and
+// the DirectInput mouse; here from Cocoa (InputMac.mm).
+
+// 0x6C9B60: the cursor in the 640x480 frontend screen. The PC stretches the
+// window's client area over it; the port maps through the renderer's
+// aspect-correct placement (PortMetalViewToFEScreen), so in widescreen the
+// cursor can leave 0..640. ftol truncates.
+void FEMouseState::UpdateCursorPos() {
+    PrevX = X;
+    PrevY = Y;
     PortInputState state;
     PortInputGetState(&state);
-    Info.XPos = static_cast<i16>(std::lround(state.mouse_x - 320.0f));
-    Info.YPos = static_cast<i16>(std::lround(state.mouse_y - 240.0f));
-    Info.WheelDelta = 0;
-    Info.ButtonMask = static_cast<u16>(state.mouse_buttons & 3);
+    X = static_cast<int>(state.mouse_x);
+    Y = static_cast<int>(state.mouse_y);
+    DeltaX = X - PrevX;
+    DeltaY = Y - PrevY;
+}
+
+// 0x6C9C80, once a frame at the end of eDisplayFrame: buttons 0/1/2 are
+// left/right/middle; the wheel is what DirectInput accumulated since last read.
+void FEMouseState::Update() {
+    UpdateCursorPos();
+    Wheel = PortInputTakeMouseWheel();
+    PortInputState state;
+    PortInputGetState(&state);
+    bool left = (state.mouse_buttons & 1) != 0;
+    LeftPressed = !LeftDown && left;
+    LeftReleased = !left && LeftDown;
+    LeftDown = left;
+    bool right = (state.mouse_buttons & 2) != 0;
+    RightPressed = !RightDown && right;
+    RightReleased = !right && RightDown;
+    RightDown = right;
+    bool middle = (state.mouse_buttons & 4) != 0;
+    bool was_middle = MiddleDown;
+    MiddlePressed = !was_middle && middle;
+    MiddleDown = middle;
+    MiddleReleased = !middle && was_middle;
 }

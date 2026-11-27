@@ -33,10 +33,13 @@ struct PortInputState {
     float pad[PORT_PAD_COUNT];
     bool pad_connected;
     // Mouse in the frontend's 640x480 virtual screen (may fall outside it in
-    // widescreen), and buttons (bit 0 left, bit 1 right).
+    // widescreen), and buttons (bit 0 left, bit 1 right, bit 2 middle).
     float mouse_x, mouse_y;
     unsigned int mouse_buttons;
 };
 
 // Fills a consistent snapshot of the current state (callable from any thread).
 void PortInputGetState(PortInputState *out);
+// Returns and clears the wheel movement since the last call, in DirectInput
+// units (+120 a notch away from the user, whatever the scrolling preference).
+int PortInputTakeMouseWheel();

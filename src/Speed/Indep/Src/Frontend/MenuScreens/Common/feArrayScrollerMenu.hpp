@@ -284,6 +284,9 @@ class ArrayScroller {
     void ScrollVer(eScrollDir dir);
 
     void UpdateScrollbar();
+#ifdef EA_PLATFORM_WIN32
+    void ScrollView(int dir);
+#endif
 
     bool bShouldPlaySound;     // offset 0x0, size 0x1
     bTList<ArraySlot> slots;   // offset 0x4, size 0x8

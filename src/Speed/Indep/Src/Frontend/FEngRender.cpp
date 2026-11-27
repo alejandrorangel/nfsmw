@@ -566,3 +566,46 @@ void cFEngRender::AddToRenderList(FEObject *pObject) {
         RenderObject(pObject, ri);
     }
 }
+
+#if defined(EA_PLATFORM_WIN32)
+#include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngMouse.hpp"
+#include "Speed/Indep/Src/Misc/GameFlow.hpp"
+#include "Speed/Indep/Src/Misc/Timer.hpp"
+
+// PC (speed.exe 1.3 @ 0x56FDB0, called from FEManager::Render): the frontend
+// cursor, the PC_CURSOR texture at its own size with its top-left at the
+// cursor, drawn last. Outside the frontend it hides after 2 s without moving.
+void FEngDrawMouseCursor(int x, int y) {
+    static int last_x, last_y; // 0x91CFB0, 0x91CFB4
+    static Timer last_moved;   // 0x91D8D0
+    if (gFEMouseCursorHidden) {
+        return;
+    }
+    if (x != last_x || y != last_y) {
+        last_moved = RealTimer;
+    }
+    if ((RealTimer - last_moved).GetSeconds() > 2.0f && !TheGameFlowManager.IsInFrontend()) {
+        return;
+    }
+    last_x = x;
+    last_y = y;
+    TextureInfo *texture = GetTextureInfo(0x6B6A294F, 1, 0); // "PC_CURSOR"
+    float left = static_cast<float>(x);
+    float top = static_cast<float>(y);
+    float right = static_cast<float>(texture->Width + x);
+    float bottom = static_cast<float>(texture->Height + y);
+    ePoly poly;
+    bMemSet(&poly, 0, sizeof(poly));
+    poly.Vertices[0] = bVector3(left, top, 0.0f);
+    poly.Vertices[1] = bVector3(right, top, 0.0f);
+    poly.Vertices[2] = bVector3(right, bottom, 0.0f);
+    poly.Vertices[3] = bVector3(left, bottom, 0.0f);
+    static const float uvs[4][2] = {{0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}};
+    for (int i = 0; i < 4; i++) {
+        poly.UVs[i][0] = uvs[i][0];
+        poly.UVs[i][1] = uvs[i][1];
+        *reinterpret_cast<uint32 *>(poly.Colours[i]) = 0x80808080;
+    }
+    eGetView(0, false)->FERender(&poly, texture, 0);
+}
+#endif

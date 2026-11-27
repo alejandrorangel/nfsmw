@@ -203,7 +203,7 @@ class IconPanel {
     }
 
 #ifdef EA_PLATFORM_WIN32
-    virtual bool UpdateMouse(); // TODO
+    virtual bool UpdateMouse();
 #endif
 
     virtual void SetInitialPos();
@@ -255,7 +255,7 @@ class IconScroller : public IconPanel {
     FEImage *AddOption(IconOption *option) override;
     virtual void SetInitialPos(int index);
 #ifdef EA_PLATFORM_WIN32
-    bool UpdateMouse() override; // TODO
+    bool UpdateMouse() override;
 #endif
     bool SetSelection(IconOption *option) override;
     void RemoveAll() override;
@@ -323,10 +323,7 @@ class IconScroller : public IconPanel {
 
     IconOption *HeadBookEnd; // offset 0x38, size 0x4
     IconOption *TailBookEnd; // offset 0x3C, size 0x4
-    FEScrollBar ScrollBar;   // offset 0x40, size 0x64
-#ifdef EA_PLATFORM_WIN32
-    uint32 TODO_PAD; // TODO: is there an extra member here or is tCubic aligned?
-#endif
+    FEScrollBar ScrollBar;   // offset 0x40, size 0x64 (PC: 0x5C, with iMouseScroll)
     tCubic1D AnimateCubic;                  // offset 0xA4, size 0x2C
     eScrollerAlignment AlignmentToSelected; // offset 0xD0, size 0x4
     int iNumBookEnds;                       // offset 0xD4, size 0x4

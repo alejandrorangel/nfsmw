@@ -6,6 +6,7 @@
 #include "InputBridge.h"
 #include "MetalBridge.h"
 
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -104,6 +105,33 @@ static void SetKey(unsigned short code, bool down) {
     }
 }
 
+// The PC hides the Windows cursor (ShowCursor(FALSE)) and the frontend draws
+// its own (FEngDrawMouseCursor); hide the system cursor while it's over the view.
+static bool gSystemCursorHidden;
+
+static void SetSystemCursorHidden(bool hidden) {
+    if (hidden != gSystemCursorHidden) {
+        gSystemCursorHidden = hidden;
+        if (hidden) {
+            [NSCursor hide];
+        } else {
+            [NSCursor unhide];
+        }
+    }
+}
+
+@interface PortCursorTracker : NSObject
+@end
+
+@implementation PortCursorTracker
+- (void)mouseEntered:(NSEvent *)event {
+    SetSystemCursorHidden(true);
+}
+- (void)mouseExited:(NSEvent *)event {
+    SetSystemCursorHidden(false);
+}
+@end
+
 static void TrackMouse(NSEvent *event) {
     NSView *view = event.window.contentView;
     if (view == nil) {
@@ -119,22 +147,68 @@ static void TrackMouse(NSEvent *event) {
         case NSEventTypeLeftMouseUp: gMouseButtons &= ~1u; break;
         case NSEventTypeRightMouseDown: gMouseButtons |= 2; break;
         case NSEventTypeRightMouseUp: gMouseButtons &= ~2u; break;
+        case NSEventTypeOtherMouseDown: if (event.buttonNumber == 2) gMouseButtons |= 4; break;
+        case NSEventTypeOtherMouseUp: if (event.buttonNumber == 2) gMouseButtons &= ~4u; break;
         default: break;
+    }
+}
+
+// Wheel notches for the DirectInput-style lZ: a classic wheel's line deltas
+// count as notches; trackpad (precise) deltas are pixels, a notch per 16.
+static int gMouseWheel;
+static double gMouseWheelPixels;
+
+static void TrackScrollWheel(NSEvent *event) {
+    if (event.momentumPhase != NSEventPhaseNone) {
+        return; // no inertial scrolling
+    }
+    double dy = event.scrollingDeltaY;
+    if (event.directionInvertedFromDevice) {
+        dy = -dy; // natural scrolling: back to the physical direction
+    }
+    std::lock_guard<std::mutex> guard(gInputLock);
+    if (event.hasPreciseScrollingDeltas) {
+        gMouseWheelPixels += dy;
+        int notches = (int)(gMouseWheelPixels / 16.0);
+        gMouseWheelPixels -= notches * 16.0;
+        gMouseWheel += notches * 120;
+    } else if (dy != 0.0) {
+        int notches = (int)std::lround(std::fabs(dy));
+        notches = notches < 1 ? 1 : notches;
+        gMouseWheel += (dy > 0.0 ? notches : -notches) * 120;
     }
 }
 
 // Installed from main.mm once the app is running.
 void PortInputInstallKeyboardMonitor() {
+    static PortCursorTracker *tracker = [PortCursorTracker new];
     for (NSWindow *window in NSApp.windows) {
         window.acceptsMouseMovedEvents = YES;
+        NSView *view = window.contentView;
+        if (view != nil) {
+            [view addTrackingArea:[[NSTrackingArea alloc]
+                                      initWithRect:NSZeroRect
+                                           options:NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect
+                                             owner:tracker
+                                          userInfo:nil]];
+            if (NSPointInRect([window convertPointFromScreen:NSEvent.mouseLocation], view.frame)) {
+                SetSystemCursorHidden(true); // already inside: no mouseEntered
+            }
+        }
     }
     [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskMouseMoved | NSEventMaskLeftMouseDragged |
-                                                  NSEventMaskRightMouseDragged | NSEventMaskLeftMouseDown |
-                                                  NSEventMaskLeftMouseUp | NSEventMaskRightMouseDown |
-                                                  NSEventMaskRightMouseUp
+                                                  NSEventMaskRightMouseDragged | NSEventMaskOtherMouseDragged |
+                                                  NSEventMaskLeftMouseDown | NSEventMaskLeftMouseUp |
+                                                  NSEventMaskRightMouseDown | NSEventMaskRightMouseUp |
+                                                  NSEventMaskOtherMouseDown | NSEventMaskOtherMouseUp
                                           handler:^NSEvent *(NSEvent *event) {
                                             TrackMouse(event);
                                             return event; // keep window dragging etc. working
+                                          }];
+    [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskScrollWheel
+                                          handler:^NSEvent *(NSEvent *event) {
+                                            TrackScrollWheel(event);
+                                            return event;
                                           }];
     [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown | NSEventMaskKeyUp | NSEventMaskFlagsChanged
                                           handler:^NSEvent *(NSEvent *event) {
@@ -213,18 +287,123 @@ static const std::vector<AutoKey> &AutoKeys() {
     return keys;
 }
 
+// Seconds since the scripted input clock started (the first input poll).
+static double AutoInputTime() {
+    static const double start = CFAbsoluteTimeGetCurrent();
+    return CFAbsoluteTimeGetCurrent() - start;
+}
+
 static void ApplyAutoKeys(float *keys) {
     const std::vector<AutoKey> &auto_keys = AutoKeys();
     if (auto_keys.empty()) {
         return;
     }
-    static const double start = CFAbsoluteTimeGetCurrent();
-    double now = CFAbsoluteTimeGetCurrent() - start;
+    double now = AutoInputTime();
     for (const AutoKey &k : auto_keys) {
         if (now >= k.time && now < k.time + k.hold) {
             keys[k.key] = 1.0f;
         }
     }
+}
+
+// Scripted mouse for automated runs, on the same clock as NFSMW_AUTO_KEYS:
+//   NFSMW_AUTO_MOUSE=<seconds>:<action>[;...]  actions, in 640x480 FE-screen
+//   coordinates: move:<x>,<y>  down  up  click (left button held 0.2 s)
+//   rclick  wheel:<notches> (+ = away from the user, i.e. scroll up)
+// Once a scripted move has happened it overrides the real cursor position.
+struct AutoMouse {
+    double time;
+    enum { MOVE, DOWN, UP, CLICK, RCLICK, WHEEL } action;
+    float x, y;
+    int notches;
+};
+
+static std::vector<AutoMouse> &AutoMice() {
+    static std::vector<AutoMouse> events = [] {
+        std::vector<AutoMouse> e;
+        for (const char *p = getenv("NFSMW_AUTO_MOUSE"); p && *p;) {
+            const char *semi = strchr(p, ';');
+            const char *colon = strchr(p, ':');
+            if (colon && (!semi || colon < semi)) {
+                AutoMouse m = {atof(p), AutoMouse::MOVE, 0, 0, 0};
+                const char *a = colon + 1;
+                bool ok = true;
+                if (strncmp(a, "move:", 5) == 0) {
+                    m.x = (float)atof(a + 5);
+                    const char *comma = strchr(a, ',');
+                    m.y = comma ? (float)atof(comma + 1) : 0.0f;
+                } else if (strncmp(a, "down", 4) == 0) {
+                    m.action = AutoMouse::DOWN;
+                } else if (strncmp(a, "up", 2) == 0) {
+                    m.action = AutoMouse::UP;
+                } else if (strncmp(a, "click", 5) == 0) {
+                    m.action = AutoMouse::CLICK;
+                } else if (strncmp(a, "rclick", 6) == 0) {
+                    m.action = AutoMouse::RCLICK;
+                } else if (strncmp(a, "wheel:", 6) == 0) {
+                    m.action = AutoMouse::WHEEL;
+                    m.notches = atoi(a + 6);
+                } else {
+                    ok = false;
+                }
+                if (ok) {
+                    e.push_back(m);
+                }
+            }
+            p = semi ? semi + 1 : nullptr;
+        }
+        return e;
+    }();
+    return events;
+}
+
+// Applies the script to the current state; with take_wheel, returns (and
+// consumes) the wheel notches due.
+static int ApplyAutoMouse(PortInputState *out, bool take_wheel) {
+    std::vector<AutoMouse> &events = AutoMice();
+    if (events.empty()) {
+        return 0;
+    }
+    double now = AutoInputTime();
+    bool held = false;
+    int wheel = 0;
+    for (AutoMouse &m : events) {
+        if (now < m.time) {
+            continue;
+        }
+        switch (m.action) {
+        case AutoMouse::MOVE:
+            out->mouse_x = m.x;
+            out->mouse_y = m.y;
+            break;
+        case AutoMouse::DOWN: held = true; break;
+        case AutoMouse::UP: held = false; break;
+        case AutoMouse::CLICK:
+            if (now < m.time + 0.2) out->mouse_buttons |= 1;
+            break;
+        case AutoMouse::RCLICK:
+            if (now < m.time + 0.2) out->mouse_buttons |= 2;
+            break;
+        case AutoMouse::WHEEL:
+            if (take_wheel) {
+                wheel += m.notches;
+                m.notches = 0;
+            }
+            break;
+        }
+    }
+    if (held) {
+        out->mouse_buttons |= 1;
+    }
+    return wheel;
+}
+
+int PortInputTakeMouseWheel() {
+    std::lock_guard<std::mutex> guard(gInputLock);
+    PortInputState scripted = {};
+    int wheel = gMouseWheel + ApplyAutoMouse(&scripted, true) * 120;
+    gMouseWheel = 0;
+    return wheel;
 }
 
 void PortInputGetState(PortInputState *out) {
@@ -235,6 +414,7 @@ void PortInputGetState(PortInputState *out) {
         ApplyAutoKeys(out->keys);
         PortMetalViewToFEScreen(gMouseU, gMouseV, &out->mouse_x, &out->mouse_y);
         out->mouse_buttons = gMouseButtons;
+        ApplyAutoMouse(out, false);
     }
     GCController *controller = GCController.current;
     if (controller == nil && GCController.controllers.count > 0) {

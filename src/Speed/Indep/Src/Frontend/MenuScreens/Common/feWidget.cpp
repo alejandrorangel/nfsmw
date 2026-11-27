@@ -7,6 +7,7 @@
 #include "Speed/Indep/Src/Frontend/FEngHashes/ScriptHashes.hpp"
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterface.hpp"
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterfaceFEObjects.hpp"
+#include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngMouse.hpp"
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterfaceFEStrings.hpp"
 #include "Speed/Indep/Src/Frontend/Localization/Localize.hpp"
 #include "Speed/Indep/Src/Frontend/MenuScreens/Common/FEIconScrollerMenu.hpp"
@@ -502,6 +503,9 @@ FEScrollBar::FEScrollBar(const char *parent_pkg, const char *name, bool vert, bo
     : bVertical(vert), bResizeHandle(resize), bArrowsOnly(arrows_only), bHandleGrabbed(false), bVisible(false), vGrabbedPos(0.0f, 0.0f),
       vCurPos(0.0f, 0.0f), vGrabOffset(0.0f, 0.0f), vBackingPos(0.0f, 0.0f), vBackingSize(0.0f, 0.0f), vHandleMinSize(0.0f, 0.0f), pBacking(nullptr),
       pHandle(nullptr), pFirstArrow(nullptr), pSecondArrow(nullptr), pFirstBackingEnd(nullptr), pSecondBackingEnd(nullptr) {
+#ifdef EA_PLATFORM_WIN32
+    iMouseScroll = eSD_NONE; // the PC leaves it to the first UpdateMouse
+#endif
     char sztemp[32];
     if (name != nullptr) {
         FEngSNPrintf(sztemp, sizeof(sztemp), "%s%s", name, "_Backing");
@@ -594,6 +598,96 @@ void FEScrollBar::SetPosResized(int num_view_items, int num_list_items, int view
 // TODO
 void FEScrollBar::SetPosNonResized(int num_view_items, int num_list_items, int view_head_index) {}
 
+#ifdef EA_PLATFORM_WIN32
+// PC (speed.exe 1.3 @ 0x589900): click the handle to grab it (dragged until
+// the button goes up), click the backing to page, release over an arrow to
+// step. The owner reads the result with GetMouseScroll().
+void FEScrollBar::UpdateMouse() {
+    iMouseScroll = eSD_NONE;
+    if (!bArrowsOnly) {
+        if (FEngMouseLeftPressedOver(pHandle)) {
+            bHandleGrabbed = true;
+            FEngGetMousePos(vGrabbedPos.x, vGrabbedPos.y);
+            float x, y;
+            FEngGetTopLeft(pHandle, x, y);
+            vGrabOffset.x = bAbs(x - vGrabbedPos.x);
+            FEngGetTopLeft(pHandle, x, y);
+            vGrabOffset.y = bAbs(y - vGrabbedPos.y);
+        } else if (FEngMouseLeftPressedOver(pBacking)) {
+            UpdateBackingMouse();
+        }
+        if (gFEMouseState.LeftReleased) {
+            bHandleGrabbed = false;
+        }
+    }
+    if (bHandleGrabbed) {
+        UpdateHandleMouse();
+    } else {
+        UpdateArrowsMouse();
+    }
+}
+
+// 0x575550
+void FEScrollBar::UpdateArrowsMouse() {
+    if (FEngMouseLeftReleasedOver(pFirstArrow)) {
+        iMouseScroll = eSD_PREV;
+    } else if (FEngMouseLeftReleasedOver(pSecondArrow)) {
+        iMouseScroll = eSD_NEXT;
+    }
+}
+
+// 0x575590: the handle follows the cursor along the backing; every fSegSize
+// it's moved from where the list puts it is a row to scroll.
+void FEScrollBar::UpdateHandleMouse() {
+    float mouse_x, mouse_y;
+    FEngGetMousePos(mouse_x, mouse_y);
+    float delta;
+    if (!bVertical) {
+        float pos = mouse_x - vGrabOffset.x;
+        float w, h;
+        FEngGetSize(pHandle, w, h);
+        float max = (vBackingSize.x + vBackingPos.x) - w;
+        pos = bMax(vBackingPos.x, pos);
+        pos = bMin(max, pos);
+        float x, y;
+        FEngGetTopLeft(pHandle, x, y);
+        FEngSetTopLeft(pHandle, pos, y);
+        delta = (mouse_x - vCurPos.x) - vGrabOffset.x;
+    } else {
+        float pos = mouse_y - vGrabOffset.y;
+        float w, h;
+        FEngGetSize(pHandle, w, h);
+        float max = (vBackingSize.y + vBackingPos.y) - h;
+        pos = bMax(vBackingPos.y, pos);
+        pos = bMin(max, pos);
+        float x, y;
+        FEngGetTopLeft(pHandle, x, y);
+        FEngSetTopLeft(pHandle, x, pos);
+        delta = (mouse_y - vCurPos.y) - vGrabOffset.y;
+    }
+    if (delta > fSegSize || delta < -fSegSize) {
+        iMouseScroll = static_cast<int>(delta / fSegSize);
+    }
+}
+
+// 0x575710: a click on the backing before the handle pages back, after it
+// pages forward.
+void FEScrollBar::UpdateBackingMouse() {
+    float mouse_x, mouse_y;
+    FEngGetMousePos(mouse_x, mouse_y);
+    float x, y, w, h;
+    FEngGetTopLeft(pHandle, x, y);
+    FEngGetSize(pHandle, w, h);
+    float mouse = bVertical ? mouse_y : mouse_x;
+    float start = bVertical ? y : x;
+    float size = bVertical ? h : w;
+    if (mouse < start) {
+        iMouseScroll = eSD_PAGE_PREV;
+    } else if (size + start < mouse) {
+        iMouseScroll = eSD_PAGE_NEXT;
+    }
+}
+#else
 // TODO
 void FEScrollBar::UpdateArrowsMouse() {}
 
@@ -602,6 +696,7 @@ void FEScrollBar::UpdateHandleMouse() {}
 
 // TODO
 void FEScrollBar::UpdateBackingMouse() {}
+#endif
 
 void FEScrollBar::SetArrowVisibility(int arrow_num, bool visible) {
     if (visible) {

@@ -1,4 +1,5 @@
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterfaceFEObjects.hpp"
+#include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngMouse.hpp"
 #include "Speed/Indep/Src/FEng/FEList.h"
 #include "Speed/Indep/Src/FEng/FETypes.h"
 #include "Speed/Indep/Src/FEng/FEObject.h"
@@ -712,6 +713,118 @@ bool FEngTestForIntersection(float xPos, float yPos, FEObject *obj) {
     }
     return false;
 }
+
+#ifdef EA_PLATFORM_WIN32
+// PC (speed.exe 1.3 @ 0x5158B0): the rectangle may have a negative size; the
+// right and bottom edges are exclusive.
+bool FEngTestForIntersection(const float xPos, const float yPos, const bVector2 &top_left, const bVector2 &size) {
+    float left = top_left.x;
+    float right = top_left.x + size.x;
+    float top = top_left.y;
+    float bottom = size.y + top_left.y;
+    if (right < left) {
+        float tmp = left;
+        left = right;
+        right = tmp;
+    }
+    if (bottom < top) {
+        float tmp = top;
+        top = bottom;
+        bottom = tmp;
+    }
+    return left <= xPos && xPos < right && top <= yPos && yPos < bottom;
+}
+
+FEMouseState gFEMouseState;    // 0x987F50
+bool gFEMouseCursorHidden;     // 0x91CFB9
+
+// 0x6C9D00
+bool FEMouseState::HasChanged() const {
+    bool left = LeftPressed || LeftReleased;
+    bool right = RightPressed || RightReleased;
+    bool middle = MiddlePressed || MiddleReleased;
+    return left || right || Wheel != 0 || middle || DeltaX != 0 || DeltaY != 0;
+}
+
+void FEngGetMousePos(float &x, float &y) {
+    x = static_cast<float>(gFEMouseState.X) - 320.0f;
+    y = static_cast<float>(gFEMouseState.Y) - 240.0f;
+}
+
+void FEngGetMouseWheel(float &delta) {
+    delta = static_cast<float>(gFEMouseState.Wheel);
+}
+
+static bool MouseIn(bool button, const bVector2 &top_left, const bVector2 &size) {
+    if (button) {
+        float x, y;
+        FEngGetMousePos(x, y);
+        if (FEngTestForIntersection(x, y, top_left, size)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool MouseOver(bool button, FEObject *obj) {
+    if (button) {
+        float x, y;
+        FEngGetMousePos(x, y);
+        if (FEngTestForIntersection(x, y, obj)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool FEngMouseLeftDownIn(const bVector2 &top_left, const bVector2 &size) {
+    return MouseIn(gFEMouseState.LeftDown, top_left, size);
+}
+
+bool FEngMouseLeftPressedIn(const bVector2 &top_left, const bVector2 &size) {
+    return MouseIn(gFEMouseState.LeftPressed, top_left, size);
+}
+
+bool FEngMouseLeftReleasedIn(const bVector2 &top_left, const bVector2 &size) {
+    return MouseIn(gFEMouseState.LeftReleased, top_left, size);
+}
+
+bool FEngMouseRightDownIn(const bVector2 &top_left, const bVector2 &size) {
+    return MouseIn(gFEMouseState.RightDown, top_left, size);
+}
+
+bool FEngMouseRightPressedIn(const bVector2 &top_left, const bVector2 &size) {
+    return MouseIn(gFEMouseState.RightPressed, top_left, size);
+}
+
+bool FEngMouseRightReleasedIn(const bVector2 &top_left, const bVector2 &size) {
+    return MouseIn(gFEMouseState.RightReleased, top_left, size);
+}
+
+bool FEngMouseLeftDownOver(FEObject *obj) {
+    return MouseOver(gFEMouseState.LeftDown, obj);
+}
+
+bool FEngMouseLeftPressedOver(FEObject *obj) {
+    return MouseOver(gFEMouseState.LeftPressed, obj);
+}
+
+bool FEngMouseLeftReleasedOver(FEObject *obj) {
+    return MouseOver(gFEMouseState.LeftReleased, obj);
+}
+
+bool FEngMouseRightDownOver(FEObject *obj) {
+    return MouseOver(gFEMouseState.RightDown, obj);
+}
+
+bool FEngMouseRightPressedOver(FEObject *obj) {
+    return MouseOver(gFEMouseState.RightPressed, obj);
+}
+
+bool FEngMouseRightReleasedOver(FEObject *obj) {
+    return MouseOver(gFEMouseState.RightReleased, obj);
+}
+#endif
 
 // UNSOLVED
 bool FEngGet2DExtentsForMouse(FEObject *pObject, FERect &Rect, FEVector2 offset) {

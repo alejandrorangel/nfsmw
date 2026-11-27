@@ -6,6 +6,9 @@
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterface.hpp"
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterfaceFEImages.hpp"
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterfaceFEStrings.hpp"
+#include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterfaceFEObjects.hpp"
+#include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngMouse.hpp"
+#include "Speed/Indep/Src/FEng/FEPackage.h"
 #include "Speed/Indep/Src/Frontend/MenuScreens/Common/feWidget.hpp"
 
 ArrayScripts::ArrayScripts() {
@@ -274,7 +277,101 @@ void ArrayScroller::SetInitialPosition(int index) {
     UpdateScrollbar();
 }
 
+#ifdef EA_PLATFORM_WIN32
+// PC (speed.exe 1.3 @ 0x593480; name is a guess): scroll the view a row
+// without moving the selection, unless it would leave the view, in which case
+// the selection highlight is hidden instead.
+void ArrayScroller::ScrollView(int dir) {
+    if (slots.IsEmpty() || data.IsEmpty()) {
+        return;
+    }
+    int start = startDatum;
+    if (dir == -1) {
+        if (start > 0) {
+            start -= width;
+        }
+    } else if (dir == 1) {
+        if (start / width < (data.CountElements() - 1) / width - height + 1) {
+            start += width;
+        }
+    }
+    if (start != startDatum) {
+        startDatum = start;
+        if (startDatum <= data.GetNodeNumber(currentDatum) - 1 && GetCurrentDatumNum() < height * width + startDatum) {
+            SetSelection(currentDatum, ForceSelectionOnScreen(GetCurrentDatumNum(), startDatum));
+            return;
+        }
+        FEngSetScript(GetPkgName(), 0x06745352, FEHASH_HIDE, true);
+    }
+}
+
+// PC (speed.exe 1.3 @ 0x593600): the slot under the cursor is selected (in
+// click-to-select mode, on a click), and a click on the selection sends
+// mouseDownMsg; the wheel over the scroll region and the scroll bar scroll
+// the view.
+void ArrayScroller::UpdateMouse() {
+    float mouse_x, mouse_y;
+    FEngGetMousePos(mouse_x, mouse_y);
+    for (int i = 0; i < slots.CountElements(); i++) {
+        ArraySlot *slot = i < slots.CountElements() ? slots.GetNode(i) : nullptr;
+        ArrayDatum *datum = startDatum + i < data.CountElements() ? data.GetNode(startDatum + i) : nullptr;
+        if (datum == nullptr) {
+            continue;
+        }
+        FEObjectMouseState *state = pkg->GetMouseObjectState(slot->GetFEngObject());
+        if (state == nullptr || !state->GetBit(FEMouseFlag_MouseOver)) {
+            continue;
+        }
+        if (!bInClickToSelectMode) {
+            if (currentDatum != datum) {
+                SetSelection(datum, startDatum);
+            }
+            if (mouseDownMsg != 0 && gFEMouseState.LeftPressed) {
+                cFEng::Get()->QueueGameMessage(mouseDownMsg, GetPkgName(), 0xFF);
+            }
+        } else if (gFEMouseState.LeftPressed) {
+            if (currentDatum == datum) {
+                if (mouseDownMsg != 0) {
+                    cFEng::Get()->QueueGameMessage(mouseDownMsg, GetPkgName(), 0xFF);
+                }
+            } else {
+                SetSelection(datum, startDatum);
+            }
+        }
+    }
+    if (pScrollRegion != nullptr) {
+        FEngGetMousePos(mouse_x, mouse_y);
+        if (FEngTestForIntersection(mouse_x, mouse_y, pScrollRegion)) {
+            float wheel;
+            FEngGetMouseWheel(wheel);
+            if (wheel > 0.0f) {
+                ScrollView(-1);
+                cFEng::Get()->QueuePackageMessage(0x704, GetPkgName(), nullptr);
+            } else if (wheel < 0.0f) {
+                ScrollView(1);
+                cFEng::Get()->QueuePackageMessage(0x148CD7, GetPkgName(), nullptr);
+            }
+        }
+    }
+    ScrollBar.UpdateMouse();
+    int scroll = ScrollBar.GetMouseScroll();
+    if (scroll != eSD_NONE) {
+        if (scroll == eSD_PAGE_NEXT) {
+            scroll = height;
+        } else if (scroll == eSD_PAGE_PREV) {
+            scroll = -height;
+        }
+        int dir = scroll >= 0 ? 1 : -1;
+        for (int n = scroll < 0 ? -scroll : scroll; n > 0; n--) {
+            ScrollView(dir);
+        }
+    }
+    UpdateScrollbar();
+    RefreshHeader();
+}
+#else
 void ArrayScroller::UpdateMouse() {}
+#endif
 
 void ArrayScroller::ClearData() {
     data.DeleteAllElements();

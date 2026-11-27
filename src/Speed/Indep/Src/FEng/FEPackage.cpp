@@ -631,6 +631,18 @@ void FEPackage::BuildMouseObjectStateList() {
     }
 }
 
+#ifdef EA_PLATFORM_WIN32
+// PC (speed.exe 1.3 @ 0x5B1DF0).
+FEObjectMouseState *FEPackage::GetMouseObjectState(FEObject *obj) {
+    for (int i = 0; i < NumMouseObjects; i++) {
+        if (MouseObjectStates[i].pObject == obj) {
+            return &MouseObjectStates[i];
+        }
+    }
+    return nullptr;
+}
+#endif
+
 bool OffsetCalculatron(u32 mouseable, FEObject *obj, FEPoint &Offset) {
     if (mouseable == obj->NameHash) {
         FEObjData *objData = obj->GetObjData();
