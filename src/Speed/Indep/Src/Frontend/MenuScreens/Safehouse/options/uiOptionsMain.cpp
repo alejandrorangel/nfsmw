@@ -104,6 +104,15 @@ void UIOptionsMain::NotificationMessage(u32 msg, FEObject *pobj, u32 param1, u32
                         cFEng::Get()->QueuePackageSwitch("MainMenu_Sub.fng", 0, 0, false);
                         break;
                     case OC_CONTROLS:
+#if defined(EA_PLATFORM_WIN32)
+                        // PC 0x545310: the PC controller configuration screens.
+                        if (mCalledFromPauseMenu) {
+                            cFEng::Get()->QueuePackageSwitch("Pause_PC_Controller.fng", static_cast<int>(mCalledFromPauseMenu), 0, false);
+                        } else {
+                            cFEng::Get()->QueuePackageSwitch("Options_PC_Controller.fng", 0, 0, false);
+                        }
+                        break;
+#endif
                         UIOptionsController::PortToConfigure = FEngMapJoyParamToJoyport(PrevParam1);
                         if (mCalledFromPauseMenu) {
                             cFEng::Get()->QueuePackageSwitch("Pause_Controller.fng", static_cast<int>(mCalledFromPauseMenu), 0, false);

@@ -14,6 +14,9 @@
 #include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/options/uiOptionsTrailers.cpp"
 
 #include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/options/uiOptionsController.cpp"
+#if defined(EA_PLATFORM_WIN32)
+#include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/options/uiOptionsPCController.cpp"
+#endif
 
 #include "Speed/Indep/Src/Frontend/MenuScreens/InGame/uiPause.cpp"
 
