@@ -970,7 +970,8 @@ void FE_ShowPostRaceScreen(bool winner) {
 // PC: 0x605730. The free roam speed trap result (the photo finish screen in
 // speed trap mode).
 void FE_ShowSpeedTrapScreen(float speedKmh, float bounty) {
-    PhotoFinishScreen::mSpeedtrapSpeed = speedKmh * 0.6213861f;
+    // In m/s (0x8A0294: 0.27778); the screen converts to the player's units.
+    PhotoFinishScreen::mSpeedtrapSpeed = speedKmh * 0.27778f;
     PhotoFinishScreen::mSpeedtrapBounty = bounty;
     PhotoFinishScreen::mActive = true;
     cFEng::Get()->QueuePackagePush("InGamePhotoMaster.fng", 2, FEngMapJoyportToJoyParam(FEDatabase->GetPlayersJoystickPort(0)), true);
@@ -1313,13 +1314,16 @@ bool Game_PlayerIsLocal(ISimable *simable) {
     return false;
 }
 
-// PC: 0x6051B0 / 0x605170. TODO(port): career race score flags.
+// PC: 0x6051B0. The activity's race won in the career.
 bool Game_IsRaceCompleted(GRuntimeInstance *activity) {
-    return false;
+    GRaceParameters *race = activity != nullptr ? GRaceDatabase::Get().GetRaceFromActivity(static_cast<GActivity *>(activity)) : nullptr;
+    return race != nullptr && GRaceDatabase::Get().CheckRaceScoreFlags(race->GetEventHash(), GRaceDatabase::kCompleted_ContextCareer);
 }
 
+// PC: 0x605170. The activity's race unlocked in the career.
 bool Game_IsRaceUnlocked(GRuntimeInstance *activity) {
-    return true;
+    GRaceParameters *race = activity != nullptr ? GRaceDatabase::Get().GetRaceFromActivity(static_cast<GActivity *>(activity)) : nullptr;
+    return race != nullptr && GRaceDatabase::Get().CheckRaceScoreFlags(race->GetEventHash(), GRaceDatabase::kUnlocked_Career);
 }
 
 // PC: 0x605460 / 0x605480. TODO(port): FEDatabase's online/LAN game flags
