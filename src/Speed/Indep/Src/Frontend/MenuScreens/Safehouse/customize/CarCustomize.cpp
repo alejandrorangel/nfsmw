@@ -2341,8 +2341,17 @@ void CustomizationScreen::NotificationMessage(u32 msg, FEObject *pobj, u32 param
                     ShoppingCartItem *item = gCarCustomizeManager.IsPartTypeInCart(selected);
                     if (item != nullptr) {
                         gCarCustomizeManager.RemoveFromCart(item);
+#if defined(EA_PORT_NATIVE)
+                        // speed.exe 0x7B71E1: the item is freed by RemoveFromCart;
+                        // clear the in-cart flag through FindInCartPart.
+                        SelectablePart *in_cart = FindInCartPart();
+                        if (in_cart != nullptr) {
+                            in_cart->UnSetInCart();
+                        }
+#else
                         SelectablePart *part = item->GetBuyingPart();
                         FindMatchingOption(part)->GetPart()->UnSetInCart();
+#endif
                     }
                     PlayInstalled();
                     return;
@@ -2360,8 +2369,15 @@ void CustomizationScreen::NotificationMessage(u32 msg, FEObject *pobj, u32 param
                 pReplacingOption->GetPart()->UnSetInCart();
                 pReplacingOption = nullptr;
             }
+#if defined(EA_PORT_NATIVE)
+            // speed.exe 0x7B711A: through the virtual GetSelectedPart, so the
+            // paint screens (no icon options) add their swatch.
+            gCarCustomizeManager.AddToCart(GetSelectedPart());
+            GetSelectedPart()->SetInCart();
+#else
             gCarCustomizeManager.AddToCart(static_cast<CustomizePartOption *>(Options.GetCurrentOption())->GetPart());
             static_cast<CustomizePartOption *>(Options.GetCurrentOption())->GetPart()->SetInCart();
+#endif
             RefreshHeader();
             break;
         }
