@@ -106,6 +106,7 @@ add_library(nfsmw_platform OBJECT
     src/Game/StringToNumberNative.cpp
     src/Game/AttribDefaultsNative.cpp
     src/Game/UComNative.cpp
+    src/Game/GInfractionManagerNative.cpp
     src/Audio/EAAudioFormat.cpp
     src/Audio/AudioMixer.cpp
     src/Audio/SpchNative.cpp
