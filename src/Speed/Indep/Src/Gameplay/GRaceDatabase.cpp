@@ -92,6 +92,20 @@ void GRaceParameters::EnsureLoaded() const {
 
 void GRaceParameters::BlockUntilLoaded() {
     EnsureLoaded();
+#if defined(EA_PORT_NATIVE)
+    // Every vault stays loaded natively, but on PC a race's vault streamed in
+    // during gameplay (engaged from free roam) is when its objects (start
+    // grid, checkpoints, characters) are made: GManager::LoadVaultSync keeps
+    // the slots' objects as PC does.
+    if (GManager::Get().GetInGameplay()) {
+        if (mParentVault != nullptr && mParentVault->IsTransient() && mParentVault->GetObjectBlock() == nullptr) {
+            GManager::Get().LoadVaultSync(mParentVault);
+        }
+        if (mChildVault != nullptr && mChildVault->IsTransient() && mChildVault->GetObjectBlock() == nullptr) {
+            GManager::Get().LoadVaultSync(mChildVault);
+        }
+    }
+#endif
 }
 
 // PC: 0x5E3A00.
@@ -1220,6 +1234,66 @@ GRaceBin *GRaceDatabase::GetBinNumber(int number) {
     }
     return nullptr;
 }
+
+#if defined(EA_PORT_NATIVE)
+// PC: 0x602320. The winning player's records for the race just run: best
+// top / average speed, the race type's best score (time, lap, points), and
+// with raceCompleted the race's completed flag for the context (career or
+// quick race); the bins' progress follows.
+void GRaceDatabase::UpdateRaceScore(bool raceCompleted) {
+    GRaceStatus &raceStatus = GRaceStatus::Get();
+    GRaceParameters *parms = raceStatus.GetRaceParameters();
+    GRacerInfo *winner = parms != nullptr ? raceStatus.GetWinningPlayerInfo() : nullptr;
+    if (winner == nullptr) {
+        return;
+    }
+    GRaceSaveInfo *info = GetScoreInfo(parms->GetEventHash());
+    const bool hasScore = (info->mFlags & kCompleted_ContextAny) != 0;
+    float topSpeed = static_cast<float>(info->mTopSpeed);
+    info->mTopSpeed = winner->GetTopSpeed() > topSpeed ? winner->GetTopSpeed() : topSpeed;
+    float averageSpeed = static_cast<float>(info->mAverageSpeed);
+    float raceAverage = winner->CalcAverageSpeed();
+    info->mAverageSpeed = raceAverage > averageSpeed ? raceAverage : averageSpeed;
+    switch (parms->GetRaceType()) {
+        case GRace::kRaceType_P2P:
+        case GRace::kRaceType_Drag:
+        case GRace::kRaceType_Tollbooth:
+        case GRace::kRaceType_JumpToSpeedTrap:
+        case GRace::kRaceType_JumpToMilestone:
+            if (!hasScore || winner->GetRaceTime() < info->mHighScores.mBestTime) {
+                info->mHighScores.mBestTime = winner->GetRaceTime();
+            }
+            break;
+        case GRace::kRaceType_Circuit:
+        case GRace::kRaceType_Knockout: {
+            float bestLap = raceStatus.GetBestLapTime(winner->GetIndex());
+            if (!hasScore || bestLap < info->mHighScores.mBestTime) {
+                info->mHighScores.mBestTime = bestLap;
+            }
+            break;
+        }
+        case GRace::kRaceType_SpeedTrap:
+        case GRace::kRaceType_CashGrab:
+            if (!hasScore || winner->GetPointTotal() > info->mHighScores.mBestSpeed) {
+                info->mHighScores.mBestSpeed = winner->GetPointTotal();
+            }
+            break;
+        case GRace::kRaceType_Checkpoint: {
+            uint32 points = static_cast<uint32>(winner->GetPointTotal());
+            if (!hasScore || points > info->mHighScores.mBestPoints) {
+                info->mHighScores.mBestPoints = points;
+            }
+            break;
+        }
+        default:
+            break;
+    }
+    if (raceCompleted) {
+        info->mFlags |= raceStatus.GetRaceContext() == GRace::kRaceContext_Career ? kCompleted_ContextCareer : kCompleted_ContextQuickRace;
+        RefreshBinProgress();
+    }
+}
+#endif
 
 // PC: 0x6022A0.
 void GRaceDatabase::RefreshBinProgress() {

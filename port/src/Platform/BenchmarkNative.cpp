@@ -37,7 +37,10 @@
 #include "Speed/Indep/Src/Frontend/Database/FEDatabase.hpp"
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterface.hpp"
 #include "Speed/Indep/Src/Frontend/RaceStarter.hpp"
+#include "Speed/Indep/Src/Gameplay/GActivity.h"
 #include "Speed/Indep/Src/Gameplay/GRaceDatabase.h"
+#include "Speed/Indep/Src/Gameplay/GRaceStatus.h"
+#include "Speed/Indep/Src/Gameplay/GTrigger.h"
 #include "Speed/Indep/Src/Interfaces/SimActivities/ICopMgr.h"
 #include "Speed/Indep/Src/Interfaces/SimEntities/IPlayer.h"
 #include "Speed/Indep/Src/Interfaces/Simables/IAI.h"
@@ -80,6 +83,7 @@ struct Scenario {
     float heat;         // player heat at the start (cops chase from 2 up)
     int frames;         // frames recorded once the race is on
     int shots[4];       // screenshot frames (1-based), 0 ends
+    bool career_event;  // free roam: warp into an event's trigger and engage it
 };
 
 // Race IDs are the race database's event IDs (NFSMW_BENCHMARK=list-races
@@ -95,6 +99,8 @@ const Scenario kScenarios[] = {
      true, 4.0f, 3600, {600, 1800, 3600}},
     {"freeroam", "a new career's free roam (skip D-Day: bin 15), the AI driving: traffic, cops, the world's events", false, true, nullptr,
      nullptr, 0, 0, 0, true, 0.0f, 3600, {600, 1800, 3600}},
+    {"career-event", "a new career's free roam, the player warped into an event's trigger: engage it, race it (the AI driving), back to free roam", false,
+     true, nullptr, nullptr, 0, 0, 0, true, 0.0f, 30000, {0}, true},
     {"frontend", "the main menu over the garage car: car shading and the frontend", true, false, nullptr, nullptr, 0, 0, 0, false, 0.0f, 3600,
      {120, 1800, 3600}},
     {"list-races", "prints the race database's events and exits", true, false, nullptr, nullptr, 0, 0, 0, false, 0.0f, 1, {0}},
@@ -160,6 +166,8 @@ IPlayer *FirstPlayer() {
     return players.empty() ? nullptr : *players.begin();
 }
 
+[[noreturn]] void Finish();
+
 const int kPursuitFrame = 240; // the countdown is over by then
 
 // The race AI drives the player's car.
@@ -207,6 +215,162 @@ void DriveWithAI() {
         player->ChargeGameBreaker(1.0f);
         bool on = player->ToggleGameBreaker();
         std::fprintf(stderr, "[benchmark] pursuit breaker %s (frame %d)\n", on ? "on" : "refused", gBenchFrame);
+    }
+}
+
+// The career event scenario: a career race's trigger in the current bin
+// (NFSMW_BENCHMARK_RACE picks one by event ID), the player warped into it;
+// the engage key (enter) brings up its info dialog, enter accepts it, the AI
+// races it, enter gets through the post race screens back to free roam.
+enum CareerEventPhase {
+    kEvent_FreeRoam,  // waiting to warp
+    kEvent_Engaging,  // in the trigger: the prompt, the dialog
+    kEvent_Racing,    // the race activity runs
+    kEvent_PostRace,  // the race is over: the results screens
+    kEvent_BackRoaming,
+};
+
+CareerEventPhase gEventPhase = kEvent_FreeRoam;
+int gEventPhaseFrame = 0;
+bool gEventPress = false;
+bool gEventLeft = false; // focus the dialog's Accept (Decline has the focus)
+bool gEventHoldCar = false; // in the trigger: the AI is off until the dialog
+std::string gLastControlPackage;
+GRaceParameters *gEventRace = nullptr;
+int gEventStartCash = 0;
+
+const char *ControlPackageName() {
+    FEPackage *pkg = cFEng::Get() ? cFEng::Get()->FindPackageWithControl() : nullptr;
+    return pkg != nullptr && pkg->GetName() != nullptr ? pkg->GetName() : "";
+}
+
+void SetEventPhase(CareerEventPhase phase) {
+    static const char *kNames[] = {"free roam", "engaging", "racing", "post race", "back in free roam"};
+    gEventPhase = phase;
+    gEventPhaseFrame = gBenchFrame;
+    std::fprintf(stderr, "[benchmark] career event: %s (frame %d)\n", kNames[phase], gBenchFrame);
+}
+
+GTrigger *FindEventTrigger() {
+    const int bin = FEDatabase->GetCareerSettings()->GetCurrentBin();
+    char prefix[8];
+    std::snprintf(prefix, sizeof(prefix), "%d.", bin);
+    for (GObjectIterator<GTrigger> it(0xFFFFFFFF); it.IsValid(); it.Advance()) {
+        GTrigger *trigger = it.GetInstance();
+        GActivity *activity = trigger->GetTargetActivity();
+        GRaceParameters *parms = activity ? GRaceDatabase::Get().GetRaceFromActivity(activity) : nullptr;
+        if (parms == nullptr || parms->GetEventID() == nullptr || parms->GetIsBossRace() || !trigger->IsEnabled()) {
+            continue;
+        }
+        if (!gRace.empty() ? gRace != parms->GetEventID()
+                           : (std::strncmp(parms->GetEventID(), prefix, std::strlen(prefix)) != 0 ||
+                              !GRaceDatabase::Get().CheckRaceScoreFlags(parms->GetEventHash(), GRaceDatabase::kUnlocked_Career) ||
+                              GRaceDatabase::Get().CheckRaceScoreFlags(parms->GetEventHash(), GRaceDatabase::kCompleted_ContextCareer))) {
+            continue;
+        }
+        gEventRace = parms;
+        return trigger;
+    }
+    return nullptr;
+}
+
+void SetHumanAI(bool on) {
+    IPlayer *player = FirstPlayer();
+    ISimable *simable = player ? player->GetSimable() : nullptr;
+    IHumanAI *human_ai;
+    if (simable != nullptr && simable->QueryInterface(&human_ai) && human_ai->GetAiControl() != on) {
+        human_ai->SetAiControl(on);
+    }
+}
+
+void CareerEventUpdate() {
+    const char *control = ControlPackageName();
+    if (gLastControlPackage != control) {
+        gLastControlPackage = control;
+        std::fprintf(stderr, "[benchmark] control: %s (frame %d)\n", control, gBenchFrame);
+    }
+    const bool racing = GRaceStatus::Exists() && GRaceStatus::Get().GetPlayMode() == GRaceStatus::kPlayMode_Racing;
+    const bool hud = std::strstr(control, "HUD") != nullptr || *control == '\0';
+    const int since = gBenchFrame - gEventPhaseFrame;
+    gEventPress = false;
+    gEventLeft = false;
+    switch (gEventPhase) {
+        case kEvent_FreeRoam:
+            if (gBenchFrame == 120) {
+                GTrigger *trigger = FindEventTrigger();
+                UMath::Vector3 pos;
+                if (trigger == nullptr) {
+                    std::fprintf(stderr, "[benchmark] no engageable career event in bin %d\n", FEDatabase->GetCareerSettings()->GetCurrentBin());
+                    std::fflush(nullptr);
+                    _exit(4);
+                }
+                trigger->GetPosition(pos);
+                UMath::Vector3 dir = trigger->GetDirection();
+                std::fprintf(stderr, "[benchmark] career event %s (type %d) at %.0f %.0f %.0f\n", gEventRace->GetEventID(),
+                             static_cast<int>(gEventRace->GetRaceType()), pos.x, pos.y, pos.z);
+                SetHumanAI(false);
+                gEventHoldCar = true;
+                IPlayer *player = FirstPlayer();
+                IVehicle *ivehicle;
+                if (player && player->GetSimable() && player->GetSimable()->QueryInterface(&ivehicle)) {
+                    if (UMath::LengthSquare(dir) < 0.01f) {
+                        dir = UMath::Vector3Make(1.0f, 0.0f, 0.0f);
+                    }
+                    ivehicle->SetVehicleOnGround(pos, dir);
+                    ivehicle->SetSpeed(0.0f);
+                }
+                gEventStartCash = static_cast<int>(FEDatabase->GetCareerSettings()->GetCash());
+                SetEventPhase(kEvent_Engaging);
+            }
+            break;
+        case kEvent_Engaging:
+            // Enter for 6 frames of every 60 in the trigger: the HUD's engage
+            // button. Once the dialog is in and done animating: left (to
+            // Accept, Decline has the focus), then enter.
+            static int dialog_frame = -1;
+            if (std::strcmp(control, "EngageEventDialog.fng") == 0) {
+                // The race's goals are set as the accept is delivered (with the
+                // sim paused): the AI takes the car back before that.
+                gEventHoldCar = false;
+                if (dialog_frame < 0) {
+                    dialog_frame = gBenchFrame;
+                }
+                const int in_dialog = gBenchFrame - dialog_frame;
+                gEventLeft = in_dialog >= 60 && in_dialog < 66;
+                gEventPress = in_dialog >= 90 && in_dialog < 96;
+            } else {
+                dialog_frame = -1;
+                gEventPress = since >= 60 && since % 60 < 6;
+            }
+            if (racing) {
+                SetEventPhase(kEvent_Racing);
+            } else if (since > 1800) {
+                std::fprintf(stderr, "[benchmark] career event: not engaged after 30 s\n");
+                Finish();
+            }
+            break;
+        case kEvent_Racing:
+            // The race AI drives (and enter on any screen that isn't the HUD:
+            // the post race results)
+            gEventPress = !hud && since % 60 < 6;
+            if (!racing) {
+                SetEventPhase(kEvent_PostRace);
+            }
+            break;
+        case kEvent_PostRace:
+            gEventPress = !hud && since % 60 < 6;
+            if (hud && !racing && TheGameFlowManager.IsInGame() && since > 120) {
+                std::fprintf(stderr, "[benchmark] career event %s: cash %d -> %d, completed %d\n", gEventRace->GetEventID(), gEventStartCash,
+                             static_cast<int>(FEDatabase->GetCareerSettings()->GetCash()),
+                             GRaceDatabase::Get().CheckRaceScoreFlags(gEventRace->GetEventHash(), GRaceDatabase::kCompleted_ContextCareer) ? 1 : 0);
+                SetEventPhase(kEvent_BackRoaming);
+            }
+            break;
+        case kEvent_BackRoaming:
+            if (since >= 600) {
+                Finish();
+            }
+            break;
     }
 }
 
@@ -343,6 +507,16 @@ void PortBenchmarkInit() {
     if (gScenario->free_roam) {
         SkipDDayRaces = 1;
         SkipCareerIntro = 1;
+        // The race AI is slow on some of the career's tracks: finish the event
+        // a minute in, first (GRaceStatus::SkipToEndOfRaceInPlace, through
+        // GManager::Update's NFSMW_DEBUG_SKIP_RACE), unless told otherwise
+        // (NFSMW_DEBUG_SKIP_RACE=0 races it out).
+        if (gScenario->career_event) {
+            setenv("NFSMW_DEBUG_SKIP_RACE", "1:60", 0);
+            if (std::strcmp(std::getenv("NFSMW_DEBUG_SKIP_RACE"), "0") == 0) {
+                unsetenv("NFSMW_DEBUG_SKIP_RACE");
+            }
+        }
         return;
     }
     SkipFE = 1;
@@ -410,6 +584,12 @@ bool PortBenchmarkInput(PortInputState *state) {
     if ((gScenario->frontend || gScenario->free_roam) && !gStarted && gEnterPresses > 0) {
         state->keys[PORT_KEY_ENTER] = 1.0f;
     }
+    if (gEventPress) {
+        state->keys[PORT_KEY_ENTER] = 1.0f;
+    }
+    if (gEventLeft) {
+        state->keys[PORT_KEY_LEFT] = 1.0f;
+    }
     return true;
 }
 
@@ -443,6 +623,8 @@ void PortBenchmarkEndFrame(uint64_t render_start_ns) {
         // with the D-Day flow complete).
         if (gScenario->free_roam && !career_started && MainMenuUp()) {
             career_started = true;
+            // The career menu's press would give player 1 the pad it came from.
+            FEDatabase->SetPlayersJoystickPort(0, 0);
             FEDatabase->GetCareerSettings()->StartNewCareer(true);
             RaceStarter::StartCareerFreeRoam();
             std::fprintf(stderr, "[benchmark] new career, free roam (frame %d)\n", frame);
@@ -455,7 +637,10 @@ void PortBenchmarkEndFrame(uint64_t render_start_ns) {
         }
     } else {
         gBenchFrame++;
-        if (!gScenario->frontend) {
+        if (gScenario->career_event) {
+            CareerEventUpdate();
+        }
+        if (!gScenario->frontend && !(gScenario->career_event && gEventHoldCar)) {
             DriveWithAI();
         }
     }

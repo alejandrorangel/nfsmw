@@ -3,6 +3,8 @@
 #include "Speed/Indep/Src/Lua/LuaGameHooks.h"
 
 #include "Speed/Indep/Src/AI/AITarget.h"
+#include "Speed/Indep/Src/EAXSound/EAXSOund.hpp"
+#include "Speed/Indep/Src/World/VisualTreatment.h"
 #include "Speed/Indep/Src/Frontend/Database/FEDatabase.hpp"
 #include "Speed/Indep/Src/Gameplay/GActivity.h"
 #include "Speed/Indep/Src/Gameplay/GCharacter.h"
@@ -11,6 +13,11 @@
 #include "Speed/Indep/Src/Gameplay/GRaceDatabase.h"
 #include "Speed/Indep/Src/Gameplay/GRaceStatus.h"
 #include "Speed/Indep/Src/Gameplay/GTrigger.h"
+#include "Speed/Indep/Src/Generated/Events/EAwardUpgrade.hpp"
+#include "Speed/Indep/Src/Generated/Events/ECommitAudioAssets.hpp"
+#include "Speed/Indep/Src/Generated/Events/ECommitRenderAssets.hpp"
+#include "Speed/Indep/Src/Generated/Events/EEnterEngagableTrigger.hpp"
+#include "Speed/Indep/Src/Generated/Events/EExitEngagableTrigger.hpp"
 #include "Speed/Indep/Src/Generated/Events/EFadeScreenOn.hpp"
 #include "Speed/Indep/Src/Generated/Events/EPause.hpp"
 #include "Speed/Indep/Src/Generated/Events/EShowMilestones.hpp"
@@ -57,6 +64,9 @@
 
 // Defined in World/rain.cpp.
 void SetOverRideRainIntensity(float rov);
+// Defined in Frontend/Database/VehicleDB.cpp.
+void AdjustStableHeat_EventWin(int playerNum);
+void AdjustStableImpound_EventWin(int playerNum);
 
 namespace {
 
@@ -208,6 +218,14 @@ void Camera_SetGenericCamera(const char *name, const char *sub) {
 // TODO(port): playing an NIS (the EPlayRaceNIS-like event 0x640F00) isn't
 // ported, so every NIS completes immediately.
 void NIS_Play(GRuntimeInstance *location, const char *nisName, const char *type, int flags, const char *cameraTrack, const char *shell) {
+#if defined(EA_PORT_NATIVE)
+    // A race's intro NIS ends with the player's car at the start marker
+    // (the opponents are already on the grid, Game_InitRacers): without the
+    // NIS, put it there as the scripts do when a race has no intro NIS.
+    if (nisName != nullptr && *nisName != '\0' && type != nullptr && bStrICmp(type, "Intro") == 0 && location != nullptr) {
+        Game_WarpPlayerToTrigger(location);
+    }
+#endif
     MNISComplete(nisName).Post(UCrc32(UCRC32_Gameplay));
 }
 
@@ -502,9 +520,20 @@ void Game_InitRacers(GRuntimeInstance *startMarker) {
             GManager::Get().ReserveStockCar(copSpawnType);
         }
     }
-    // TODO(port): career races commit the audio/render assets here
-    // (ECommitAudioAssets/ECommitRenderAssets), every player's HUD is reset
-    // (IPlayer vtable +0x24) and EAXSound::StartNewGamePlay runs.
+    // A career race engaged from free roam loads its opponents' cars now (a
+    // quick race's loading flow does it in QuickGame).
+    if (raceStatus.GetRaceContext() == GRace::kRaceContext_Career) {
+        new ECommitAudioAssets();
+        new ECommitRenderAssets();
+    }
+    // Every player's HUD goes; the race's comes back with the race.
+    const IPlayer::List &allPlayers = IPlayer::GetList(PLAYER_ALL);
+    for (IPlayer::List::const_iterator iter = allPlayers.begin(); iter != allPlayers.end(); ++iter) {
+        (*iter)->SetHud(PHT_NONE);
+    }
+    if (g_pEAXSound != nullptr) {
+        g_pEAXSound->StartNewGamePlay();
+    }
 }
 
 // PC: 0x611570. Moves the (first) player to the trigger, streaming the world
@@ -733,13 +762,82 @@ void Game_NotifyRaceFinished(ISimable *racer) {
     info.SetPctRaceComplete(100.0f);
     raceStatus.CalculateRankings();
     if (racer->IsPlayer()) {
-        info.ForceStop();
+        IPlayer *player = racer->GetPlayer();
+        if (Sim::GetUserMode() == Sim::USER_SINGLE && info.GetGameCharacter() == nullptr && !info.GetIsTotalled() &&
+            !info.GetIsEngineBlown() && player != nullptr && player->IsLocal()) {
+            new EShowRaceOverMessage(player);
+        }
+        // TODO(port): online races report the driver (OnlineManager::FinishDriver).
+        // A player's win: the race's cash (and, the first time, its rewards
+        // and the races it unlocks), the stable's heat and impound
+        // bookkeeping, then the race's records and the event icons.
+        if (info.GetRanking() == 1 && player != nullptr) {
+            int playerIndex = player->GetSettingsIndex();
+            if (playerIndex == 0 || playerIndex == 1) {
+                GRaceParameters *parms = raceStatus.GetRaceParameters();
+                const Attrib::Gen::gameplay *raceObj = parms->GetGameplayObj();
+                if (!raceStatus.GetHasBeenWon()) {
+                    raceStatus.SetHasBeenWon(true);
+                    bool wonBefore = GRaceDatabase::Get().CheckRaceScoreFlags(parms->GetEventHash(), GRaceDatabase::kCompleted_ContextCareer);
+                    if (raceStatus.GetRaceContext() == GRace::kRaceContext_Career) {
+                        FEDatabase->GetUserProfile(playerIndex)->GetCareer()->AwardCash(static_cast<int>(parms->GetCashValue()));
+                        if (!wonBefore) {
+                            for (unsigned int i = 0; i < raceObj->Num_RewardsForWinner(); i++) {
+                                new EAwardUpgrade(raceObj->RewardsForWinner(i).mCollectionKey);
+                            }
+                        }
+                        AdjustStableHeat_EventWin(playerIndex);
+                        AdjustStableImpound_EventWin(playerIndex);
+                    }
+                    if (!wonBefore) {
+                        for (unsigned int i = 0; i < raceObj->Num_UnlockRaces(); i++) {
+                            unsigned int unlockKey = raceObj->UnlockRaces(i).mCollectionKey;
+                            GRaceParameters *unlock = unlockKey != 0 ? GRaceDatabase::Get().GetRaceFromKey(unlockKey) : nullptr;
+                            if (unlock == nullptr) {
+                                continue;
+                            }
+                            GRaceSaveInfo *unlockInfo = GRaceDatabase::Get().GetScoreInfo(unlock->GetEventHash());
+                            // As on PC (0x611C83): the reverse of Game_UnlockRace.
+                            unlockInfo->mFlags |= GRaceDatabase::kUnlocked_QuickRace;
+                            if (!unlock->GetNeverInQuickRace()) {
+                                unlockInfo->mFlags |= GRaceDatabase::kUnlocked_Career;
+                            }
+                        }
+                    }
+                }
+                GRaceDatabase::Get().UpdateRaceScore(true);
+                GManager::Get().RefreshEngageTriggerIcons();
+            }
+            if (Sim::GetUserMode() == Sim::USER_SINGLE) {
+                info.ForceStop();
+            }
+        } else {
+            info.ForceStop();
+        }
     }
     IVehicleAI *ai;
     if (racer->QueryInterface(&ai) && ai->GetTarget() != nullptr) {
         ai->GetTarget()->Clear();
     }
     raceStatus.UpdateAdaptiveDifficulty(static_cast<GRaceStatus::eAdaptiveGainReason>(4), racer);
+    // The challenge series: its special event, then every one of its races.
+    GRaceParameters *parms = raceStatus.GetRaceParameters();
+    if (parms != nullptr && parms->GetIsPursuitRace() && bStrICmp(parms->GetEventID(), "19.8.69") == 0) {
+        FEDatabase->GetCareerSettings()->SetHasBeatenSpecialChallengeEvent();
+    }
+    GRaceBin *challengeBin = GRaceDatabase::Get().GetBinNumber(19);
+    if (challengeBin == nullptr) {
+        return;
+    }
+    for (unsigned int i = 0; i < challengeBin->GetWorldRaceCount(); i++) {
+        unsigned int raceHash = challengeBin->GetWorldRaceHash(i);
+        GRaceParameters *race = GRaceDatabase::Get().GetRaceFromHash(raceHash);
+        if (race != nullptr && !race->GetIsCollectorsEditionRace() && bStrCmp(race->GetEventID(), "19.8.31") != 0 &&
+            !GRaceDatabase::Get().CheckRaceScoreFlags(raceHash, GRaceDatabase::kCompleted_ContextQuickRace)) {
+            return;
+        }
+    }
+    FEDatabase->GetCareerSettings()->SetHasBeatenChallengeSeries();
 }
 
 // PC: 0x604ED0.
@@ -914,18 +1012,40 @@ void Game_ForcePursuitStart(int minHeat) {
     GManager::Get().QueueFreeRoamPursuit(static_cast<float>(minHeat));
 }
 
-// PC: 0x604F80 / 0x604FD0. TODO(port): EEnterEngagableTrigger (career world
-// race engage) isn't ported.
-void Game_EnterEngagableTrigger(GRuntimeInstance *trigger) {
-    LUA_HOOK_TODO("Game.EnterEngagableTrigger");
+// PC: 0x604F80 / 0x604FD0. The engage prompt on the HUD while the player is
+// inside an event's trigger (the argument is the race activity).
+void Game_EnterEngagableTrigger(GRuntimeInstance *activity) {
+    new EEnterEngagableTrigger(activity);
 }
 
-void Game_ExitEngagableTrigger(GRuntimeInstance *trigger) {}
+void Game_ExitEngagableTrigger(GRuntimeInstance *activity) {
+    new EExitEngagableTrigger(activity);
+}
 
-// PC: 0x611FB0 / 0x611FF0. TODO(port): menu gate zones (career).
-void Game_EnterGateZone(GRuntimeInstance *trigger, const char *zone) {}
+namespace {
 
-void Game_ExitGateZone(GRuntimeInstance *trigger, const char *zone) {}
+IMenuZoneTrigger *FirstPlayerMenuZoneTrigger() {
+    IPlayer *player = FirstPlayer();
+    IHud *hud = player != nullptr ? player->GetHud() : nullptr;
+    IMenuZoneTrigger *izone;
+    return hud != nullptr && hud->QueryInterface(&izone) ? izone : nullptr;
+}
+
+} // namespace
+
+// PC: 0x611FB0 / 0x611FF0. A menu gate (safehouse, car lot, customization
+// shop): the HUD's engage prompt for the zone.
+void Game_EnterGateZone(GRuntimeInstance *trigger, const char *zone) {
+    if (IMenuZoneTrigger *izone = FirstPlayerMenuZoneTrigger()) {
+        izone->EnterTrigger(zone);
+    }
+}
+
+void Game_ExitGateZone(GRuntimeInstance *trigger, const char *zone) {
+    if (IMenuZoneTrigger *izone = FirstPlayerMenuZoneTrigger()) {
+        izone->ExitTrigger();
+    }
+}
 
 // PC: 0x6120C0 / 0x605020. The "race over" HUD message for the first player
 // (not in split screen); hiding it does nothing on PC.
@@ -987,14 +1107,28 @@ void Game_SetAllStaging(bool staging) {
 // PC: 0x6050F0.
 void Game_ShowPauseMenu() {}
 
-// PC: 0x612130 / 0x60E030.
-void Game_AwardCash(ISimable *racer, float cash) {}
-
+// PC: 0x60E030. Points (cash bags, bounty) add to the racer's total; a
+// player with a HUD gets a screen pulse and the sound.
 void Game_AwardPoints(ISimable *racer, float points) {
     GRacerInfo *info = RaceStatus().GetRacerInfo(racer);
     if (info != nullptr) {
         info->AddToPointTotal(points);
     }
+    IPlayer *player = racer != nullptr ? racer->GetPlayer() : nullptr;
+    IHud *hud = player != nullptr ? player->GetHud() : nullptr;
+    IGenericMessage *imessage;
+    if (hud != nullptr && hud->QueryInterface(&imessage)) {
+        IVisualTreatment *treatment = IVisualTreatment::Get();
+        if (treatment != nullptr) {
+            treatment->TriggerPulse(0.2f);
+        }
+        g_pEAXSound->PlayUISoundFX(static_cast<eMenuSoundTriggers>(4));
+    }
+}
+
+// PC: 0x612130 (a jump to Game_AwardPoints).
+void Game_AwardCash(ISimable *racer, float cash) {
+    Game_AwardPoints(racer, cash);
 }
 
 // PC: 0x605140.
@@ -1061,8 +1195,11 @@ void Game_HideTriggerIcon(GRuntimeInstance *trigger) {
 }
 
 // PC: 0x605930.
+// The next free roam starts at the marker.
 void Game_WarpToMarkerWhenRoaming(GRuntimeInstance *marker) {
-    LUA_HOOK_TODO("Game.WarpToMarkerWhenRoaming");
+    if (marker != nullptr) {
+        RaceStatus().SetWarpWhenInFreeRoam(marker->GetCollection());
+    }
 }
 
 // PC: 0x605890. Nothing left on PC.

@@ -252,6 +252,26 @@ void GManager::LoadVaultSync(GVault *vault) {
             vault->PreloadTransient(mLoadingPackImage, mTransientPoolNumber);
             GRaceDatabase::Get().NotifyVaultLoaded(vault);
         }
+        // The slots' bookkeeping as on PC: a vault streamed in during
+        // gameplay (a race engaged from free roam) gets its objects and
+        // the one it replaces in the slot loses its own.
+        if (vault->IsTransient() && vault->IsLoaded()) {
+            GVault *&slot = vault->IsRaceBin() ? mBinVaultInSlot[0] : mRaceVaultInSlot[0];
+            if (slot != vault) {
+                if (mRaceVaultInSlot[0] != nullptr && mRaceVaultInSlot[0]->GetObjectBlock() != nullptr) {
+                    mRaceVaultInSlot[0]->DestroyGameplayObjects();
+                }
+                mRaceVaultInSlot[0] = nullptr;
+                if (vault->IsRaceBin() && slot != nullptr && slot->GetObjectBlock() != nullptr) {
+                    slot->DestroyGameplayObjects();
+                }
+                slot = vault;
+            }
+            if (mInGameplay && vault->GetObjectBlock() == nullptr) {
+                vault->CreateGameplayObjects();
+                ConnectRuntimeInstances();
+            }
+        }
         return;
     }
 #endif
@@ -421,6 +441,8 @@ void GManager::BeginGameplay() {
             vault->CreateGameplayObjects();
         }
     }
+    mBinVaultInSlot[0] = slotBin != nullptr ? slotBin->GetChildVault() : nullptr;
+    mRaceVaultInSlot[0] = slotRace != nullptr ? slotRace->GetChildVault() : nullptr;
 #else
     for (unsigned int onVault = 0; onVault < mVaultCount; onVault++) {
         if (mVaults[onVault].IsLoaded()) {

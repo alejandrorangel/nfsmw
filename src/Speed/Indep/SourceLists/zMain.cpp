@@ -61,6 +61,14 @@
 #include "Speed/Indep/Src/Generated/Events/EAutoSave.cpp"
 
 #include "Speed/Indep/Src/Generated/Events/ECollision.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EEnterEngagableTrigger.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EExitEngagableTrigger.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/ERequestEventInfoDialog.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EAwardUpgrade.cpp"
 #endif
 
 #include "Speed/Indep/Src/Input/Common/action.cpp"

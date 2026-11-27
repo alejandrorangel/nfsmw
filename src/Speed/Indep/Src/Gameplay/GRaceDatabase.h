@@ -472,6 +472,9 @@ class GRaceDatabase {
     unsigned int DeserializeBins(uint8 *src);
     void RefreshBinProgress();
     void ResetCareerCompleteFlag(unsigned int eventHash);
+#if defined(EA_PORT_NATIVE)
+    void UpdateRaceScore(bool raceCompleted);
+#endif
 
     static const char sDDayRaces[5][8];
 
