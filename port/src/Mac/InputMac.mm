@@ -158,12 +158,13 @@ void PortInputInstallKeyboardMonitor() {
                                           }];
 }
 
-// Scripted key presses for automated runs, each held for 0.2 s:
-//   NFSMW_AUTO_KEYS=<seconds>:<key>[,...]  keys: enter esc space up down left right
+// Scripted key presses for automated runs, each held for 0.2 s (or /<hold> s):
+//   NFSMW_AUTO_KEYS=<seconds>:<key>[/<hold>][,...]  keys: enter esc space up down left right
 //   NFSMW_AUTO_ENTER=<seconds>[,...]       shorthand for enter presses
 struct AutoKey {
     double time;
     int key;
+    double hold;
 };
 
 static int AutoKeyCode(const char *name) {
@@ -186,14 +187,19 @@ static const std::vector<AutoKey> &AutoKeys() {
             for (const char *p = env; p && *p;) {
                 double t = atof(p);
                 int key = PORT_KEY_ENTER;
+                double hold = 0.2;
+                const char *comma = strchr(p, ',');
                 if (!times_only) {
                     const char *colon = strchr(p, ':');
                     key = colon ? AutoKeyCode(colon + 1) : -1;
+                    const char *slash = strchr(p, '/');
+                    if (slash && (!comma || slash < comma)) {
+                        hold = atof(slash + 1);
+                    }
                 }
                 if (key >= 0) {
-                    k.push_back({t, key});
+                    k.push_back({t, key, hold});
                 }
-                const char *comma = strchr(p, ',');
                 p = comma ? comma + 1 : nullptr;
             }
         };
@@ -212,7 +218,7 @@ static void ApplyAutoKeys(float *keys) {
     static const double start = CFAbsoluteTimeGetCurrent();
     double now = CFAbsoluteTimeGetCurrent() - start;
     for (const AutoKey &k : auto_keys) {
-        if (now >= k.time && now < k.time + 0.2) {
+        if (now >= k.time && now < k.time + k.hold) {
             keys[k.key] = 1.0f;
         }
     }
