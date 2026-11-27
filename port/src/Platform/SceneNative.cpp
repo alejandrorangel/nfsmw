@@ -41,6 +41,11 @@
 #include <set>
 
 TextureInfo *PortSolidTexture(eSolid *solid, int index); // SolidNative.cpp
+// sub_6C83D0 (every frame, after the sun moves): 0x8FAE64, the sun's
+// strength (its height over 0.14 (0x9018F0) up to 0.677 (0x9018EC), times 1 -
+// the cloud), and 0x8FAE68 = 0.1 + 0.8 x that (0x9018E4 / 0x9018E8).
+float gPortSunStrength = 1.0f;   // 0x8FAE64
+float gPortShadowCGAlpha = 1.0f; // 0x8FAE68
 void PortRainDropsFrame();                                 // RainNative.cpp
 void PortRenderShadowMapMeshes();                          // ShadowMapMeshNative.cpp
 extern bTList<FrontEndRenderingCar> FrontEndRenderingCarList; // CarRender.cpp
@@ -234,6 +239,14 @@ void DrawSolid(eSolid *solid, const M44 world, const eDynamicLightContext *light
         d.texture = MetalTextureOf(texture);
         d.first_index = group.FirstIndex;
         d.effect = group.Effect;
+        // eViewPlatInterface::Render 0x6DAC11: render flag 0x20000 (scenery
+        // instances flagged 0x100: baked shadow decals) draws WORLD (and
+        // WORLDNOFOG) groups with IDI_SHADOW_CG_FX (22), whose ShadowColor
+        // (sub_6C6630) is (0.5, 0.5, 0.5, 0x8FAE68), w doubled off the main
+        // target.
+        if ((render_flags & 0x20000) != 0 && group.Effect == PORT_EFFECT_WORLD) {
+            d.effect = 22;
+        }
         if (group.Effect == PORT_EFFECT_GLOSSYWINDOW) {
             d.texture2 = WindowReflectionTexture();
         } else if (group.Effect == PORT_EFFECT_WORLDNORMALMAP || group.Effect == PORT_EFFECT_WORLDREFLECT) {
@@ -247,6 +260,15 @@ void DrawSolid(eSolid *solid, const M44 world, const eDynamicLightContext *light
             light_material = solid->LightMaterialTable[light_index].LightMaterial;
         }
         MaterialConstants(light_material, d.material);
+        if (d.effect == 22) {
+            d.material[0] = gPortShadowCGAlpha;
+            static const bool trace = std::getenv("NFSMW_TRACE_SHADOW_CG") != nullptr;
+            static std::set<eSolid *> seen;
+            if (trace && seen.insert(solid).second) {
+                std::fprintf(stderr, "[shadowcg] %s group %d texture %s blend %d usage %d\n", solid->Name, g, texture ? texture->GetName() : "-",
+                             texture ? texture->AlphaBlendType : -1, texture ? texture->AlphaUsageType : -1);
+            }
+        }
         if (lights && lights->NumLights > 0) {
             const float *dm = reinterpret_cast<const float *>(&lights->LocalDirectionMatrix);
             const float *cm = reinterpret_cast<const float *>(&lights->LocalColourMatrix);
@@ -611,6 +633,13 @@ void SetupFrameLighting(eView *view) {
     PortWorldFog f = {};
     SetWorldFog(sun, f);
     float cloud = view && view->Precipitation ? view->Precipitation->GetCloudIntensity() : 0.0f;
+    {
+        float h = sun.z - 0.14f;
+        h = h < 0.0f ? 0.0f : h;
+        h = h > 0.677f - 0.14f ? 0.677f - 0.14f : h;
+        gPortSunStrength = h / (0.677f - 0.14f) * (1.0f - cloud);
+        gPortShadowCGAlpha = 0.1f + (0.9f - 0.1f) * gPortSunStrength;
+    }
     SetTimeOfDayLighting(sun, cloud, f);
     // WORLDREFLECT's specular rgb is also scaled by 1 - the Rain +0x290
     // cloud intensity (sub_6D71F0).

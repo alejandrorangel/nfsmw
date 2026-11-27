@@ -158,11 +158,13 @@ void PortVisualTreatmentFrame(int frame) {
         if (se != nullptr && se->IsActive(SE_GLARE)) {
             // Glare (SE_inf[3].active, view ScreenEffects +0x30): offset
             // (1 - intensity) (0.3 + 0.2 cloud) (0x8F9B48/4C), at least 0;
-            // blend factor intensity x 1 (0x8FAE64) x 200 (0x8970CC).
+            // blend factor intensity x the sun strength (0x8FAE64) x 200
+            // (0x8970CC).
             float glare = se->GetIntensity(SE_GLARE);
             ob.offset = (1.0f - glare) * (0.3f + 0.2f * cloud);
             ob.offset = ob.offset > 0.0f ? ob.offset : 0.0f;
-            intensity = glare * 200.0f;
+            extern float gPortSunStrength; // 0x8FAE64 (SceneNative.cpp)
+            intensity = glare * gPortSunStrength * 200.0f;
         } else {
             // 0.35 + 0.5 cloud (0x8F9B50/54); blend factor 0.6 (0x8F9B30) with
             // the visual treatment, else 0.8 (0x8F9B2C), of 255.

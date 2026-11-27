@@ -729,6 +729,10 @@ vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffe
         CarVertex(o, p.xyz, o.local_normal, o.color, c, m, l, wv);
         return o;
     }
+    if (c.effect == 22) {
+        // IDI_SHADOW_CG_FX vs #1: position, oD0 = colour, oT0 = uv.
+        return o;
+    }
     if (c.effect == 19) {
         // IDI_SKYBOX_FX (c.pad = pass). Second uv set (dcl_texcoord1) after
         // the first in the longer vertex formats.
@@ -979,6 +983,11 @@ fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(
             out = float4(m.rgb, m.a * sky.cloud_intensity.z);
         }
         return out;
+    } else if (c.effect == 22) {
+        // IDI_SHADOW_CG_FX ps #0 (ps_1_1): t v0 ShadowColor c1; ShadowColor
+        // (0.5, 0.5, 0.5, w) with w in c.eye.w. ps_1_x clamps constants to
+        // -1..1: the 'def c1, 1, 1, 1, 2' is (1, 1, 1, 1) and w at most 1.
+        out = saturate(t * saturate(in.d0) * float4(0.5, 0.5, 0.5, min(c.eye.w, 1.0)));
     } else if (c.effect == 4) {
         out = CarShade(in, t, c, env_map, CarShadow(c, in.shadow_pos, shadow_map, shadow_colour));
     } else if (NormalMapped(c)) {
@@ -1925,6 +1934,11 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                     }
                 }
                 memcpy(c.eye, eye, sizeof(float) * 3);
+                if (d.effect == 22) {
+                    // sub_6C6630: ShadowColor.w = 0x8FAE68, x 2 off the main
+                    // render target.
+                    c.eye[3] = d.material[0] * (_drawingEnvFace ? 2.0f : 1.0f);
+                }
                 memcpy(c.view_x, view_x, sizeof(view_x));
                 static const char *shade_env = getenv("NFSMW_SHADE");
                 c.shade = (shade_env && strcmp(shade_env, "texture") == 0) ? 1 : 0;
