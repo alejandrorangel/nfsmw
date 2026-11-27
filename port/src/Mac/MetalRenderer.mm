@@ -4,6 +4,7 @@
 #import "BenchmarkMac.h"
 #include "../Platform/Benchmark.h"
 #include "MetalPrelitBridge.h"
+#include "MetalUpload.h"
 
 #include <atomic>
 #include <mutex>
@@ -1609,13 +1610,12 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
 // The frame's IDI_PARTICLES_FX batches after the world: ZFUNC LESSEQUAL, no
 // depth writes (___eDisplayFrame sets ZWRITEENABLE 0 around them), each
 // batch with its texture's blending (sub_6C1010).
-- (void)drawParticles:(const Frame3D &)scene encoder:(id<MTLRenderCommandEncoder>)enc {
+- (void)drawParticles:(const Frame3D &)scene encoder:(id<MTLRenderCommandEncoder>)enc commandBuffer:(id<MTLCommandBuffer>)cmd {
     if (scene.particles.empty()) {
         return;
     }
-    id<MTLBuffer> vb = [_device newBufferWithBytes:scene.particle_verts.data()
-                                            length:scene.particle_verts.size() * sizeof(PortParticleVertex)
-                                           options:MTLResourceStorageModeShared];
+    id<MTLBuffer> vb = port_upload::Acquire(_device, scene.particle_verts.data(), scene.particle_verts.size() * sizeof(PortParticleVertex));
+    port_upload::Retire(vb, cmd);
     [enc setCullMode:MTLCullModeNone];
     [enc setDepthStencilState:_depthTest];
     [enc setVertexBuffer:vb offset:0 atIndex:0];
@@ -2583,7 +2583,7 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
             [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
         }
     }
-    [self drawParticles:scene encoder:enc];
+    [self drawParticles:scene encoder:enc commandBuffer:cmd];
     _passSamples = 1;
     _passMask = 0;
     _passMainScene = false;
@@ -2709,6 +2709,7 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
     pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
     pass.colorAttachments[0].loadAction = MTLLoadActionClear;
 
+    id<MTLCommandBuffer> cmd = [_queue commandBuffer];
     FEFrame fe;
     {
         std::lock_guard<std::mutex> guard(gFELock);
@@ -2718,7 +2719,7 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
             std::swap(_scene, g3DPublished); // the game clears what it gets back (PortMetal3DBeginFrame)
             _sceneSerial = g3DPublishedSerial;
         }
-        PortMetalPrelitTakeFrame((__bridge void *)_device);
+        PortMetalPrelitTakeFrame((__bridge void *)_device, (__bridge void *)cmd);
     }
     PortMacBenchmarkFrameTaken(view);
     const Frame3D &scene = _scene;
@@ -2726,7 +2727,6 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
     pass.depthAttachment.clearDepth = 1.0;
     pass.depthAttachment.loadAction = MTLLoadActionClear;
 
-    id<MTLCommandBuffer> cmd = [_queue commandBuffer];
     _sky = scene.sky;
     for (int i = 0; i < 3; i++) {
         _skyMisc[i] = scene.sky_misc[i];
@@ -2789,9 +2789,8 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
             gFEMapping = {(float)(viewport.originX / size.width), (float)(viewport.originY / size.height),
                           (float)(viewport.width / size.width), (float)(viewport.height / size.height), scale[0], scale[1]};
         }
-        id<MTLBuffer> vb = [_device newBufferWithBytes:fe.vertices.data()
-                                                length:fe.vertices.size() * sizeof(PortFEVertex)
-                                               options:MTLResourceStorageModeShared];
+        id<MTLBuffer> vb = port_upload::Acquire(_device, fe.vertices.data(), fe.vertices.size() * sizeof(PortFEVertex));
+        port_upload::Retire(vb, cmd);
         [enc setVertexBuffer:vb offset:0 atIndex:0];
         for (const FEBatch &b : fe.batches) {
             [enc setRenderPipelineState:_fePipelines[b.blend]];

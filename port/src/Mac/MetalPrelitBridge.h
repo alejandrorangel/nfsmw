@@ -51,8 +51,8 @@ void PortMetalPrelitPublish();
 // Render thread, with the 3D frame (under the lock PortMetalFEEndFrame
 // holds): takes the published frame, if it's new, as the one to draw and
 // uploads its vertices (device: an id<MTLDevice>); otherwise the last one
-// is drawn again.
-void PortMetalPrelitTakeFrame(void *device);
+// is drawn again. cmd: the id<MTLCommandBuffer> the frame is drawn in.
+void PortMetalPrelitTakeFrame(void *device, void *cmd);
 // Render thread: draws the taken frame into encoder (an
 // id<MTLRenderCommandEncoder> of the main scene pass, samples per pixel)
 // with view_proj (world -> clip, row vectors). part: 0, 1 or 2 (see

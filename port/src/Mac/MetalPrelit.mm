@@ -3,6 +3,7 @@
 #import <Metal/Metal.h>
 
 #include "MetalPrelitBridge.h"
+#include "MetalUpload.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -246,18 +247,19 @@ void PortMetalPrelitPublish() {
     gPublishedNew = true;
 }
 
-void PortMetalPrelitTakeFrame(void *device) {
+void PortMetalPrelitTakeFrame(void *device, void *cmd) {
     std::lock_guard<std::mutex> guard(gLock);
     if (!gPublishedNew) {
         return; // no new frame: draw this one again
     }
     std::swap(gDrawing, gPublished); // the game clears what it gets back (PortMetalPrelitBeginFrame)
     gPublishedNew = false;
+    // The last frame's were last used by an earlier command buffer.
+    port_upload::Retire(gDrawingVertices, (__bridge id<MTLCommandBuffer>)cmd);
     gDrawingVertices = nil;
     if (!gDrawing.vertices.empty()) {
-        gDrawingVertices = [(__bridge id<MTLDevice>)device newBufferWithBytes:gDrawing.vertices.data()
-                                                                       length:gDrawing.vertices.size() * sizeof(PortPrelitVertex)
-                                                                      options:MTLResourceStorageModeShared];
+        gDrawingVertices = port_upload::Acquire((__bridge id<MTLDevice>)device, gDrawing.vertices.data(),
+                                                gDrawing.vertices.size() * sizeof(PortPrelitVertex));
     }
 }
 
