@@ -6,6 +6,7 @@
 #include "InputBridge.h"
 #include "MetalBridge.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -95,6 +96,27 @@ static int PortKeyForKeyCode(unsigned short code) {
     case 0x41: return PORT_KEY_DECIMAL;
     }
     return -1;
+}
+
+// Typed characters, like the WM_CHAR messages TranslateMessage makes on PC.
+static std::vector<int> gChars;
+
+static void QueueChars(NSEvent *event) {
+    NSString *chars = event.characters;
+    std::lock_guard<std::mutex> guard(gInputLock);
+    for (NSUInteger i = 0; i < chars.length; i++) {
+        unichar c = [chars characterAtIndex:i];
+        if (c == 0x7F) {
+            c = '\b'; // the Mac delete key is the PC backspace
+        } else if (c == 0x03) {
+            c = '\r'; // keypad enter
+        }
+        // Function, arrow and Mac forward-delete keys make no WM_CHAR; nor do
+        // characters outside the ANSI code page.
+        if (c < 0x100 && !(c >= 0x80 && c < 0xA0)) {
+            gChars.push_back(c);
+        }
+    }
 }
 
 static void SetKey(unsigned short code, bool down) {
@@ -228,6 +250,9 @@ void PortInputInstallKeyboardMonitor() {
                                                 return event; // keep Cmd-Q etc. working
                                             }
                                             SetKey(event.keyCode, event.type == NSEventTypeKeyDown);
+                                            if (event.type == NSEventTypeKeyDown) {
+                                                QueueChars(event);
+                                            }
                                             return nil; // swallow, so no system beep
                                           }];
 }
@@ -396,6 +421,66 @@ static int ApplyAutoMouse(PortInputState *out, bool take_wheel) {
         out->mouse_buttons |= 1;
     }
     return wheel;
+}
+
+// Scripted typing for automated runs, on the same clock as NFSMW_AUTO_KEYS:
+//   NFSMW_AUTO_TEXT=<seconds>:<text>[;...]  each text is typed at once.
+//   Escapes: \r or \n return, \b backspace, \e escape, \; and \\ themselves.
+struct AutoText {
+    double time;
+    std::vector<int> chars;
+    bool typed;
+};
+
+static std::vector<AutoText> &AutoTexts() {
+    static std::vector<AutoText> texts = [] {
+        std::vector<AutoText> t;
+        const char *p = getenv("NFSMW_AUTO_TEXT");
+        while (p && *p) {
+            AutoText text = {atof(p), {}, false};
+            const char *colon = strchr(p, ':');
+            if (colon == nullptr) {
+                break;
+            }
+            for (p = colon + 1; *p && *p != ';'; p++) {
+                int c = (unsigned char)*p;
+                if (c == '\\' && p[1]) {
+                    p++;
+                    switch (*p) {
+                    case 'r': case 'n': c = '\r'; break;
+                    case 'b': c = '\b'; break;
+                    case 'e': c = 0x1B; break;
+                    default: c = (unsigned char)*p; break;
+                    }
+                }
+                text.chars.push_back(c);
+            }
+            t.push_back(text);
+            if (*p == ';') {
+                p++;
+            }
+        }
+        return t;
+    }();
+    return texts;
+}
+
+int PortInputTakeChars(int *out, int max) {
+    std::lock_guard<std::mutex> guard(gInputLock);
+    std::vector<AutoText> &texts = AutoTexts();
+    if (!texts.empty()) {
+        double now = AutoInputTime();
+        for (AutoText &t : texts) {
+            if (!t.typed && now >= t.time) {
+                t.typed = true;
+                gChars.insert(gChars.end(), t.chars.begin(), t.chars.end());
+            }
+        }
+    }
+    int n = (int)gChars.size() < max ? (int)gChars.size() : max;
+    std::copy(gChars.begin(), gChars.begin() + n, out);
+    gChars.erase(gChars.begin(), gChars.begin() + n);
+    return n;
 }
 
 int PortInputTakeMouseWheel() {

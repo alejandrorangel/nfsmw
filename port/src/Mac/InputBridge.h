@@ -43,3 +43,7 @@ void PortInputGetState(PortInputState *out);
 // Returns and clears the wheel movement since the last call, in DirectInput
 // units (+120 a notch away from the user, whatever the scrolling preference).
 int PortInputTakeMouseWheel();
+// Moves up to max typed characters, oldest first, into out and returns how many.
+// Codes are what the PC's ANSI window gets as WM_CHAR: Latin-1 characters,
+// '\r' for return, 0x1B for escape, '\b' for backspace.
+int PortInputTakeChars(int *out, int max);

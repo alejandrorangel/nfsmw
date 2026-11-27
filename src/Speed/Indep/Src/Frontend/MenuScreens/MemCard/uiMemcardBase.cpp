@@ -55,6 +55,33 @@ void UIMemcardKeyboard::Setup() {
     FEngSetCurrentButton(GetPackageName(), gButtonIDs[1]);
 }
 
+#ifdef EA_PLATFORM_WIN32
+// PC: the profile name is typed straight into the PC_NAME_ENTRY panel's text
+// field instead of on an on-screen keyboard.
+static const uint32 FEObj_PC_NAME_ENTRY = 0x6042a783;      // "PC_NAME_ENTRY"
+static const uint32 FEObj_PC_NAME_ENTRY_TEXT = 0x8f095fd5; // the edited FEString
+
+// PC: 0x527510
+void UIMemcardKeyboard::ShowKeyboard() {
+    FEngSetInvisible(m_pDisplayMsg);
+    FEngSetScript(GetPackageName(), FEObj_PC_NAME_ENTRY, FEHASH_SHOW, true);
+    FEngBeginTextInput(FEObj_PC_NAME_ENTRY_TEXT, 6, GetLocalizedString(0x70513bd4), GetLocalizedString(0xd48d95f), 7);
+    FEDatabase->mFEKeyboardSettings.Mode = 5;
+}
+
+// PC: 0x5275B0
+void UIMemcardKeyboard::NotificationMessage(u32 msg, FEObject *obj, u32 param1, u32 param2) {
+    if (msg == __BUTTON_PRESSED__) {
+        // Clicking the OK button accepts the typed name.
+        cFEng::Get()->QueueGameMessage(FEMSG_ACCEPT_EDITED_TEXT, GetPackageName(), 0xff);
+        return;
+    }
+    if (msg == FEMSG_DECLINE_EDITED_TEXT || msg == FEMSG_ACCEPT_EDITED_TEXT) {
+        FEngSetVisible(m_pDisplayMsg);
+        FEngSetScript(GetPackageName(), FEObj_PC_NAME_ENTRY, FEHASH_HIDE, true);
+    }
+}
+#else
 void UIMemcardKeyboard::ShowKeyboard() {
     const u32 FEObj_DIM = FEHASH_DIM;
     const u32 FEObj_SHOW = FEHASH_SHOW;
@@ -74,6 +101,7 @@ void UIMemcardKeyboard::NotificationMessage(u32 msg, FEObject *obj, u32 param1, 
         FEngSetScript(GetPackageName(), FEObj_PC_NAME_ENTRY, FEObj_UNDIM, true);
     }
 }
+#endif
 
 // ===== UIMemcardBase =====
 

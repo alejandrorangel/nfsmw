@@ -6,6 +6,14 @@
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterfaceFEStrings.hpp"
 #include "Speed/Indep/Src/Frontend/Localization/Localize.hpp"
 #include "Speed/Indep/bWare/Inc/Strings.hpp"
+#ifdef EA_PLATFORM_WIN32
+#include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterface.hpp"
+#include "Speed/Indep/Src/Misc/GameFlow.hpp"
+#endif
+
+#ifdef EA_PORT_NATIVE
+KeyboardEditString gKeyboardManager; // PC: 0x91D4B0
+#endif
 
 KeyboardEditString::KeyboardEditString() {
     TextInputObject = nullptr;
@@ -47,6 +55,103 @@ void KeyboardEditString::RevertToOriginalString() {
     PackedStringToWideString(EditStringUCS2, 0x200, InitialString);
     SyncEditIntoPacked();
 }
+
+#ifdef EA_PLATFORM_WIN32
+// PC typed text entry. Windows delivers WM_CHAR (an ANSI character code) to
+// the window proc 0x6DB6C0, which hands it to NotifyChar through 0x5A95F0.
+
+// PC: 0x57F1D0
+void KeyboardEditString::StartCapture(FEngTextInputObject *txt, uint32 mode, const char *start_string, uint32 max_text_length) {
+    TextInputObject = txt;
+    ModeFlags = mode;
+    if (static_cast<int>(max_text_length) > 0x9B) {
+        max_text_length = 0x9B;
+    }
+    MaxTextLength = max_text_length;
+    PackedStringToWideString(EditStringUCS2, 0x200, start_string);
+    SyncEditIntoPacked();
+    bStrNCpy(InitialString, start_string, sizeof(InitialString));
+    CursorPosUCS2 = bStrLen(EditStringUCS2);
+    KeysProcessed = 0;
+    mEnabled = true;
+}
+
+// PC: 0x56C820. Letters and digits are always allowed; the mode adds symbols.
+bool KeyboardEditString::PassesThroughFilter(int keycode) {
+    // PC: the symbol tables at 0x8F53F0 (0x56C7C0) and 0x8F5474 (0x56C7F0)
+    static const int kSymbols[] = {' ', '.', ',', '_', '@', '-', '`', '=', '[', ']', '\\', ';', '\'', '/', '<', '>', '?',
+                                   ':', '"', '{', '}', '|', '+', '(', ')', '*', '&', '%', '#', '!', '~'};
+    static const int kInvertedPunctuation[] = {0xBF, 0xA1, 'a'};
+
+    if (!IsCapturing()) {
+        return false;
+    }
+    if ((keycode >= 'a' && keycode <= 'z') || (keycode >= 'A' && keycode <= 'Z') || (keycode >= '0' && keycode <= '9')) {
+        return true;
+    }
+    if (ModeFlags == 4 && (keycode == '@' || keycode == '.' || keycode == '_')) {
+        return true;
+    }
+    if (ModeFlags == 5 && (keycode == ' ' || keycode == ',' || keycode == '@' || keycode == '.')) {
+        return true;
+    }
+    if (ModeFlags != 3 && ModeFlags != 0) {
+        return false;
+    }
+    if (keycode >= 0xC0 && keycode <= 0xFF) {
+        return true;
+    }
+    for (unsigned int i = 0; i < sizeof(kInvertedPunctuation) / sizeof(kInvertedPunctuation[0]); i++) {
+        if (kInvertedPunctuation[i] == keycode) {
+            return true;
+        }
+    }
+    for (unsigned int i = 0; i < sizeof(kSymbols) / sizeof(kSymbols[0]); i++) {
+        if (kSymbols[i] == keycode) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// PC: 0x5A3790. There's no cursor movement on PC (the WM_KEYDOWN Home/End/
+// Left/Right cases in the window proc call empty functions): characters are
+// appended and backspace deletes the last one.
+void KeyboardEditString::ProcessHotkeys(int keycode) {
+    if (!IsCapturing()) {
+        return;
+    }
+    int keys_processed = KeysProcessed++;
+    if (keycode == '\r') {
+        // Ignore a return that's the first key, e.g. the press that opened the input.
+        if (keys_processed != 0) {
+            TextInputObject->ReturnPressed();
+        }
+    } else if (keycode == 0x1B) {
+        TextInputObject->EscapePressed();
+    } else if (keycode == '\b') {
+        if (CursorPosUCS2 > 0) {
+            CursorPosUCS2--;
+            EditStringUCS2[CursorPosUCS2] = 0;
+        }
+    } else if (PassesThroughFilter(keycode) && CursorPosUCS2 < MaxTextLength) {
+        EditStringUCS2[CursorPosUCS2] = static_cast<uint16>(keycode);
+        CursorPosUCS2++;
+    }
+}
+
+// PC: 0x5A8700
+void KeyboardEditString::NotifyChar(int keycode) {
+    if (IsCapturing()) {
+        ProcessHotkeys(keycode);
+    } else if (TheGameFlowManager.GetState() == GAMEFLOW_STATE_IN_FRONTEND && (keycode == 'q' || keycode == 'Q')) {
+        // PC MenuScreen::BaseNotify 0x5A4820 answers this with the quit-game dialog.
+        cFEng::Get()->QueueGameMessage(0x62799a4c, nullptr, 0xff);
+    }
+    // PC then feeds EasterEggs::KeyboardInput 0x65D9E0, but only when the flag
+    // byte at 0x8F8410 is set, and it's 0 in .data and never written.
+}
+#endif
 
 FEngTextInputObject::FEngTextInputObject(MenuScreen *pkg, FEString *obj, uint32 mode, const char *start_string, uint32 max_text_length)
     : DisplayString(obj), ParentPackage(pkg), mBlinkTime(0) {

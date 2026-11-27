@@ -12,6 +12,10 @@
 #include "Speed/Indep/Src/Frontend/HUD/FeHudElement.hpp"
 #include "Speed/Indep/Src/Frontend/MenuScreens/Common/feKeyboardInput.hpp"
 #include "Speed/Indep/Src/Frontend/MenuScreens/InGame/FEPkg_MU_Keyboard.hpp"
+#ifdef EA_PLATFORM_WIN32
+#include "Speed/Indep/Src/Frontend/MenuScreens/Common/feDialogBox.hpp"
+#include "Speed/Indep/Src/Misc/GameFlow.hpp"
+#endif
 
 extern KeyboardEditString gKeyboardManager;
 MenuScreen *g_pOLCurrentScreen = nullptr;
@@ -74,10 +78,39 @@ MenuScreen::~MenuScreen() {
     }
 }
 
+#ifdef EA_PLATFORM_WIN32
+// PC: 0x5864B0. No quit dialog over the boot screens, movies, loading or EA Trax.
+static bool CanShowQuitDialog(FEPackage *pkg) {
+    uint32 hash = pkg->GetNameHash();
+    return hash != FEngHashString("LOADING.FNG") && hash != FEngHashString("EA_TRAX_JUKEBOX.FNG") && hash != FEngHashString("MC_MAIN.FNG") &&
+           hash != FEngHashString("FEANYMOVIE.FNG") && hash != FEngHashString("LS_PSA.FNG") && hash != FEngHashString("LS_EALOGO.FNG") &&
+           hash != FEngHashString("MW_LS_ATTRACTFMV.FNG") && hash != FEngHashString("MW_LS_SPLASH.FNG");
+}
+#endif
+
 void MenuScreen::BaseNotify(u32 Message, FEObject *pObject, u32 Param1, u32 Param2) {
     if (CheckKeyboard(Message)) {
         return;
     }
+
+#ifdef EA_PLATFORM_WIN32
+    // PC MenuScreen::BaseNotify 0x5A4820: pressing Q in the frontend (see
+    // KeyboardEditString::NotifyChar) asks whether to quit the game.
+    // TODO(port): the rest of PC BaseNotify (online, EA Messenger, LAN) isn't ported.
+    if (Message == 0x62799a4c) {
+        FEPackage *base = cFEng::Get()->FindPackageAtBase();
+        FEPackage *control = cFEng::Get()->FindPackageWithControl();
+        FEPackage *pkg = ConstructData.pPackage;
+        if (TheGameFlowManager.GetState() == GAMEFLOW_STATE_IN_FRONTEND && CanShowQuitDialog(pkg) && pkg->IsInputEnabled() && pkg == control &&
+            control == base) {
+            DialogInterface::ShowTwoButtons(GetPackageName(), "", dialog_confirmation, 0x70e01038, 0x417b25e4, 0xbe34e004, 0x34dc1bcf,
+                                            0x34dc1bcf, first_dialog_button2, 0x75cac3b);
+        }
+    } else if (Message == 0xbe34e004) {
+        extern int ExitTheGameFlag;
+        ExitTheGameFlag = 1;
+    }
+#endif
 
     int send_notify = 1;
 
@@ -91,7 +124,15 @@ void MenuScreen::BaseNotify(u32 Message, FEObject *pObject, u32 Param1, u32 Para
 }
 
 const char *MenuScreen::FEngGetEditedString() {
+#ifdef EA_PLATFORM_WIN32
+    // PC: 0x586550. The text is typed straight into the screen (no keyboard screen).
+    if (TextInputObject != nullptr) {
+        return gKeyboardManager.GetEditedString();
+    }
+    return nullptr;
+#else
     return FEDatabase->mFEKeyboardSettings.Buffer;
+#endif
 }
 
 void MenuScreen::FEngEndTextInput() {
@@ -105,7 +146,12 @@ void MenuScreen::FEngEndTextInput() {
 
 void MenuScreen::FEngBeginTextInput(uint32 object_hash, uint32 edit_mode, const char *initial_string, const char *title_string,
                                     uint32 max_text_length) {
+#ifdef EA_PLATFORM_WIN32
+    // PC: 0x5865E0 always edits in place with the typed-text input object.
+    bool is_plat_pc = true;
+#else
     bool is_plat_pc = false;
+#endif
     if (is_plat_pc) {
         TextInputObject = new ("FEngTextInputObject", 0)
             FEngTextInputObject(this, FEngFindString(GetPackageName(), object_hash), edit_mode, initial_string, max_text_length);
@@ -173,6 +219,17 @@ bool MenuScreen::CheckKeyboard(uint32 msg) {
     }
 
     if (TextInputObject != nullptr) {
+#ifdef EA_PLATFORM_WIN32
+        // PC: 0x59B2C0 abandons the edit on 0xD15C04EC (handled by the online
+        // EA Messenger screens).
+        if (msg == 0xd15c04ec) {
+            gKeyboardManager.RevertToOriginalString();
+            gKeyboardManager.EndCapture();
+            TextInputObject->RedrawString(true);
+            FEngEndTextInput();
+            return false;
+        }
+#endif
         if (gKeyboardManager.IsCapturing()) {
             if (msg == __PAD_BACK__) {
                 TextInputObject->EscapePressed();

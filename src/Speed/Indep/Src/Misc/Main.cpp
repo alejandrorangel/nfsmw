@@ -544,6 +544,12 @@ void MainLoop(float hardware_ms) {
 #else
 #endif
     }
+#ifdef EA_PORT_NATIVE
+    // PC MainLoop 0x663D30 ends by pumping the window messages (0x6DF8E0), which
+    // is where typed characters (WM_CHAR) reach the frontend's text input.
+    extern void PortDispatchCharMessages();
+    PortDispatchCharMessages();
+#endif
 }
 
 static const float Tweak_MinimumRealTimeStep = 0.25f; // Decl: 3123

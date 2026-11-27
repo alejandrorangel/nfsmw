@@ -9,6 +9,10 @@
 
 // total size: 0xC
 class FEngTextInputObject {
+#ifdef EA_PLATFORM_WIN32
+    friend class MenuScreen; // PC MenuScreen::CheckKeyboard 0x59B2C0 calls RedrawString
+#endif
+
   private:
     void DrawCursor();
     void RedrawString(bool pIncludeCursor);
@@ -34,7 +38,11 @@ class KeyboardEditString {
 
   private:
     bool AddChar();
+#ifdef EA_PLATFORM_WIN32
+    bool PassesThroughFilter(int keycode);
+#else
     bool PassesThroughFilter();
+#endif
     uint32 GetModeFlags() {
         return ModeFlags;
     }

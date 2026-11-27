@@ -94,7 +94,9 @@ own console widescreen path stays off.)
 Debug switches:
 
 - `NFSMW_AUTO_KEYS=<s>:<key>,...` (enter esc space up down left right),
-  `NFSMW_AUTO_ENTER=<s>,...`: scripted key presses for automated runs
+  `NFSMW_AUTO_ENTER=<s>,...`: scripted key presses for automated runs;
+  `NFSMW_AUTO_TEXT=<s>:<text>;...`: scripted typing (escapes `\r` return,
+  `\b` backspace, `\e` escape), e.g. `32:q` for the frontend quit prompt
 - `NFSMW_SMOKE_CAR=<car>` / `NFSMW_SMOKE_SOLIDS=<name text>`: draw models over
   the frontend with an orbit camera; `NFSMW_SCENE_ON_TOP=1` draws the 3D
   scene over the frontend; `NFSMW_SHADE=texture` ignores vertex colours
