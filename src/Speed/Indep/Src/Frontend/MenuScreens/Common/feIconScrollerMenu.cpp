@@ -286,7 +286,14 @@ IconScroller::IconScroller(const char *pkg_name, const char *master, const char 
 
     fIconSpacing = -5.0f;
 
+#if defined(EA_PLATFORM_WIN32)
+    // PC (speed.exe 1.3 IconScroller ctor 0x59B8A0): the scroller centres on
+    // and hides the master template object (e.g. OPTION_MASTER), not the
+    // scroll region.
+    FEObject *master_obj = FEngFindObject(pkg_name, FEHashUpper(master));
+#else
     FEObject *master_obj = FEngFindObject(pkg_name, FEHashUpper(scroll_region));
+#endif
     if (master_obj != nullptr) {
         FEngGetCenter(master_obj, fXCenter, fYCenter);
         FEngSetInvisible(master_obj);
