@@ -14,6 +14,10 @@
 #include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/FEPkg_GarageMain.hpp"
 #include "Speed/Indep/Src/World/Car.hpp"
 #include "Speed/Indep/Src/Misc/ResourceLoader.hpp"
+#include "Speed/Indep/Src/Misc/GameFlow.hpp"
+#include "Speed/Indep/Src/World/Scenery.hpp"
+#include "Speed/Indep/Src/Gameplay/GRaceDatabase.h"
+#include "Speed/Indep/Src/Ecstasy/eMath.hpp"
 #include "Speed/Indep/bWare/Inc/bWare.hpp"
 
 #include "../Mac/MetalBridge.h"
@@ -497,6 +501,120 @@ eVisibleState eViewPlatInterface::GetVisibleStateSB(const bVector3 *position, bM
 }
 
 // Builds this frame's 3D scene (published with the frontend).
+void RenderWorldModels(eView *view, int exc_flag); // WorldModel.cpp
+EVIEWMODE eGetCurrentViewMode();
+
+namespace {
+
+// The in-game world for player view 1, following speed.exe 1.3's frame:
+// sub_6BFDD0 fills one SceneryCullInfo per active player view (sub_4FAE40:
+// exclude flags; sub_6BFD00: facade matrix = rotation about Z by the view's
+// heading, and the view) and runs GrandSceneryCullInfo::DoCulling; then
+// ___eDisplayFrame (0x6DE300) stuffs the scenery (flags 0x20) and the world
+// models for view 1. Sky, flares, particles and the post effects are not
+// drawn yet.
+GrandSceneryCullInfo gWorldCullInfo;
+
+void SetupCullInfo(eView *view, SceneryCullInfo *info, unsigned int exclude) {
+    int id = view->GetID();
+    unsigned int flags = exclude | 0x10;
+    if (id == 1 || id == 2) {
+        flags = exclude | 0x12;
+    }
+    EVIEWMODE mode = eGetCurrentViewMode();
+    if (mode == 4 || mode == 3) {
+        flags |= 1;
+    }
+    if (id > 0x11 && id < 0x18) {
+        flags |= 0x100;
+    }
+    if (flags & 0x1800) {
+        flags |= 0x8000040;
+    }
+    if (flags & 0x1000) {
+        flags |= 2;
+    }
+    if (id == 3) {
+        flags |= 0x20;
+    }
+    // TODO(port): GRaceStatus::fObj race type 1 (drag) adds 4.
+    bVector3 *dir = view->GetCamera()->GetDirection();
+    bMatrix4 rot;
+    eCreateRotationZ(&rot, bATan(dir->x, dir->y));
+    info->FacadeMatrix = rot;
+    info->pView = view;
+    info->ExcludeFlags = flags;
+}
+
+// Until the player car exists natively, nothing drives the race camera, so it
+// stays at the frontend's position near the origin. Place it behind the
+// startup race's start grid instead (sim → world via eSwizzleWorldVector).
+void PortDebugRaceCamera(eView *view) {
+    static const bool off = std::getenv("NFSMW_NO_DEBUG_CAM") != nullptr;
+    Camera *camera = view->GetCamera();
+    if (off || bLength(camera->GetPosition()) > 50.0f || !GRaceDatabase::Exists()) {
+        return;
+    }
+    GRaceParameters *race = GRaceDatabase::Get().GetStartupRace();
+    if (race == nullptr) {
+        return;
+    }
+    UMath::Vector3 p, d;
+    race->GetStartPosition(p);
+    race->GetStartDirection(d);
+    bVector3 sim_pos(p.x, p.y, p.z), sim_dir(d.x, d.y, d.z), pos, dir;
+    eSwizzleWorldVector(sim_pos, pos);
+    eSwizzleWorldVector(sim_dir, dir);
+    bVector3 eye(pos.x - dir.x * 9.0f, pos.y - dir.y * 9.0f, pos.z + 3.0f);
+    bVector3 center(pos.x + dir.x * 10.0f, pos.y + dir.y * 10.0f, pos.z + 1.0f);
+    bVector3 up(0.0f, 0.0f, 1.0f);
+    bMatrix4 m;
+    eCreateLookAtMatrix(&m, eye, center, up);
+    camera->SetCameraMatrix(m, 0.0f);
+}
+
+bool RenderWorldScene(int frame) {
+    if (TheGameFlowManager.GetState() != GAMEFLOW_STATE_RACING) {
+        return false;
+    }
+    static const bool trace = std::getenv("NFSMW_TRACE_SCENE") != nullptr;
+    bool log = trace && (frame % 120 == 0);
+    eView *view = eGetView(1, false);
+    if (view == nullptr || view->GetCamera() == nullptr) {
+        return false;
+    }
+    PortDebugRaceCamera(view);
+    M44 view_proj;
+    if (!ViewProjectionFor(view, view_proj)) {
+        return false;
+    }
+    PortMetal3DBeginFrame(view_proj);
+    SetViewClip(view, view_proj);
+    bVector3 *eye = view->GetCamera()->GetPosition();
+    float e[3] = {eye->x, eye->y, eye->z};
+    PortMetal3DSetEye(e);
+    PortMetal3DSetOverlay(false);
+    gSceneLog = log;
+    std::memcpy(gSceneViewProj, view_proj, sizeof(M44));
+
+    gWorldCullInfo.NumCullInfos = 0;
+    SetupCullInfo(view, &gWorldCullInfo.SceneryCullInfos[gWorldCullInfo.NumCullInfos++], 0x6000);
+    gWorldCullInfo.DoCulling();
+    gSceneDraws = 0;
+    gSceneCalls = gSceneNoSolid = 0;
+    gWorldCullInfo.StuffScenery(view, 0x20);
+    int scenery = gSceneDraws;
+    RenderWorldModels(view, 0);
+    if (log) {
+        std::fprintf(stderr, "[world] camera (%.1f %.1f %.1f) dir (%.2f %.2f %.2f) draws: scenery %d, models %d (calls %d, no solid %d)\n",
+                     eye->x, eye->y, eye->z, view->GetCamera()->GetDirection()->x, view->GetCamera()->GetDirection()->y,
+                     view->GetCamera()->GetDirection()->z, scenery, gSceneDraws - scenery, gSceneCalls, gSceneNoSolid);
+    }
+    return true;
+}
+
+} // namespace
+
 void PortRenderScene(int frame) {
     M44 view_proj;
     Identity(view_proj);
@@ -504,6 +622,9 @@ void PortRenderScene(int frame) {
         PortMetal3DBeginFrame(view_proj);
         PortMetal3DSetOverlay(true);
         SmokeDraw();
+        return;
+    }
+    if (RenderWorldScene(frame)) {
         return;
     }
     if (!RenderFrontEndScene()) {
