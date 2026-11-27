@@ -220,6 +220,12 @@ void VehiclePartDamageBehaviour::Reset() {
 }
 
 ePositionMarker *VehiclePartDamageBehaviour::FindPositionMarker(const char *findPivotName) {
+#if defined(EA_PORT_NATIVE)
+    // PC finds none: Init (0x754410) is just the two SetPivot calls, the
+    // InitAnimationPivot calls compiled away. The decomp's body reads an
+    // uninitialised part (a crash once a car first takes part damage).
+    return nullptr;
+#endif
     CarPartModel *carPart;
     unsigned int findNameHash;
     this->mCarRenderInfo->GetMinLodLevel();
