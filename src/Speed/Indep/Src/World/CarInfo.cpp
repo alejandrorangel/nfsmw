@@ -1,3 +1,6 @@
+#if defined(EA_PORT_NATIVE)
+#include "Speed/PC/Src/PCGraphicsOptions.hpp"
+#endif
 #include "Speed/Indep/Src/World/CarInfo.hpp"
 #include "CarPartID.h"
 #include "Speed/Indep/Src/World/CarLoader.hpp"
@@ -893,6 +896,30 @@ void RideInfo::Init(CarType type, CarRenderUsage usage, int has_dash, int can_be
     this->mMaxSpoilerLodLevel = CARPART_LOD_E;
     this->mMaxRoofScoopLodLevel = CARPART_LOD_E;
     this->mMinReflectionLodLevel = CARPART_LOD_E;
+
+#if defined(EA_PORT_NATIVE)
+    // PC RideInfo::Init (0x739A70): the LOD range comes from the Car Geometry
+    // Detail option for every car (the console split by render usage above):
+    // minimum = option maximum - g_CarLodLevel (High: LOD A), traffic diffuse
+    // one above it, and fixed caps for the other parts.
+    {
+        int min_lod = gPCGraphicsOptionsMax.CarLodLevel - gPCGraphicsOptions.CarLodLevel;
+        this->mMinLodLevel = static_cast<CARPART_LOD>(min_lod);
+        this->mMaxLodLevel = CARPART_LOD_E;
+        this->mMinFELodLevel = CARPART_LOD_A;
+        this->mMaxFELodLevel = CARPART_LOD_E;
+        this->mMaxLicenseLodLevel = CARPART_LOD_B;
+        this->mMinTrafficDiffuseLodLevel = static_cast<CARPART_LOD>(min_lod + 1);
+        this->mMinShadowLodLevel = CARPART_LOD_C;
+        this->mMaxShadowLodLevel = CARPART_LOD_B;
+        this->mMaxTireLodLevel = CARPART_LOD_D;
+        this->mMaxBrakeLodLevel = CARPART_LOD_B;
+        this->mMaxSpoilerLodLevel = CARPART_LOD_E;
+        this->mMaxRoofScoopLodLevel = CARPART_LOD_E;
+        this->mMinReflectionLodLevel = CARPART_LOD_C;
+        this->mSpecialLODBehavior = 0;
+    }
+#endif
 
     if (usage == carRenderUsage_NISCar) {
         this->mMinLodLevel = CARPART_LOD_A;
