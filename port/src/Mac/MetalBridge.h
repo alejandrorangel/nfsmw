@@ -132,6 +132,16 @@ struct PortMotionBlur {
 };
 void PortMetal3DSetMotionBlur(const PortMotionBlur *blur);
 
+// PC X360 effects light flares (speed.exe 1.3 sub_6DAE20, with
+// g_X360EffectsEnable): the prelit quads between Begin and End (the flares)
+// go into a persistent full-size target instead of the frame. Each frame
+// the target is faded (times (0x78, 0x64, 0x82, 0xFF) / 255), the flares
+// drawn into it with the frame's depth, and it is added to the frame
+// (ONE / ONE) before the particles, or with Over Bright on, over bright is
+// added into it (and so trails too) and it is added after the treatment.
+void PortMetal3DBeginX360Flares();
+void PortMetal3DEndX360Flares();
+
 // PC world atmospheric scattering (IDI_WORLD_FX family vertex shaders:
 // extinction and Rayleigh + Henyey-Greenstein Mie in-scattering), with the
 // constants speed.exe 1.3 sub_6D6CF0 sets each frame from the 'effects'

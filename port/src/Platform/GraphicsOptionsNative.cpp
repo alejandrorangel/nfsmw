@@ -187,7 +187,15 @@ void SetDeviceMaxima() {
     m.CarLodLevel = 1;                 // 0x901880
     m.VSyncOn = 1;                     // 0x9018AC
     m.Unknown40 = 0;                   // 0x901878
-    m.X360EffectsEnable = 0;           // 0x901868
+    // 0x901868: 0 on every device (0x6D2234), so the X360 effects path
+    // (sub_6DAE20's light flare trails) never runs on PC. NFSMW_X360_EFFECTS=1
+    // turns the path on to see it (maximum and option; no registry value
+    // holds it).
+    m.X360EffectsEnable = 0;
+    if (const char *e = std::getenv("NFSMW_X360_EFFECTS")) {
+        m.X360EffectsEnable = *e != '\0' && *e != '0' ? 1 : 0;
+        gPCGraphicsOptions.X360EffectsEnable = m.X360EffectsEnable;
+    }
     m.Unknown14 = 0;                   // 0x90184C
     m.VisualTreatment = 1;             // 0x9018B0: the visual treatment effect loaded
     m.Unknown7C = 0;                   // 0x9018B4

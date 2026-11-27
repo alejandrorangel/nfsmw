@@ -19,6 +19,7 @@
 #include "Speed/Indep/Src/Misc/SpeedChunks.hpp"
 #include "Speed/Indep/bWare/Inc/bChunk.hpp"
 
+#include "../Mac/MetalBridge.h"
 #include "../Mac/MetalPrelitBridge.h"
 
 #include <cstdio>
@@ -384,13 +385,20 @@ void PortRenderWorldEffects(eView *view) {
     // (ePreDisplay, at the start of the frame, added the sun's flares to the
     // pool and read the flare attributes: FERenderMetal.cpp.)
     // 0x6DF2A3: with 0x9017E4 set, under IDI_WORLDPRELIT_FX with
-    // ZWRITEENABLE 0, the world, car and pool flares. TODO(port): with
-    // g_X360EffectsEnable (0x9017E0) the PC draws them through sub_6DAE20
-    // instead (into a separate target composited over the frame).
+    // ZWRITEENABLE 0, the world, car and pool flares; with
+    // g_X360EffectsEnable (0x9017E0) sub_6DAE20 draws them into its
+    // persistent flare target instead (PortMetal3DBeginX360Flares).
     if (gPCGraphicsOptions.Unknown34 != 0) {
+        const bool x360 = gPCGraphicsOptions.X360EffectsEnable != 0;
+        if (x360) {
+            PortMetal3DBeginX360Flares();
+        }
         eRenderWorldLightFlares(view, FLARE_NORM);
         RenderVehicleFlares(view, 0, 0);
         eRenderLightFlarePool(view);
+        if (x360) {
+            PortMetal3DEndX360Flares();
+        }
     }
     // 0x6DF472: the particles (g_ParticleSystemEnable), IDI_PARTICLES_FX.
     if (gPCGraphicsOptions.ParticleSystemEnable != 0) {

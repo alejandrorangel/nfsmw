@@ -19,12 +19,13 @@ struct Batch {
     uint32_t flags;
     uint32_t first; // vertex (triangle list)
     uint32_t count;
+    int part; // PortMetalPrelitSetPart
 };
 
 struct Frame {
     std::vector<PortPrelitVertex> vertices; // two triangles per quad
     std::vector<Batch> batches;
-    size_t split = SIZE_MAX; // batches from here on are part 1 (PortMetalPrelitSplit)
+    int part = 0; // PortMetalPrelitSetPart
 };
 
 Frame gBuilding;
@@ -176,11 +177,11 @@ id<MTLRenderPipelineState> Pipeline(int samples, PortPrelitBlend blend) {
 void PortMetalPrelitBeginFrame() {
     gBuilding.vertices.clear();
     gBuilding.batches.clear();
-    gBuilding.split = SIZE_MAX;
+    gBuilding.part = 0;
 }
 
-void PortMetalPrelitSplit() {
-    gBuilding.split = gBuilding.batches.size();
+void PortMetalPrelitSetPart(int part) {
+    gBuilding.part = part;
 }
 
 void PortMetalPrelitAddQuads(void *texture, PortPrelitBlend blend, uint32_t flags, const PortPrelitVertex *vertices, uint32_t num_quads) {
@@ -189,9 +190,9 @@ void PortMetalPrelitAddQuads(void *texture, PortPrelitBlend blend, uint32_t flag
     }
     id<MTLTexture> t = (__bridge id<MTLTexture>)texture;
     Frame &f = gBuilding;
-    if (f.batches.empty() || f.batches.size() == f.split || f.batches.back().texture != t || f.batches.back().blend != blend ||
+    if (f.batches.empty() || f.batches.back().part != f.part || f.batches.back().texture != t || f.batches.back().blend != blend ||
         f.batches.back().flags != flags) {
-        f.batches.push_back({t, blend, flags, (uint32_t)f.vertices.size(), 0});
+        f.batches.push_back({t, blend, flags, (uint32_t)f.vertices.size(), 0, f.part});
     }
     static const int order[6] = {0, 1, 2, 0, 2, 3};
     for (uint32_t q = 0; q < num_quads; q++) {
@@ -213,17 +214,15 @@ void PortMetalPrelitDraw(void *encoder, void *device, const float view_proj[16],
     std::vector<Batch> batches;
     {
         std::lock_guard<std::mutex> guard(gLock);
-        size_t first = 0, end = gPublished.batches.size();
-        if (part == 0) {
-            end = std::min(end, gPublished.split);
-        } else if (part == 1) {
-            first = std::min(end, gPublished.split);
+        for (const Batch &b : gPublished.batches) {
+            if (part < 0 ? b.part != 2 : b.part == part) {
+                batches.push_back(b);
+            }
         }
-        if (first >= end) {
+        if (batches.empty()) {
             return;
         }
         vertices = gPublished.vertices;
-        batches.assign(gPublished.batches.begin() + first, gPublished.batches.begin() + end);
     }
     id<MTLRenderCommandEncoder> enc = (__bridge id<MTLRenderCommandEncoder>)encoder;
     id<MTLDevice> dev = (__bridge id<MTLDevice>)device;

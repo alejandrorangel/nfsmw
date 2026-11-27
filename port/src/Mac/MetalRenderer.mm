@@ -202,6 +202,7 @@ struct Frame3D {
     PortOverBright ob = {};
     bool motion_blur = false; // PortMetal3DSetMotionBlur
     PortMotionBlur mb = {};
+    bool x360_flares = false; // PortMetal3DSetX360Flares
     // IDI_SKYBOX_FX constants (PortMetal3DSetSky); textures held strongly.
     PortSky sky = {};
     id<MTLTexture> sky_misc[3];
@@ -258,6 +259,7 @@ void PortMetal3DBeginFrame(const float view_proj[16]) {
     g3DBuilding.fog = {};
     g3DBuilding.overbright = false;
     g3DBuilding.motion_blur = false;
+    g3DBuilding.x360_flares = false;
     g3DBuilding.sky = {};
     for (int i = 0; i < 3; i++) {
         g3DBuilding.sky_misc[i] = nil;
@@ -371,8 +373,17 @@ void PortMetal3DSetMotionBlur(const PortMotionBlur *blur) {
     g3DBuilding.motion_blur = blur != nullptr;
     if (blur) {
         g3DBuilding.mb = *blur;
-        PortMetalPrelitSplit();
+        PortMetalPrelitSetPart(1);
     }
+}
+
+void PortMetal3DBeginX360Flares() {
+    g3DBuilding.x360_flares = true;
+    PortMetalPrelitSetPart(2);
+}
+
+void PortMetal3DEndX360Flares() {
+    PortMetalPrelitSetPart(1);
 }
 
 void PortMetal3DBeginShadow(const float view_proj[16], int shadow_detail) {
@@ -1155,6 +1166,15 @@ fragment float4 texture_fs(QuadOut in [[stage_in]], texture2d<float> src [[textu
     return src.sample(s, in.uv);
 }
 
+// sub_6DAE20's fade of the X360 flare target: sub_6D3B80 with ZERO,
+// BLENDFACTOR 0xFF786482 (the target times (0x78, 0x64, 0x82, 0xFF) / 255),
+// here as a copy of last frame's target (the copy sub_6D40E0 makes into the
+// FSAA surface) times the factor.
+fragment float4 flare_fade_fs(QuadOut in [[stage_in]], texture2d<float> src [[texture(0)]]) {
+    constexpr sampler s(filter::nearest, address::clamp_to_edge);
+    return src.sample(s, in.uv) * float4(120.0 / 255.0, 100.0 / 255.0, 130.0 / 255.0, 1.0);
+}
+
 // IDI_PARTICLES_FX technique 0 (vs #5; ps_1_1 #4: mul_x2 r0, t0, v0) with
 // the texture's alpha test (ALPHAREF 0x5F, sub_6C68B0).
 struct ParticleVertex { packed_float3 pos; uint color; packed_float2 uv; };
@@ -1264,8 +1284,16 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     // the blur.
     id<MTLTexture> _mb[2];
     id<MTLRenderPipelineState> _radialPipeline;
-    id<MTLRenderPipelineState> _mbBlendPSO[4];
+    id<MTLRenderPipelineState> _compositePSO[2][4]; // [blend factor, one/one][samples]
     id<MTLTexture> _sceneColorMSKept, _sceneDepthKept;
+    // X360 flares (PC g_X360EffectsEnable, sub_6DAE20): the persistent flare
+    // target 0x982960 / 0x93E7BC (two here, last frame's and this frame's),
+    // its FSAA surface 0x93E7B8 (memoryless), the fade pipelines per sample
+    // count, and the BLENDFACTOR / ONE add of over bright into it.
+    id<MTLTexture> _flare[2], _flareMS;
+    int _flareCurrent;
+    id<MTLRenderPipelineState> _flareFadePipeline[4];
+    id<MTLRenderPipelineState> _flareAddPipeline;
     // IDI_PARTICLES_FX: [sample count 1, 2, 4, 8][opaque, alpha, additive], rgb writes.
     id<MTLRenderPipelineState> _particlePSO[4][3];
     // IDI_RAIN_DROP_FX and the frame copy it refracts.
@@ -1386,6 +1414,15 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
             if (!_radialPipeline) {
                 NSLog(@"NFSMW: radial blur pipeline failed: %@", error);
             }
+            pd.fragmentFunction = [lib newFunctionWithName:@"overbright_add_fs"];
+            pd.colorAttachments[0].blendingEnabled = YES;
+            pd.colorAttachments[0].sourceRGBBlendFactor = pd.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorOne;
+            pd.colorAttachments[0].destinationRGBBlendFactor = pd.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOne;
+            _flareAddPipeline = [_device newRenderPipelineStateWithDescriptor:pd error:&error];
+            if (!_flareAddPipeline) {
+                NSLog(@"NFSMW: flare add pipeline failed: %@", error);
+            }
+            pd.colorAttachments[0].blendingEnabled = NO;
             pd.fragmentFunction = [lib newFunctionWithName:@"overbright_fs"];
             _overbrightPipeline = [_device newRenderPipelineStateWithDescriptor:pd error:&error];
             if (!_overbrightPipeline) {
@@ -2086,12 +2123,13 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     _sceneDepthKept = [_device newTextureWithDescriptor:dd];
 }
 
-// sub_6D3B80's composite (BLENDFACTOR / INVBLENDFACTOR) for a pass with this
-// many samples, depth attached but untouched.
-- (id<MTLRenderPipelineState>)motionBlurBlendPipeline:(int)samples {
+// sub_6D3B80's composites over the frame in a scene pass with this many
+// samples (depth attached, untouched): mode 0 BLENDFACTOR / INVBLENDFACTOR
+// (the motion blur), mode 1 ONE / ONE (the X360 flare target).
+- (id<MTLRenderPipelineState>)compositePipeline:(int)mode samples:(int)samples {
     int si = samples >= 8 ? 3 : samples >= 4 ? 2 : samples >= 2 ? 1 : 0;
-    if (_mbBlendPSO[si] != nil) {
-        return _mbBlendPSO[si];
+    if (_compositePSO[mode][si] != nil) {
+        return _compositePSO[mode][si];
     }
     MTLRenderPipelineDescriptor *pd = [MTLRenderPipelineDescriptor new];
     pd.vertexFunction = [_lib newFunctionWithName:@"quad_vs"];
@@ -2102,14 +2140,86 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     pd.rasterSampleCount = (NSUInteger)(1 << si);
     MTLRenderPipelineColorAttachmentDescriptor *c = pd.colorAttachments[0];
     c.blendingEnabled = YES;
-    c.sourceRGBBlendFactor = c.sourceAlphaBlendFactor = MTLBlendFactorBlendColor;
-    c.destinationRGBBlendFactor = c.destinationAlphaBlendFactor = MTLBlendFactorOneMinusBlendColor;
+    c.sourceRGBBlendFactor = c.sourceAlphaBlendFactor = mode == 0 ? MTLBlendFactorBlendColor : MTLBlendFactorOne;
+    c.destinationRGBBlendFactor = c.destinationAlphaBlendFactor = mode == 0 ? MTLBlendFactorOneMinusBlendColor : MTLBlendFactorOne;
     NSError *error = nil;
-    _mbBlendPSO[si] = [_device newRenderPipelineStateWithDescriptor:pd error:&error];
-    if (!_mbBlendPSO[si]) {
-        NSLog(@"NFSMW: motion blur blend pipeline failed: %@", error);
+    _compositePSO[mode][si] = [_device newRenderPipelineStateWithDescriptor:pd error:&error];
+    if (!_compositePSO[mode][si]) {
+        NSLog(@"NFSMW: composite pipeline %d failed: %@", mode, error);
     }
-    return _mbBlendPSO[si];
+    if (mode == 1 && _flareFadePipeline[si] == nil) {
+        pd.fragmentFunction = [_lib newFunctionWithName:@"flare_fade_fs"];
+        c.blendingEnabled = NO;
+        _flareFadePipeline[si] = [_device newRenderPipelineStateWithDescriptor:pd error:&error];
+        if (!_flareFadePipeline[si]) {
+            NSLog(@"NFSMW: flare fade pipeline failed: %@", error);
+        }
+    }
+    return _compositePSO[mode][si];
+}
+
+// PC sub_6DAE20 (g_X360EffectsEnable, in place of the flares at
+// ___eDisplayFrame 0x6DF2A3): the flare target 0x982960 faded
+// (BLENDFACTOR 0xFF786482), copied into the FSAA surface with FSAA, the
+// world, car and pool flares drawn into it under IDI_WORLDPRELIT_FX with the
+// frame's depth (z test, no writes), resolved back.
+- (void)drawX360Flares:(const Frame3D &)scene samples:(int)samples commandBuffer:(id<MTLCommandBuffer>)cmd {
+    NSUInteger w = _sceneColor.width, h = _sceneColor.height;
+    if (_flare[0] == nil || _flare[0].width != w || _flare[0].height != h) {
+        // 0x6C3000: created with the back buffer's size and cleared.
+        MTLTextureDescriptor *cd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                                                                      width:w
+                                                                                     height:h
+                                                                                  mipmapped:NO];
+        cd.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+        cd.storageMode = MTLStorageModePrivate;
+        for (int i = 0; i < 2; i++) {
+            _flare[i] = [_device newTextureWithDescriptor:cd];
+            _flare[i].label = @"X360 flares 0x982960";
+            MTLRenderPassDescriptor *cp = [MTLRenderPassDescriptor renderPassDescriptor];
+            cp.colorAttachments[0].texture = _flare[i];
+            cp.colorAttachments[0].loadAction = MTLLoadActionClear;
+            cp.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0);
+            cp.colorAttachments[0].storeAction = MTLStoreActionStore;
+            [[cmd renderCommandEncoderWithDescriptor:cp] endEncoding];
+        }
+        _flareMS = nil;
+    }
+    if (samples > 1 && (_flareMS == nil || (int)_flareMS.sampleCount != samples)) {
+        MTLTextureDescriptor *md = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                                                                      width:w
+                                                                                     height:h
+                                                                                  mipmapped:NO];
+        md.textureType = MTLTextureType2DMultisample;
+        md.sampleCount = samples;
+        md.usage = MTLTextureUsageRenderTarget;
+        md.storageMode = MTLStorageModeMemoryless;
+        _flareMS = [_device newTextureWithDescriptor:md];
+    }
+    const int next = _flareCurrent ^ 1;
+    MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+    rp.colorAttachments[0].loadAction = MTLLoadActionDontCare;
+    if (samples > 1) {
+        rp.colorAttachments[0].texture = _flareMS;
+        rp.colorAttachments[0].resolveTexture = _flare[next];
+        rp.colorAttachments[0].storeAction = MTLStoreActionMultisampleResolve;
+    } else {
+        rp.colorAttachments[0].texture = _flare[next];
+        rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+    }
+    rp.depthAttachment.texture = rp.stencilAttachment.texture = _sceneDepthKept;
+    rp.depthAttachment.loadAction = rp.stencilAttachment.loadAction = MTLLoadActionLoad;
+    rp.depthAttachment.storeAction = rp.stencilAttachment.storeAction = MTLStoreActionDontCare;
+    id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rp];
+    enc.label = @"X360 flares";
+    int si = samples >= 8 ? 3 : samples >= 4 ? 2 : samples >= 2 ? 1 : 0;
+    [enc setRenderPipelineState:_flareFadePipeline[si]];
+    [enc setDepthStencilState:_depthOff];
+    [enc setFragmentTexture:_flare[_flareCurrent] atIndex:0];
+    [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+    PortMetalPrelitDraw((__bridge void *)enc, (__bridge void *)_device, scene.view_proj, samples, (int)_colorFormat, (int)_depthFormat, 2);
+    [enc endEncoding];
+    _flareCurrent = next;
 }
 
 // One sub_6D2840 pass (see radial_fs).
@@ -2240,44 +2350,56 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
 // quarter, alpha = luminance; kernel 0x8F9560) and sub_6DBFE0 (0x8F9474 = 2
 // rounds of a 4-tap horizontal then vertical blur; kernels 0x8F9530 /
 // 0x8F9500), and over bright's.
-- (void)drawOffscreenScene:(const Frame3D &)scene commandBuffer:(id<MTLCommandBuffer>)cmd view:(MTKView *)view {
-    const int samples = PortMetalFSAASamples(gFSAALevel.load());
-    [self ensureSceneTargets:view.drawableSize samples:samples];
+// One part of the scene pass. The first clears; later ones load what the
+// part before kept (the motion blur and the X360 flares split the pass); the
+// last resolves.
+- (id<MTLRenderCommandEncoder>)beginScenePart:(bool)first last:(bool)last samples:(int)samples commandBuffer:(id<MTLCommandBuffer>)cmd {
+    const bool kept = _sceneDepthKept != nil && !(first && last);
     MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
     // The PC back buffer is cleared to 0 (alpha 0 too) after each present
     // (eDisplayFrame 0x6E75F0, D3DCLEAR target | z | stencil, colour 0).
-    rp.colorAttachments[0].loadAction = MTLLoadActionClear;
+    rp.colorAttachments[0].loadAction = first ? MTLLoadActionClear : MTLLoadActionLoad;
     rp.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0);
     if (samples > 1) {
-        rp.colorAttachments[0].texture = _sceneColorMS;
+        rp.colorAttachments[0].texture = kept ? _sceneColorMSKept : _sceneColorMS;
         rp.colorAttachments[0].resolveTexture = _sceneColor;
-        rp.colorAttachments[0].storeAction = MTLStoreActionMultisampleResolve;
+        rp.colorAttachments[0].storeAction = last ? MTLStoreActionMultisampleResolve : MTLStoreActionStoreAndMultisampleResolve;
     } else {
         rp.colorAttachments[0].texture = _sceneColor;
         rp.colorAttachments[0].storeAction = MTLStoreActionStore;
     }
-    rp.depthAttachment.texture = _sceneDepth;
-    rp.depthAttachment.loadAction = MTLLoadActionClear;
+    id<MTLTexture> depth = kept ? _sceneDepthKept : _sceneDepth;
+    rp.depthAttachment.texture = rp.stencilAttachment.texture = depth;
+    rp.depthAttachment.loadAction = rp.stencilAttachment.loadAction = first ? MTLLoadActionClear : MTLLoadActionLoad;
     rp.depthAttachment.clearDepth = 1.0;
-    rp.depthAttachment.storeAction = MTLStoreActionDontCare;
-    rp.stencilAttachment.texture = _sceneDepth;
-    rp.stencilAttachment.loadAction = MTLLoadActionClear;
+    // The X360 flares test against the frame's depth after the last part.
+    rp.depthAttachment.storeAction = kept ? MTLStoreActionStore : MTLStoreActionDontCare;
     rp.stencilAttachment.storeAction = MTLStoreActionDontCare;
-    // The motion blur splits the pass (PortMetal3DSetMotionBlur): the frame
-    // and its depth are stored after the first part and loaded for the
-    // second.
-    const bool split = scene.motion_blur && _radialPipeline && [self motionBlurBlendPipeline:samples];
-    if (split) {
-        [self ensureMotionBlurTargets];
-        rp.depthAttachment.texture = rp.stencilAttachment.texture = _sceneDepthKept;
-        rp.depthAttachment.storeAction = MTLStoreActionStore;
-        if (samples > 1) {
-            rp.colorAttachments[0].texture = _sceneColorMSKept;
-            rp.colorAttachments[0].storeAction = MTLStoreActionStoreAndMultisampleResolve;
-        }
-    }
     id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rp];
-    enc.label = @"Scene";
+    enc.label = first ? @"Scene" : @"Scene (continued)";
+    return enc;
+}
+
+// The 3D scene into the offscreen frame (multisampled with FSAA, then
+// resolved; PC renders into the multisampled back buffer or the FSAA
+// surface 0x93E7B8 and StretchRects it, 0x6DAEB5 / sub_6D40E0), then the
+// bloom source for the treatment: PC sub_6DBEC0 (2x2 taps down to a
+// quarter, alpha = luminance; kernel 0x8F9560) and sub_6DBFE0 (0x8F9474 = 2
+// rounds of a 4-tap horizontal then vertical blur; kernels 0x8F9530 /
+// 0x8F9500), and over bright's.
+- (void)drawOffscreenScene:(const Frame3D &)scene commandBuffer:(id<MTLCommandBuffer>)cmd view:(MTKView *)view {
+    const int samples = PortMetalFSAASamples(gFSAALevel.load());
+    [self ensureSceneTargets:view.drawableSize samples:samples];
+    // The motion blur (PortMetal3DSetMotionBlur) and the X360 flares
+    // (PortMetal3DSetX360Flares) split the pass: the frame and its depth are
+    // stored after a part and loaded for the next.
+    const bool split = scene.motion_blur && _radialPipeline && [self compositePipeline:0 samples:samples];
+    const int si = samples >= 8 ? 3 : samples >= 4 ? 2 : samples >= 2 ? 1 : 0;
+    const bool x360 = scene.x360_flares && [self compositePipeline:1 samples:samples] && _flareFadePipeline[si];
+    if (split || x360) {
+        [self ensureMotionBlurTargets];
+    }
+    id<MTLRenderCommandEncoder> enc = [self beginScenePart:true last:!split && !x360 samples:samples commandBuffer:cmd];
     // The world effects write ColorWriteMode 7 (rgb; sub_6CFCE0) in the
     // player view.
     _passSamples = samples;
@@ -2296,35 +2418,34 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
         // here: it's the same image).
         [self radialBlur:_sceneColor into:_mb[1] offsets:scene.mb.offsets scale:1.0f commandBuffer:cmd];
         [self radialBlur:_mb[1] into:_mb[0] offsets:scene.mb.offsets scale:4.0f commandBuffer:cmd];
-        MTLRenderPassDescriptor *rp2 = [MTLRenderPassDescriptor renderPassDescriptor];
-        rp2.colorAttachments[0].texture = samples > 1 ? _sceneColorMSKept : _sceneColor;
-        rp2.colorAttachments[0].loadAction = MTLLoadActionLoad;
-        if (samples > 1) {
-            rp2.colorAttachments[0].resolveTexture = _sceneColor;
-            rp2.colorAttachments[0].storeAction = MTLStoreActionMultisampleResolve;
-        } else {
-            rp2.colorAttachments[0].storeAction = MTLStoreActionStore;
-        }
-        rp2.depthAttachment.texture = rp2.stencilAttachment.texture = _sceneDepthKept;
-        rp2.depthAttachment.loadAction = MTLLoadActionLoad;
-        rp2.depthAttachment.storeAction = MTLStoreActionDontCare;
-        rp2.stencilAttachment.loadAction = MTLLoadActionLoad;
-        rp2.stencilAttachment.storeAction = MTLStoreActionDontCare;
-        enc = [cmd renderCommandEncoderWithDescriptor:rp2];
-        enc.label = @"Scene after motion blur";
+        enc = [self beginScenePart:false last:!x360 samples:samples commandBuffer:cmd];
         // sub_6D3B80(0x982A28, 0x93DEF8, BLENDFACTOR, INVBLENDFACTOR).
-        [enc setRenderPipelineState:[self motionBlurBlendPipeline:samples]];
+        [enc setRenderPipelineState:[self compositePipeline:0 samples:samples]];
         [enc setDepthStencilState:_depthOff];
         [enc setFragmentTexture:_mb[0] atIndex:0];
         const float f = scene.mb.factor;
         [enc setBlendColorRed:f green:f blue:f alpha:f];
         [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
-        // The rest of the frame: the sky's alpha-only pass (0x6DF3C3), the
-        // flares and the particles.
+        // The rest of the frame: the sky's alpha-only pass (0x6DF3C3; PC
+        // draws it after the flares, but it writes only alpha), the flares
+        // and the particles.
         _onlySkyAlpha = true;
         [self drawScene:scene encoder:enc view:view];
         _onlySkyAlpha = false;
         PortMetalPrelitDraw((__bridge void *)enc, (__bridge void *)_device, scene.view_proj, samples, (int)_colorFormat, (int)_depthFormat, 1);
+    }
+    if (x360) {
+        [enc endEncoding];
+        [self drawX360Flares:scene samples:samples commandBuffer:cmd];
+        enc = [self beginScenePart:false last:true samples:samples commandBuffer:cmd];
+        if (!scene.overbright) {
+            // sub_6DAE20 0x6DB0C4, Over Bright off: sub_6D3B80(0x982A28,
+            // 0x93E7BC, ONE, ONE) adds the flare target to the frame.
+            [enc setRenderPipelineState:[self compositePipeline:1 samples:samples]];
+            [enc setDepthStencilState:_depthOff];
+            [enc setFragmentTexture:_flare[_flareCurrent] atIndex:0];
+            [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+        }
     }
     [self drawParticles:scene encoder:enc];
     _passSamples = 1;
@@ -2360,6 +2481,24 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
         for (int i = 0; i < 2; i++) {
             [self filter:_ob[0] into:_ob[1] taps:kBlurH count:4 mode:0 commandBuffer:cmd];
             [self filter:_ob[1] into:_ob[0] taps:kBlurV count:4 mode:0 commandBuffer:cmd];
+        }
+        if (x360 && _flareAddPipeline) {
+            // sub_6DC040 0x6DC161, with g_X360EffectsEnable: the blurred over
+            // bright goes into the flare target (BLENDFACTOR, ONE), which
+            // keeps it for the next frames' fades; applyOverBright then adds
+            // the flare target instead.
+            MTLRenderPassDescriptor *fp = [MTLRenderPassDescriptor renderPassDescriptor];
+            fp.colorAttachments[0].texture = _flare[_flareCurrent];
+            fp.colorAttachments[0].loadAction = MTLLoadActionLoad;
+            fp.colorAttachments[0].storeAction = MTLStoreActionStore;
+            id<MTLRenderCommandEncoder> fe = [cmd renderCommandEncoderWithDescriptor:fp];
+            fe.label = @"Over bright into the flare target";
+            [fe setRenderPipelineState:_flareAddPipeline];
+            [fe setFragmentTexture:_ob[0] atIndex:0];
+            float intensity = scene.ob.intensity;
+            [fe setFragmentBytes:&intensity length:sizeof(intensity) atIndex:0];
+            [fe drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+            [fe endEncoding];
         }
     }
     // ___eDisplayFrame 0x6DF7DF: the drops after the bloom sources were
@@ -2409,8 +2548,11 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
     }
     [enc setRenderPipelineState:_overbrightAddPipeline];
     [enc setDepthStencilState:_depthOff];
-    [enc setFragmentTexture:_ob[0] atIndex:0];
-    float intensity = scene.ob.intensity;
+    // With the X360 flares, the flare target (holding the over bright) at
+    // full weight (sub_6D3B80(.., 0x93E7BC, ONE, ONE)).
+    const bool x360 = scene.x360_flares && _flare[_flareCurrent] != nil && _flareAddPipeline;
+    [enc setFragmentTexture:(x360 ? _flare[_flareCurrent] : _ob[0]) atIndex:0];
+    float intensity = x360 ? 1.0f : scene.ob.intensity;
     [enc setFragmentBytes:&intensity length:sizeof(intensity) atIndex:0];
     [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 }

@@ -36,14 +36,15 @@ void PortMetalPrelitBeginFrame();
 // Adds num_quads quads (4 vertices each, corners in order around the
 // perimeter) with texture (id<MTLTexture>, null = white).
 void PortMetalPrelitAddQuads(void *texture, PortPrelitBlend blend, uint32_t flags, const PortPrelitVertex *vertices, uint32_t num_quads);
-// Splits the building frame: quads added from now on are part 1 (drawn after
-// the motion blur, PortMetal3DSetMotionBlur), the ones before part 0.
-void PortMetalPrelitSplit();
+// Quads added from now on are in this part of the frame: 0 (the start) up
+// to the motion blur, 1 after it (PortMetal3DSetMotionBlur), 2 the X360
+// flares (PortMetal3DBeginX360Flares).
+void PortMetalPrelitSetPart(int part);
 // Publishes the building frame (PortMetalFEEndFrame calls it).
 void PortMetalPrelitPublish();
 // Render thread: draws the published frame into encoder (an
 // id<MTLRenderCommandEncoder> of the main scene pass, samples per pixel)
-// with view_proj (world -> clip, row vectors). part: 0 or 1 (see
-// PortMetalPrelitSplit), -1 all.
+// with view_proj (world -> clip, row vectors). part: 0, 1 or 2 (see
+// PortMetalPrelitSetPart), -1 parts 0 and 1.
 void PortMetalPrelitDraw(void *encoder, void *device, const float view_proj[16], int samples, int colour_format, int depth_format,
                          int part = -1);
