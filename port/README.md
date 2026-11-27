@@ -146,6 +146,7 @@ game time, from the moment the race is on) it writes `<scenario>.csv`
 | `pursuit` | Rosewood sprint 15.2.1, 3 opponents, a heat 4 pursuit from frame 240 (AI, physics, ~10 cars) |
 | `frontend` | the main menu over the garage car (car shading, frontend) |
 | `forest` | Rosewood forest circuit 15.1.1 (foliage, long views) |
+| `freeroam` | a new career's free roam from the main menu with the game's skip-D-Day switches (bin 15, the AI driving): traffic, patrolling cops and pursuits, the world's events |
 | `list-races` | prints the race database's event IDs |
 
 Overrides: `NFSMW_BENCHMARK_FRAMES`, `NFSMW_BENCHMARK_SHOTS=<f>,<f>`,

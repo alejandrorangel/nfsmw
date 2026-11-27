@@ -46,6 +46,7 @@ SCENARIOS = {
     'rain': 'the downtown circuit in the rain: rain particles, wet road',
     'frontend': 'main menu over the garage car: car shading, frontend',
     'forest': 'Rosewood forest circuit, 3 opponents: trees and long views',
+    'freeroam': "a new career's free roam (skip D-Day), the AI driving: traffic, cops, world events",
 }
 DEFAULT = ['race', 'pursuit', 'frontend']
 

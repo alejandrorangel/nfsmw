@@ -6,7 +6,12 @@
 // its event ID, QuickGame::CreateCars the player car) and hands the player car
 // to the race AI (AIVehicleHuman::SetAiControl, the debug "AI drives me"
 // toggle), so it drives itself. The frontend scenario boots to the main menu
-// and looks at the garage car.
+// and looks at the garage car. The free roam scenario starts a new career
+// from the main menu with the game's skip-D-Day switches (SkipDDayRaces and
+// SkipCareerIntro, the EASTER_EGG_SKIP_DDAY cheat: CareerSettings::
+// StartNewCareer simulates the prologue and starts at blacklist bin 15),
+// then RaceStarter::StartCareerFreeRoam, as the career menu's "resume free
+// roam" does, and the AI drives the player's car around the city.
 //
 // Every frame is exactly one 1/60 s sim tick of game time whatever the real
 // time (Main.cpp's loop passes PortBenchmarkFixedFrameMs to MainLoop and
@@ -31,6 +36,7 @@
 
 #include "Speed/Indep/Src/Frontend/Database/FEDatabase.hpp"
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterface.hpp"
+#include "Speed/Indep/Src/Frontend/RaceStarter.hpp"
 #include "Speed/Indep/Src/Gameplay/GRaceDatabase.h"
 #include "Speed/Indep/Src/Interfaces/SimActivities/ICopMgr.h"
 #include "Speed/Indep/Src/Interfaces/SimEntities/IPlayer.h"
@@ -55,6 +61,8 @@
 extern int IsSoundEnabled;
 extern int IsMemcardEnabled;
 extern const char *SkipFEPlayerCar;
+extern int SkipDDayRaces;
+extern int SkipCareerIntro;
 
 namespace {
 
@@ -62,6 +70,7 @@ struct Scenario {
     const char *name;
     const char *description;
     bool frontend;      // the main menu instead of a race
+    bool free_roam;     // a new career's free roam (from the main menu)
     const char *race;   // event ID (GRaceDatabase::GetRaceFromName)
     const char *car;    // vehicle (CarBuilder key), the SkipFE default otherwise
     int opponents;      // AI racers
@@ -76,18 +85,20 @@ struct Scenario {
 // Race IDs are the race database's event IDs (NFSMW_BENCHMARK=list-races
 // prints them all).
 const Scenario kScenarios[] = {
-    {"race", "downtown Rockport circuit (21.1.1), 3 opponents, light traffic, no cops: the renderer and the GPU", false, "21.1.1", "bmwm3gtre46", 3,
+    {"race", "downtown Rockport circuit (21.1.1), 3 opponents, light traffic, no cops: the renderer and the GPU", false, false, "21.1.1", "bmwm3gtre46", 3,
      3, 10, false, 0.0f, 3600, {600, 1800, 3600}},
-    {"forest", "the Rosewood forest circuit (15.1.1), 3 opponents: trees, foliage and long views", false, "15.1.1", "bmwm3gtre46", 3, 2, 10, false,
+    {"forest", "the Rosewood forest circuit (15.1.1), 3 opponents: trees, foliage and long views", false, false, "15.1.1", "bmwm3gtre46", 3, 2, 10, false,
      0.0f, 3600, {600, 1800, 3600}},
-    {"rain", "the downtown circuit (21.1.1) in the rain (NFSMW_RAIN): rain particles, wet road", false, "21.1.1", "bmwm3gtre46", 3, 3, 10, false,
+    {"rain", "the downtown circuit (21.1.1) in the rain (NFSMW_RAIN): rain particles, wet road", false, false, "21.1.1", "bmwm3gtre46", 3, 3, 10, false,
      0.0f, 3600, {600, 1800, 3600}},
-    {"pursuit", "Rosewood sprint (15.2.1), 3 opponents, a heat 4 pursuit, traffic: the CPU (AI, physics) and many cars", false, "15.2.1", "bmwm3gtre46", 3, 1, 60,
+    {"pursuit", "Rosewood sprint (15.2.1), 3 opponents, a heat 4 pursuit, traffic: the CPU (AI, physics) and many cars", false, false, "15.2.1", "bmwm3gtre46", 3, 1, 60,
      true, 4.0f, 3600, {600, 1800, 3600}},
-    {"frontend", "the main menu over the garage car: car shading and the frontend", true, nullptr, nullptr, 0, 0, 0, false, 0.0f, 3600,
+    {"freeroam", "a new career's free roam (skip D-Day: bin 15), the AI driving: traffic, cops, the world's events", false, true, nullptr,
+     nullptr, 0, 0, 0, true, 0.0f, 3600, {600, 1800, 3600}},
+    {"frontend", "the main menu over the garage car: car shading and the frontend", true, false, nullptr, nullptr, 0, 0, 0, false, 0.0f, 3600,
      {120, 1800, 3600}},
-    {"list-races", "prints the race database's events and exits", true, nullptr, nullptr, 0, 0, 0, false, 0.0f, 1, {0}},
-    {"write-options", "writes the default video options to $NFSMW_VIDEO_CONFIG and exits", true, nullptr, nullptr, 0, 0, 0, false, 0.0f, 0,
+    {"list-races", "prints the race database's events and exits", true, false, nullptr, nullptr, 0, 0, 0, false, 0.0f, 1, {0}},
+    {"write-options", "writes the default video options to $NFSMW_VIDEO_CONFIG and exits", true, false, nullptr, nullptr, 0, 0, 0, false, 0.0f, 0,
      {0}},
 };
 
@@ -199,9 +210,13 @@ void DriveWithAI() {
     }
 }
 
+bool MainMenuUp() {
+    return TheGameFlowManager.IsInFrontend() && cFEng::Get() != nullptr && cFEng::Get()->IsPackageInControl("MainMenu.fng");
+}
+
 bool StartReached() {
     if (gScenario->frontend) {
-        return TheGameFlowManager.IsInFrontend() && cFEng::Get() != nullptr && cFEng::Get()->IsPackageInControl("MainMenu.fng");
+        return MainMenuUp();
     }
     return TheGameFlowManager.IsInGame();
 }
@@ -325,6 +340,11 @@ void PortBenchmarkInit() {
     if (gScenario->frontend) {
         return;
     }
+    if (gScenario->free_roam) {
+        SkipDDayRaces = 1;
+        SkipCareerIntro = 1;
+        return;
+    }
     SkipFE = 1;
     std::strncpy(SkipFERaceID, gRace.c_str(), 15);
     SkipFERaceID[15] = '\0';
@@ -387,7 +407,7 @@ bool PortBenchmarkInput(PortInputState *state) {
     std::memset(state, 0, sizeof(*state));
     state->mouse_x = -100.0f; // off the screen, over no widget
     state->mouse_y = -100.0f;
-    if (gScenario->frontend && !gStarted && gEnterPresses > 0) {
+    if ((gScenario->frontend || gScenario->free_roam) && !gStarted && gEnterPresses > 0) {
         state->keys[PORT_KEY_ENTER] = 1.0f;
     }
     return true;
@@ -416,7 +436,17 @@ void PortBenchmarkEndFrame(uint64_t render_start_ns) {
     if (!gStarted) {
         // Frontend: hold enter for 6 frames of every 60 until the main menu
         // is up (the splash screen waits for a press).
-        gEnterPresses = gScenario->frontend && TheGameFlowManager.IsInFrontend() && frame % 60 < 6 ? 1 : 0;
+        static bool career_started = false;
+        const bool to_menu = gScenario->frontend || (gScenario->free_roam && !career_started);
+        gEnterPresses = to_menu && TheGameFlowManager.IsInFrontend() && !MainMenuUp() && frame % 60 < 6 ? 1 : 0;
+        // Free roam: a new career from the main menu (uiCareerCrib's "yes"
+        // with the D-Day flow complete).
+        if (gScenario->free_roam && !career_started && MainMenuUp()) {
+            career_started = true;
+            FEDatabase->GetCareerSettings()->StartNewCareer(true);
+            RaceStarter::StartCareerFreeRoam();
+            std::fprintf(stderr, "[benchmark] new career, free roam (frame %d)\n", frame);
+        }
         if ((Now() - gLaunch) / 1e9 > gTimeout) {
             std::fprintf(stderr, "[benchmark] %s: no start after %d s (game flow state %d), giving up\n", gScenario->name, gTimeout,
                          static_cast<int>(TheGameFlowManager.GetState()));
