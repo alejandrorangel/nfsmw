@@ -2418,7 +2418,14 @@ void CustomizationScreen::NotificationMessage(u32 msg, FEObject *pobj, u32 param
                     }
                     Showcase::FromPackage = GetPackageName();
                     Showcase::FromArgs = Category | CC_MAKE_HIWORD(FromCategory);
+#if defined(EA_PORT_NATIVE)
+                    // speed.exe 0x7B7080: the showcase gets the car being tuned
+                    // (with 0 it showed another car's manufacturer).
+                    cFEng::Get()->QueuePackageSwitch("Showcase.fng", reinterpret_cast<intptr_t>(gCarCustomizeManager.GetTuningCar()), 0,
+                                                     false);
+#else
                     cFEng::Get()->QueuePackageSwitch("Showcase.fng", 0, 0, false);
+#endif
                     break;
                 }
             }
