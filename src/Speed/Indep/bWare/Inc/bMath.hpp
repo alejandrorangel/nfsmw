@@ -1175,7 +1175,27 @@ struct bQuaternion {
         return this->GetMatrix(*mat);
     }
 
+#if defined(EA_PORT_NATIVE)
+    // Rotation part of mat from this (unit) quaternion, row-vector convention
+    // (v' = v * mat); translation row untouched. Empty in the decomp, which
+    // dropped every frontend rotation (e.g. the selection bracket corners).
+    void GetMatrix(bMatrix4 &mat) const {
+        float xx = x * x, yy = y * y, zz = z * z;
+        float xy = x * y, xz = x * z, yz = y * z;
+        float wx = w * x, wy = w * y, wz = w * z;
+        mat.v0.x = 1.0f - 2.0f * (yy + zz);
+        mat.v0.y = 2.0f * (xy + wz);
+        mat.v0.z = 2.0f * (xz - wy);
+        mat.v1.x = 2.0f * (xy - wz);
+        mat.v1.y = 1.0f - 2.0f * (xx + zz);
+        mat.v1.z = 2.0f * (yz + wx);
+        mat.v2.x = 2.0f * (xz + wy);
+        mat.v2.y = 2.0f * (yz - wx);
+        mat.v2.z = 1.0f - 2.0f * (xx + yy);
+    }
+#else
     void GetMatrix(bMatrix4 &mat) const {}
+#endif
 
     bQuaternion &Slerp(bQuaternion &r, const bQuaternion &target, float t) const;
 
