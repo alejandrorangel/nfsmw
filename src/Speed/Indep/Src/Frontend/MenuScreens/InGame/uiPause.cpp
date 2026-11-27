@@ -79,6 +79,10 @@ void PauseMenu::NotificationMessage(u32 msg, FEObject *pobj, u32 param1, u32 par
                             MemoryCard::GetInstance()->CancelNextAutoSave();
                         }
                         new ERestartRace();
+#if defined(EA_PORT_NATIVE)
+                        // PC 0x54FF10 also closes the menu (and unpauses).
+                        new EUnPause();
+#endif
                         break;
                     case 0xFDAE152F:
                         new EUnPause();
