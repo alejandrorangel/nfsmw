@@ -24,7 +24,15 @@ inline void VU0_v3unitcrossprod(const UMath::Vector3 &a, const UMath::Vector3 &b
 }
 
 // Decl: Carbon: UVectorMathCPU.hpp: 107, GC MW: UVectorMathGC.hpp: TODO, PS2 MW: UVectorMath.hpp: TODO
+#if defined(EA_PORT_NATIVE)
+inline void VU0_v4unitcrossprodxyz(const UMath::Vector4 &a, const UMath::Vector4 &b, UMath::Vector4 &dest) {
+    VU0_v4crossprodxyz(a, b, dest);
+    float rlen = VU0_rsqrt(dest.x * dest.x + dest.y * dest.y + dest.z * dest.z);
+    VU0_v4scalexyz(dest, rlen, dest);
+}
+#else
 inline void VU0_v4unitcrossprodxyz(const UMath::Vector4 &a, const UMath::Vector4 &b, UMath::Vector4 &dest) {}
+#endif
 
 // Decl: Carbon: UVectorMathCPU.hpp: 129, GC MW: UVectorMathGC.hpp: 220, PS2 MW: UVectorMath.hpp: 621
 inline void VU0_v3unit(const UMath::Vector3 &a, UMath::Vector3 &result) {
@@ -73,17 +81,42 @@ inline void VU0_v3scale(const UMath::Vector3 &a, const UMath::Vector3 &b, UMath:
 }
 
 // Decl: 213
+#if defined(EA_PORT_NATIVE)
+inline void VU0_v4scale(const UMath::Vector4 &a, const float scaleby, UMath::Vector4 &result) {
+    result.x = a.x * scaleby;
+    result.y = a.y * scaleby;
+    result.z = a.z * scaleby;
+    result.w = a.w * scaleby;
+}
+#else
 inline void VU0_v4scale(const UMath::Vector4 &a, const float scaleby, UMath::Vector4 &result) {}
+#endif
 
 // Decl: 269
 inline void VU0_v3scaleadd(const UMath::Vector3 &a, const float scaleby, const UMath::Vector3 &b, UMath::Vector3 &result) {
+#if defined(EA_PORT_NATIVE)
+    // a * scaleby + b, as the PS2 VU0 version (vmulx then vadd) computes it
+    result.x = a.x * scaleby + b.x;
+    result.y = a.y * scaleby + b.y;
+    result.z = a.z * scaleby + b.z;
+#else
     result.x = a.x + b.x * scaleby;
     result.y = a.y + b.y * scaleby;
     result.z = a.z + b.z * scaleby;
+#endif
 }
 
 // Decl: Carbon: UVectorMathCPU.hpp: 285
+#if defined(EA_PORT_NATIVE)
+inline void VU0_v4scaleadd(const UMath::Vector4 &a, const float scaleby, const UMath::Vector4 &b, UMath::Vector4 &result) {
+    result.x = a.x * scaleby + b.x;
+    result.y = a.y * scaleby + b.y;
+    result.z = a.z * scaleby + b.z;
+    result.w = a.w * scaleby + b.w;
+}
+#else
 inline void VU0_v4scaleadd(const UMath::Vector4 &a, const float scaleby, const UMath::Vector4 &b, UMath::Vector4 &result) {}
+#endif
 
 // Decl: Carbon: UVectorMathCPU.hpp: 293, GC MW: UVectorMathGC.hpp: 62, PS2 MW: UVectorMath.hpp: 1223
 inline void VU0_v3negate(UMath::Vector3 &result) {
@@ -150,6 +183,9 @@ inline float VU0_v3distancesquare(const UMath::Vector3 &p1, const UMath::Vector3
 
 // Decl: 393
 inline float VU0_v3distancesquarexz(const UMath::Vector3 &p1, const UMath::Vector3 &p2) {
+#if defined(EA_PORT_NATIVE)
+    return (p1.x - p2.x) * (p1.x - p2.x) + (p1.z - p2.z) * (p1.z - p2.z);
+#endif
     return 0.0f; // TODO
 }
 
@@ -160,6 +196,9 @@ inline float VU0_v3lengthsquare(const UMath::Vector3 &a) {
 
 // Decl: Carbon: UVectorMathCPU.hpp: 415
 inline float VU0_v4lengthsquarexyz(const UMath::Vector4 &a) {
+#if defined(EA_PORT_NATIVE)
+    return a.x * a.x + a.y * a.y + a.z * a.z;
+#endif
     return 0.0f; // TODO
 }
 
@@ -167,6 +206,8 @@ inline float VU0_v4lengthsquarexyz(const UMath::Vector4 &a) {
 inline float VU0_sqrt(const float a) {
 #ifdef EA_PLATFORM_XENON
     return __fsqrts(a);
+#elif defined(EA_PORT_NATIVE)
+    return sqrtf(a);
 #else
     // TODO
 #endif
@@ -230,7 +271,17 @@ inline void VU0_v4Init(UMath::Vector4 &a) {
 }
 
 // Decl: Carbon: UVectorMathCPU.hpp: 564, GC MW: UVectorMathGC.hpp: 152, PS2 MW: UVectorMath.hpp: TODO
+#if defined(EA_PORT_NATIVE)
+inline void VU0_MATRIX4Init(UMath::Matrix4 &dest) {
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
+            dest[i][j] = i == j ? 1.0f : 0.0f;
+        }
+    }
+}
+#else
 inline void VU0_MATRIX4Init(UMath::Matrix4 &dest) {}
+#endif
 
 // Decl: Carbon: UVectorMathCPU.hpp: 584, GC MW: UVectorMathGC.hpp: 169, PS2 MW: UVectorMath.hpp: 2188
 inline void VU0_MATRIX4Init(UMath::Matrix4 &dest, const float xx, const float yy, const float zz) {

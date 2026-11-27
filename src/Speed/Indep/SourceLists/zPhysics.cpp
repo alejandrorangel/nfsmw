@@ -22,4 +22,6 @@
 #include "Speed/Indep/Src/Physics/Common/PhysicsObject.cpp"
 
 #include "Speed/Indep/Src/Physics/Common/PVehicle.cpp"
+
+#include "Speed/Indep/Src/Physics/PhysicsTunings.cpp"
 #endif

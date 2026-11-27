@@ -61,7 +61,13 @@ typedef UMath::Vector4 RQUAT; // Decl: Carbon: 56
 // static const float INVTWOPI; // Decl: Carbon: 61
 
 // Decl: 109
+#if defined(EA_PORT_NATIVE)
+inline int REAL2INT(float f) {
+    return static_cast<int>(f);
+}
+#else
 inline int REAL2INT(float f) {}
+#endif
 inline int FLOAT2INT(float f) {
     return static_cast<int>(f);
 }
@@ -82,9 +88,19 @@ inline float IntAsFloat(const int &i) {
     return *reinterpret_cast<const float *>(&i);
 }
 
+#if defined(EA_PORT_NATIVE)
+inline int FloatSignBit(const float &f) {
+    return static_cast<int>(static_cast<unsigned int>(FloatAsInt(f)) >> 31);
+}
+
+inline float FloatAbs(const float &f) {
+    return IntAsFloat(FloatAsInt(f) & 0x7FFFFFFF);
+}
+#else
 inline int FloatSignBit(const float &f) {}
 
 inline float FloatAbs(const float &f) {}
+#endif
 
 static const int kFloatOneAsInt = 0x3F800000;              // Decl: Carbon: 166
 static const float kFloatScaleUp = IntAsFloat(0x00800000); // Decl: Carbon: 167
@@ -139,7 +155,13 @@ inline void Coord3AsString(const UMath::Vector3 &c, char *str) {}
 
 inline void Coord4AsString(const UMath::Vector4 &c, char *str) {}
 
+#if defined(EA_PORT_NATIVE)
+inline float V3LengthSquared(const UMath::Vector4 &p) {
+    return p.x * p.x + p.y * p.y + p.z * p.z;
+}
+#else
 inline float V3LengthSquared(const UMath::Vector4 &p) {}
+#endif
 
 // Decl: Carbon: 269
 inline float PTDir(const UMath::Vector4 &vert, const UMath::Vector4 &p0, const UMath::Vector4 &p1) {}

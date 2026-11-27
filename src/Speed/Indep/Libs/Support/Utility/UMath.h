@@ -591,7 +591,23 @@ void BuildRotate(UMath::Matrix4 &m, float r, float x, float y, float z);
 #ifndef EA_BUILD_A124
 // TODO this doesn't show up in the dwarf as an inline yet
 // they moved this since outside the namespace after the alpha
+#if defined(EA_PORT_NATIVE)
+// speed.exe 1.3: 0x5C8CC0: inverse of a rotation + translation
+inline void OrthoInverse(UMath::Matrix4 &m) {
+    float t;
+    t = m.v0.y, m.v0.y = m.v1.x, m.v1.x = t;
+    t = m.v0.z, m.v0.z = m.v2.x, m.v2.x = t;
+    t = m.v1.z, m.v1.z = m.v2.y, m.v2.y = t;
+    float x = m.v3.x;
+    float y = m.v3.y;
+    float z = m.v3.z;
+    m.v3.x = -(x * m.v0.x) - y * m.v1.x - z * m.v2.x;
+    m.v3.y = -(x * m.v0.y) - y * m.v1.y - z * m.v2.y;
+    m.v3.z = -(x * m.v0.z) - y * m.v1.z - z * m.v2.z;
+}
+#else
 inline void OrthoInverse(UMath::Matrix4 &m);
+#endif
 #endif
 
 struct UQuat : public UMath::Vector4 {

@@ -849,6 +849,19 @@ void PVehicle::LoadBehaviors(const UMath::Vector3 &initialPos, const UMath::Matr
     LoadBehavior(MechanicID(BEHAVIOR_MECHANIC_EFFECTS), LookupBehaviorSignature(BEHAVIOR_MECHANIC_EFFECTS), Sim::Param());
     LoadBehavior(MechanicID(BEHAVIOR_MECHANIC_RESET), LookupBehaviorSignature(BEHAVIOR_MECHANIC_RESET), Sim::Param());
 
+#if defined(EA_PORT_NATIVE)
+    if (TraceVehicle()) {
+        const Attrib::StringKey *mechanics[] = {&BEHAVIOR_MECHANIC_RIGIDBODY, &BEHAVIOR_MECHANIC_INPUT,  &BEHAVIOR_MECHANIC_ENGINE,
+                                                &BEHAVIOR_MECHANIC_SUSPENSION, &BEHAVIOR_MECHANIC_DAMAGE, &BEHAVIOR_MECHANIC_DRAW,
+                                                &BEHAVIOR_MECHANIC_AUDIO,     &BEHAVIOR_MECHANIC_AI,     &BEHAVIOR_MECHANIC_EFFECTS,
+                                                &BEHAVIOR_MECHANIC_RESET};
+        for (const Attrib::StringKey *mechanic : mechanics) {
+            Behavior *beh = FindBehavior(MechanicID(*mechanic));
+            VEHICLE_TRACE("  %s: signature %#x -> %s\n", mechanic->GetString() + 18, LookupBehaviorSignature(*mechanic).GetValue(),
+                          beh ? "loaded" : "none");
+        }
+    }
+#endif
     ResetBehavior(MechanicID(BEHAVIOR_MECHANIC_RIGIDBODY));
     ResetBehavior(MechanicID(BEHAVIOR_MECHANIC_INPUT));
     ResetBehavior(MechanicID(BEHAVIOR_MECHANIC_SUSPENSION));
