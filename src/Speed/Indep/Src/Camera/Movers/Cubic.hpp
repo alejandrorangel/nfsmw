@@ -62,8 +62,6 @@ class CubicCameraMover : public CameraMover {
     void CameraSpeedHug(bVector3 *offset);                                                         // 0x47CE80
     bVector3 AvoidablesPush(const bVector3 &pos, const bVector3 &dir);                             // 0x47C440
     float AvoidablesClearance(bVector4 *eye, bVector3 *push);                                      // 0x47C250
-    bool MakeSpace(bMatrix4 *world_to_camera, bVector3 *target);                                   // 0x470FE0
-    bool WallClearance(bVector3 *eye, bVector3 *target, bVector4 *push);                           // 0x470BF0
     bool AvoidAvoidables(bMatrix4 *world_to_camera, bVector3 *target, CameraAnchor *anchor);        // 0x47C6F0
     void TerrainVelocityNoise(bMatrix4 *world_to_camera, CameraAnchor *anchor, float speed_scale, float terrain_scale); // 0x47BEC0
 

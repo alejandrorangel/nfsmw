@@ -15,9 +15,9 @@
 //                     0x47C440 avoidable push   0x470FE0 MakeSpace 0x470BF0 wall clearance
 //                     0x47BEC0 terrain/velocity noise  0x46B0C0 ResetState
 //
-// The director picks a CameraAI::Action per player view; the only action
-// ported is CDActionDrive, which owns a CameraAnchor (the followed car's
-// state) and a CubicCameraMover attached to the view. Tables are the 1.3
+// The director picks a CameraAI::Action per player view; the actions ported
+// are CDActionDrive, which owns a CameraAnchor (the followed car's state) and
+// a CubicCameraMover attached to the view, and CDActionIce (ICENative.cpp). Tables are the 1.3
 // .data values (addresses next to each).
 
 #include "Speed/Indep/Src/Camera/Camera.hpp"
@@ -54,6 +54,12 @@
 #include "Speed/Indep/Src/World/WWorldMath.h"
 #include "Speed/Indep/Src/World/WWorldPos.h"
 #include "Speed/Indep/Src/World/WorldConn.h"
+#include "Speed/Indep/Src/Camera/ICE/ICEAnimScene.hpp"
+#include "Speed/Indep/Src/Camera/ICE/ICEManager.hpp"
+#include "Speed/Indep/Src/Generated/Hash.hpp"
+#include "Speed/Indep/Src/Generated/Messages/MICECameraFinished.h"
+#include "Speed/Indep/Src/Interfaces/SimActivities/INIS.h"
+#include "CameraAINative.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -783,7 +789,7 @@ void CubicCameraMover::SetDesired(bMatrix4 *basis, POV *pov, const CubicCameraTw
     }
 }
 
-bool CubicCameraMover::WallClearance(bVector3 *target, bVector3 *eye, bVector4 *push) {
+bool CameraMover::WallClearance(bVector3 *target, bVector3 *eye, bVector4 *push) {
     *push = bVector4(0.0f, 0.0f, 0.0f, 0.0f);
     float fov_scale = ClampF(static_cast<float>(GetCamera()->GetFov()) * 7.847377e-05f, 1.0f, 1.5f);
     bVector3 d = *target - *eye;
@@ -847,7 +853,7 @@ static void ReaimCamera(bMatrix4 *world_to_camera, bVector3 *eye, bVector3 *targ
     eCreateLookAtMatrix(world_to_camera, *eye, center, up);
 }
 
-bool CubicCameraMover::MakeSpace(bMatrix4 *world_to_camera, bVector3 *target) {
+bool CameraMover::MakeSpace(bMatrix4 *world_to_camera, bVector3 *target) {
     bMatrix4 cam;
     eInvertTransformationMatrix(&cam, world_to_camera);
     bVector3 eye(cam.v3.x, cam.v3.y, cam.v3.z);
@@ -1093,71 +1099,6 @@ void CubicCameraMover::Update(float dT) {
 // ---------------------------------------------------------------------------
 
 namespace CameraAI {
-class Director;
-
-class Action {
-  public:
-    virtual ~Action() {}
-    virtual void Update(float dT) = 0;
-    virtual void Reset() = 0;
-    virtual const Attrib::StringKey &GetName() const = 0;
-    virtual Attrib::StringKey GetNext() const {
-        return Attrib::StringKey();
-    }
-    virtual CameraMover *GetMover() = 0;
-    virtual void SetSpecial(float f) {}
-};
-
-typedef Action *(*ActionConstructor)(Director *director);
-ActionConstructor FindActionConstructor(unsigned int hash32);
-
-// total size (PC): 0x2C8
-class Director {
-  public:
-    explicit Director(EVIEW_ID view_id);
-    ~Director();
-
-    EVIEW_ID GetViewID() const {
-        return mViewID;
-    }
-    Action *GetAction() {
-        return mAction;
-    }
-    CameraMover *GetMover() {
-        return mAction != nullptr ? mAction->GetMover() : nullptr;
-    }
-    bool IsCinematicMomement() const {
-        return mIsCinematicMomement;
-    }
-    void Update(float dT);
-    void SetAction(const Attrib::StringKey &desired);
-    void SelectAction();
-    void TotaledStart();
-    void ResetTimers() {
-        mJumpTime = 0.0f;
-        mPursuitStartTime = 0.0f;
-        mIsCinematicMomement = false;
-        mCinematicSlowdownSeconds = 0.0f;
-    }
-    void SetCinematicSlowdown(float seconds) {
-        mCinematicSlowdownSeconds = seconds;
-    }
-
-    static Director *sDirectors[2];
-    static int sNumDirectors;
-
-  private:
-    void SwitchToDesired();
-
-    EVIEW_ID mViewID;
-    Attrib::StringKey mDesiredMode;
-    Action *mAction;
-    float mPursuitStartTime;
-    float mJumpTime;
-    bool mIsCinematicMomement;
-    float mCinematicSlowdownSeconds;
-};
-
 Director *Director::sDirectors[2];
 int Director::sNumDirectors;
 
@@ -1213,8 +1154,9 @@ float CDActionDrive::sCinematicSeconds = 2.0f;
 
 namespace {
 int sSavedPovType = -1; // 0x8EE4B4: POV to restore after the pull-back button
+} // namespace
 
-IPlayer *FindPlayerForView(int view_id) {
+IPlayer *CameraAI::FindPlayerForView(int view_id) {
     const IPlayer::List &players = IPlayer::GetList(PLAYER_ALL);
     for (IPlayer::List::const_iterator it = players.begin(); it != players.end(); ++it) {
         if ((*it)->GetRenderPort() == view_id) {
@@ -1223,10 +1165,9 @@ IPlayer *FindPlayerForView(int view_id) {
     }
     return nullptr;
 }
-} // namespace
 
 CameraAI::Action *CDActionDrive::Construct(CameraAI::Director *director) {
-    IPlayer *player = FindPlayerForView(director->GetViewID());
+    IPlayer *player = CameraAI::FindPlayerForView(director->GetViewID());
     if (player == nullptr || player->GetSettings() == nullptr) {
         return nullptr;
     }
@@ -1254,7 +1195,7 @@ CDActionDrive::CDActionDrive(CameraAI::Director *director, IPlayer *player)
     bool blend_from_ice = false;
     CameraMover *previous = director->GetMover();
     if (previous != nullptr && previous->GetType() == CM_ICE) {
-        blend_from_ice = false; // TODO(port): byte_8EE392 (ICE "blend to game"), always 0 until ICE is ported
+        blend_from_ice = TheICEManager.IsSmoothExit(); // byte_8EE392: the ICE key's smooth exit
     }
     mAnchor = new CameraAnchor(0);
     if (mCinematicMomementTimer > 0.0f) {
@@ -1512,9 +1453,11 @@ struct ActionEntry {
     ActionConstructor construct;
 };
 // The UTL::COM::Factory<Director*, Action, UCrc32> registry (0x9111FC). Only
-// CDActionDrive is ported; asking for any other action keeps the current one.
+// CDActionDrive and CDActionIce are ported; asking for any other action keeps
+// the current one.
 const ActionEntry kActions[] = {
     {"CDActionDrive", CDActionDrive::Construct},
+    {"CDActionIce", ConstructCDActionIce},
 };
 } // namespace
 
@@ -1546,7 +1489,10 @@ Director::~Director() {
     }
 }
 
-void Director::SwitchToDesired() {
+// The tail of SelectAction (0x479C32) and SetAction (0x4797F0): take the
+// action's follow-up, then build the desired action if it isn't running.
+// Only SelectAction clears the cinematic-moment state of the new action.
+void Director::SwitchToDesired(bool from_select) {
     if (mAction != nullptr) {
         Attrib::StringKey next = mAction->GetNext();
         if (!next.IsEmpty()) {
@@ -1567,8 +1513,10 @@ void Director::SwitchToDesired() {
     if (action == nullptr) {
         return;
     }
-    mIsCinematicMomement = false;
-    mCinematicSlowdownSeconds = 0.0f;
+    if (from_select) {
+        mIsCinematicMomement = false;
+        mCinematicSlowdownSeconds = 0.0f;
+    }
     delete mAction;
     mAction = action;
     SetNewSndCamAction(mDesiredMode, mViewID);
@@ -1576,7 +1524,7 @@ void Director::SwitchToDesired() {
 
 void Director::SetAction(const Attrib::StringKey &desired) {
     mDesiredMode = desired;
-    SwitchToDesired();
+    SwitchToDesired(false);
 }
 
 void Director::TotaledStart() {
@@ -1585,22 +1533,52 @@ void Director::TotaledStart() {
 }
 
 void Director::SelectAction() {
-    // TODO(port): ICE / NIS (CDActionIce) and the game-breaker track-car cut
-    // (CDActionTrackCar + MGamePlayMoment) are not ported.
-    if (mJumpTime < 0.0f) {
-        mJumpTime = 0.0f;
-        mDesiredMode = Attrib::StringKey("CDActionDrive");
-        mIsCinematicMomement = true;
+    if (TheICEManager.GetState() <= 0) { // the ICE editor drives the camera itself
+        if (mJumpTime < 0.0f) {
+            mJumpTime = 0.0f;
+            mDesiredMode = Attrib::StringKey("CDActionDrive");
+            mIsCinematicMomement = true;
+        }
+        if (mPursuitStartTime < 0.0f) {
+            mPursuitStartTime = 0.0f;
+            mDesiredMode = Attrib::StringKey("CDActionDrive");
+            mIsCinematicMomement = true;
+        }
+        if (mPursuitStartTime > 0.0f && mPursuitStartTime < 2.0f) {
+            mDesiredMode = Attrib::StringKey("CDActionTrackCop");
+        }
+        // TODO(port): the game-breaker track-car cut (CDActionTrackCar +
+        // MGamePlayMoment, 0x4799F0) is not ported.
+
+        // An NIS scene that controls the camera, or a generic ICE camera
+        // (ECinematicMoment), plays through CDActionIce.
+        bool ice = false;
+        INIS *nis = INIS::Get();
+        ICEScene *scene = nis != nullptr && nis->IsPlaying() ? nis->GetScene() : nullptr;
+        if (scene != nullptr) {
+            ice = scene->IsControllingCamera();
+            mIsCinematicMomement = nis->IsWorldMomement();
+        }
+        if (!ice) {
+            if (TheICEManager.GetPlayGenericGroupHash() != bStringHash("")) {
+                ice = true;
+            } else if (mAction != nullptr && mAction->GetName().GetHash64() == Attrib::StringHash64("CDActionIce")) {
+                // The ICE camera is done: back to driving.
+                TheICEManager.SetUseRealTime(false);
+                mDesiredMode = Attrib::StringKey("CDActionDrive");
+                if (INIS::Get() != nullptr) {
+                    INIS::Get()->FireEventTag("ICEEnd");
+                }
+                MICECameraFinished().Post(UCrc32(UCRC32_Gameplay));
+            }
+        }
+        if (ice) {
+            mDesiredMode = Attrib::StringKey("CDActionIce");
+            mJumpTime = 0.0f;
+            mPursuitStartTime = 0.0f;
+        }
     }
-    if (mPursuitStartTime < 0.0f) {
-        mPursuitStartTime = 0.0f;
-        mDesiredMode = Attrib::StringKey("CDActionDrive");
-        mIsCinematicMomement = true;
-    }
-    if (mPursuitStartTime > 0.0f && mPursuitStartTime < 2.0f) {
-        mDesiredMode = Attrib::StringKey("CDActionTrackCop");
-    }
-    SwitchToDesired();
+    SwitchToDesired(true);
 }
 
 void Director::Update(float dT) {

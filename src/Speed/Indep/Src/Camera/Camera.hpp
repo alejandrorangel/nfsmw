@@ -269,7 +269,14 @@ class Camera {
         return this->CurrentKey.FarZ;
     }
 
+#if defined(EA_PORT_NATIVE)
+    // speed.exe 1.3 stores it (ICE mover 0x482EC0 writes Camera+0xC8).
+    void SetLetterBox(float LB_h) {
+        this->CurrentKey.LB_height = LB_h;
+    }
+#else
     void SetLetterBox(float LB_h) {}
+#endif
 
     // float GetLetterBox() {}
 

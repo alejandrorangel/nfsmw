@@ -102,6 +102,7 @@ add_library(nfsmw_platform OBJECT
     src/Platform/VisualTreatmentNative.cpp
     src/Game/SelectCarCameraMover.cpp
     src/Game/CameraDriveNative.cpp
+    src/Game/ICENative.cpp
     src/Game/USpline.cpp
     src/Game/StringToNumberNative.cpp
     src/Game/AttribDefaultsNative.cpp

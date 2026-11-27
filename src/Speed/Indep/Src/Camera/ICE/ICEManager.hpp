@@ -55,11 +55,24 @@ class ICEManager {
     float GetAnimElevationFixup(Vector3 *position);
 
     void SetGenericCameraToPlay(const char *group_name, const char *track_name); // Decl: 48
-    bool IsGenericCameraPlaying() {}                                             // Decl: 49
+#if defined(EA_PORT_NATIVE)
+    // Native port (port/src/Game/ICENative.cpp, from speed.exe 1.3).
+    bool IsGenericCameraPlaying() {
+        return nPlayGenericTrackName[0] != '\0';
+    }
+    uint32 GetPlayGenericGroupHash() const {
+        return nPlayGenericGroupHash;
+    }
+    void ClearGenericCamera(); // inlined at 0x473CD0 / 0x482EC0
+#else
+    bool IsGenericCameraPlaying() {} // Decl: 49
+#endif
 
     ICEGroup *GetCurrentGroup();
     ICETrack *GetCurrentTrack();
+#if !defined(EA_PORT_NATIVE)
     ICETrack *GetPlaybackTrack() {}
+#endif
     ICEShakeTrack *GetShakeTrack(uint32 shake_type);
     char *GetShakeTypeName(uint32 shake_type);
     uint32 GetRelativeShakeType(uint32 shake_type, int inc);
@@ -70,8 +83,17 @@ class ICEManager {
     bool ChooseCameraPlaybackTrack(); // Decl: 52
     int GetNumSceneCameraTrack(uint32 scene_hash);
     int GetCameraIndex(float f_param, ICETrack *track);
+#if defined(EA_PORT_NATIVE)
+    void SetSmoothExit(bool smooth) {
+        bSmoothExit = smooth;
+    }
+    bool IsSmoothExit() {
+        return bSmoothExit;
+    }
+#else
     void SetSmoothExit(bool smooth) {} // Decl: 53
     bool IsSmoothExit() {}             // Decl: 54
+#endif
     // int ChooseGoodSceneCameraTrackIndex(uint32 scene_hash, Matrix4 *scene_origin);
     void SetUseRealTime(bool val) { // Decl: 55
         bUseRealTime = val;
@@ -80,7 +102,12 @@ class ICEManager {
         return bUseRealTime;
     }
     float GetTimerSeconds() { // Decl: 57
+#if defined(EA_PORT_NATIVE)
+        // speed.exe 1.3 (0x483C90, 0x4785F0): real time when set.
+        return bUseRealTime ? RealTimer.GetSeconds() : WorldTimer.GetSeconds();
+#else
         return bUseRealTime ? WorldTimer.GetSeconds() : RealTimer.GetSeconds();
+#endif
     }
 
   private:

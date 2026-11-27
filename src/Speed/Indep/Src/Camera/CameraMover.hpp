@@ -215,6 +215,9 @@ class CameraMover : public bTNode<CameraMover>, public WCollisionMgr::ICollision
     void EyeCubicInit(tCubic3D *eye, bMatrix4 *world_to_local, bVector3 *anchor_velocity);
     void LookCubicInit(tCubic3D *look, bMatrix4 *world_to_local, bVector3 *anchor_velocity);
     void SetEyeLook(tCubic3D *eye, tCubic3D *look, tCubic1D *fov, bMatrix4 *world_to_local, bVector3 *anchor_velocity);
+    // speed.exe 1.3 CameraMover helpers shared by the drive and ICE movers.
+    bool MakeSpace(bMatrix4 *world_to_camera, bVector3 *target);         // 0x470FE0
+    bool WallClearance(bVector3 *target, bVector3 *eye, bVector4 *push); // 0x470BF0
 #else
     virtual CameraAnchor *GetAnchor() {}
 
