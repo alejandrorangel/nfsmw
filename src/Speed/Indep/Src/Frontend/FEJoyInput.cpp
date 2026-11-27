@@ -52,6 +52,16 @@ cFEngJoyInput::cFEngJoyInput() {
 }
 
 void cFEngJoyInput::FlushActions() {
+#ifdef EA_PLATFORM_WIN32
+    // PC: 0x5247A0 only flushes the first port's queue and pad state.
+    if (mActionQ[0] != nullptr) {
+        mActionQ[0]->Flush();
+    }
+    for (int i = 0; i < NUM_ELEMENTS(MapJoyEventToFEPad); i++) {
+        MapJoyEventToFEPad[i].State[0] = 0;
+    }
+    return;
+#endif
     mActionQ[0]->Size(); // unknown purpose
 
     for (int port = 0; port < NUM_JOYSTICK_PORTS; port++) {

@@ -68,6 +68,9 @@ bool WideCharHistogram::PackString(char *packed, int size, const uint16 *wide) {
             }
         } while (ch != 0 && string_pos < size);
     }
+#if defined(SANE_CODE) || defined(EA_PORT_NATIVE)
+    return !error;
+#endif
 }
 
 // UNSOLVED
