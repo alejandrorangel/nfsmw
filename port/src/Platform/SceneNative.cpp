@@ -201,6 +201,19 @@ uint32_t ShadowLevel(const eSolidPlatGroup &group, const M44 world) {
     return z == 100.0f ? 0 : 1;
 }
 
+// The view being built: its camera's world position and world -> camera
+// matrix (the eViews entry sub_6C8000 reads for LocalEyePos and WorldView).
+float gSceneCameraPos[3];
+M44 gSceneWorldToCamera = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+
+void SetSceneCamera(Camera *camera) {
+    const bVector3 *p = camera->GetPosition();
+    gSceneCameraPos[0] = p->x;
+    gSceneCameraPos[1] = p->y;
+    gSceneCameraPos[2] = p->z;
+    std::memcpy(gSceneWorldToCamera, camera->GetWorldToCameraMatrix(), sizeof(M44));
+}
+
 // render_flags: eViewPlatInterface::Render flags (bit 0: CarRender's
 // disable_env_flag, no environment map).
 void DrawSolid(eSolid *solid, const M44 world, const eDynamicLightContext *lights = nullptr, unsigned int render_flags = 0) {
@@ -242,19 +255,57 @@ void DrawSolid(eSolid *solid, const M44 world, const eDynamicLightContext *light
                 d.lights[12 + i * 4 + 1] = cm[i * 4 + 1];
                 d.lights[12 + i * 4 + 2] = cm[i * 4 + 2];
             }
-            d.lights[24] = lights->LocalEyePosition.x;
-            d.lights[25] = lights->LocalEyePosition.y;
-            d.lights[26] = lights->LocalEyePosition.z;
             d.flags |= PORT_3D_LIT;
             if (!(render_flags & 1)) {
-                // IDI_CAR_FX WorldView: the light context's EnvMapMatrix
-                // (elSetupEnvMap: local_world * hack_man_matrix).
-                std::memcpy(d.envmap, &lights->EnvMapMatrix, sizeof(d.envmap));
                 d.flags |= PORT_3D_ENVMAP;
+            }
+        }
+        if (group.Effect == PORT_EFFECT_CAR) {
+            // sub_6C8000 (speed.exe 1.3), not the light context: LocalEyePos =
+            // the view's camera position x inverse(local_world)
+            // (eInvertTransformationMatrix 0x6BDE60, D3DXVec4Transform), and
+            // WorldView = local_world x the view matrix. (The context's
+            // LocalEyePosition, clamped to 2.78..8 by elSetupEnvMap, and its
+            // EnvMapMatrix are never handed to the shader.)
+            bMatrix4 local_world, world_local;
+            std::memcpy(&local_world, world, sizeof(M44));
+            eInvertTransformationMatrix(&world_local, &local_world);
+            bVector4 eye(gSceneCameraPos[0], gSceneCameraPos[1], gSceneCameraPos[2], 1.0f);
+            eMulVector(&eye, &world_local, &eye);
+            d.lights[24] = eye.x;
+            d.lights[25] = eye.y;
+            d.lights[26] = eye.z;
+            M44 world_view;
+            Multiply(world_view, world, gSceneWorldToCamera);
+            for (int r = 0; r < 3; r++) {
+                for (int k = 0; k < 4; k++) {
+                    d.envmap[r * 4 + k] = k < 3 ? world_view[r * 4 + k] : 0.0f;
+                }
             }
         }
         d.num_indices = group.NumIndices;
         d.shadow_level = ShadowLevel(group, world);
+        {
+            static const bool trace = std::getenv("NFSMW_TRACE_CARMAT") != nullptr;
+            static int n;
+            if (trace && group.Effect == PORT_EFFECT_CAR && n < 400) {
+                n++;
+                const float *m = d.material, *l = d.lights;
+                std::fprintf(stderr,
+                             "[carmat] %s g%d lm %s dmin(%.3f %.3f %.3f %.3f) drange(%.3f %.3f %.3f %.3f) smin(%.3f %.3f %.3f) srange(%.3f %.3f %.3f) "
+                             "env %.3f+%.3f pow %.2f spow %.2f lit %d sl %u\n",
+                             solid->Name, g, light_material ? light_material->Name : "-", m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8],
+                             m[9], m[10], m[12], m[13], m[14], m[16], m[17], m[18], m[19], (d.flags & PORT_3D_LIT) != 0, d.shadow_level);
+                static int nl;
+                if (world[10] > 0 && nl++ < 3) {
+                    std::fprintf(stderr, "[carmat]  L0 (%.3f %.3f %.3f) c(%.3f %.3f %.3f)  L1 (%.3f %.3f %.3f) c(%.3f %.3f %.3f)  L2 (%.3f %.3f %.3f) c(%.3f %.3f %.3f) eye (%.3f %.3f %.3f)\n",
+                                 l[0], l[1], l[2], l[12], l[13], l[14], l[4], l[5], l[6], l[16], l[17], l[18], l[8], l[9], l[10], l[20], l[21], l[22],
+                                 l[24], l[25], l[26]);
+                    std::fprintf(stderr, "[carmat]  world (%.3f %.3f %.3f)(%.3f %.3f %.3f)(%.3f %.3f %.3f) t(%.3f %.3f %.3f)\n", world[0], world[1],
+                                 world[2], world[4], world[5], world[6], world[8], world[9], world[10], world[12], world[13], world[14]);
+                }
+            }
+        }
         // sub_6C68B0: alpha test when the texture is punch-through (ref
         // 0x5F); blending only by AlphaBlendType -- SRCCOPY draws opaque even
         // when the alpha is MODULATED (car skins: alpha is a gloss mask).
@@ -897,6 +948,7 @@ bool RenderFrontEndScene() {
         bVector3 *eye = view->GetCamera()->GetPosition();
         float e[3] = {eye->x, eye->y, eye->z};
         PortMetal3DSetEye(e);
+        SetSceneCamera(view->GetCamera());
     }
     gSceneLog = log;
     std::memcpy(gSceneViewProj, view_proj, sizeof(M44));
@@ -1150,6 +1202,7 @@ bool RenderWorldScene(int frame) {
     bVector3 *eye = view->GetCamera()->GetPosition();
     float e[3] = {eye->x, eye->y, eye->z};
     PortMetal3DSetEye(e);
+    SetSceneCamera(view->GetCamera());
     PortMetal3DSetOverlay(false);
     gSceneLog = log;
     std::memcpy(gSceneViewProj, view_proj, sizeof(M44));

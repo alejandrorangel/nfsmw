@@ -67,12 +67,13 @@ struct Port3DDraw {
     // SpecularMin, SpecularRange (rgba each), then EnvmapMin, EnvmapRange,
     // EnvmapPower, SpecularPower.
     float material[20];
-    // Model-space lighting (eDynamicLightContext), when PORT_3D_LIT: three
-    // light directions, three colours, then the eye position (xyzw each).
+    // Car effect: model-space lighting (eDynamicLightContext, when
+    // PORT_3D_LIT): three light directions, three colours, then LocalEyePos
+    // (the camera in model space, sub_6C8000), xyzw each.
     float lights[28];
-    // Car effect WorldView (eDynamicLightContext::EnvMapMatrix rows 0..2,
-    // xyzw each), when PORT_3D_ENVMAP: takes the model-space reflection
-    // vector into the space of the environment cube.
+    // Car effect WorldView (local_world x view matrix, sub_6C8000) rows
+    // 0..2, xyzw each: takes the model-space reflection vector into the
+    // space of the environment cube. The cube is sampled when PORT_3D_ENVMAP.
     float envmap[12];
     // PC shadow level (sub_6E0AB0): 0 no shadow map (technique #0), 1 one
     // hardware-compare tap, 2 four taps (PCF). Only effects WORLD,

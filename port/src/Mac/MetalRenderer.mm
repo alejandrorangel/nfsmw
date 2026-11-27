@@ -564,7 +564,7 @@ struct MeshConst { float4x4 mvp; float4x4 world; uint stride; uint shade; uint e
                    float4x4 shadow; float inv_shadow; uint shadow_level; uint shadow_map; float shadow_texel; };
 struct MeshOut { float4 pos [[position]]; float2 uv; float4 color; float3 normal; float3 world_pos; float3 local_normal; float3 local_pos;
                  float4 d0; float4 d1; float3 inscatter; float2 uv1; float spec; float3 tlight; float3 tview; float4 shadow_pos;
-                 float2 uv2; float4 clip; };
+                 float2 uv2; float4 clip; float3 env; };
 
 // PortSky (the float part): CloudScroll, CloudIntensity.
 struct SkyConst { float cloud_scroll; float pad[3]; float4 cloud_intensity; };
@@ -624,8 +624,52 @@ struct Material {
     float envmap_min, envmap_range, envmap_power, specular_power;
 };
 
+struct EnvMatrix { float4 row[3]; };
+
+// IDI_CAR_FX vertex shaders, technique #0 'car' shader=1 (vs #11) and the
+// shadowed techniques #1..#3 (vs #9/#7/#5, identical but for the outputs),
+// instruction by instruction. v0 = local position, v1 = the vertex normal
+// (as stored, not renormalised), v2 = the D3DCOLOR vertex colour (v2.x: red),
+// c(LocalEyePos) = the camera in model space, LocalDirectionMatrix columns =
+// the three light directions, LocalColourMatrix rows = their colours,
+// WorldView = local_world x view (sub_6C8000). oD0/oD1 are colour registers:
+// clamped to 0..1.
+void CarVertex(thread MeshOut &o, float3 v0, float3 v1, float4 v2, constant MeshConst &c, constant Material &m, constant Lights &l,
+               constant EnvMatrix &wv) {
+    float3 eye_vec = l.eye.xyz - v0;                           // add r0.xyz, -v0, LocalEyePos
+    float3 v = eye_vec * rsqrt(dot(eye_vec, eye_vec));         // dp3, rsq, mul: V
+    float ndv = max(dot(v, v1), 0.01);                         // dp3, max r.x, c.x (0.01)
+    float ao = clamp(v2.x + v2.x, 0.0, 1.0);                   // add r1.w, v2.x, v2.x; max 0; min 1
+    // lit r0, (ndv, ndv, -, SpecularPower): r0.z = ndv^SpecularPower.
+    float3 spec = pow(ndv, clamp(m.specular_power, -128.0, 128.0)) * m.specular_range.rgb + m.specular_min.rgb;
+    // lit r0, (ndv, ndv, -, EnvmapPower); EnvmapMin/Range .x only.
+    float envamt = pow(ndv, clamp(m.envmap_power, -128.0, 128.0)) * m.envmap_range + m.envmap_min;
+    // Per light: clamp(N . L + 0.1, 0, 1) x its colour (c.w = 0.1).
+    float3 lights = 0;
+    for (int i = 0; i < 3; i++) {
+        lights += clamp(dot(v1, l.dir[i].xyz) + 0.1, 0.0, 1.0) * l.colour[i].rgb;
+    }
+    float4 diffuse = ndv * m.diffuse_range + m.diffuse_min;    // mad r0, ndv, DiffuseRange, DiffuseMin
+    o.d0 = saturate(float4(ao * lights * diffuse.rgb, diffuse.w));
+    o.d1 = saturate(float4(spec * ao, ao * envamt));
+    float3 r = (ndv + ndv) * v1 - v;                            // mad r0.xyz, 2 ndv, v1, -V
+    o.env = r.x * wv.row[0].xyz + r.y * wv.row[1].xyz + r.z * wv.row[2].xyz; // oT0 = R x WorldView (dp3 with its columns)
+    if (c.shadow_level == 0) {
+        // vs #11: oT2 = N, oT3 = normalize(V + L0).
+        float3 h = v + l.dir[0].xyz;
+        o.local_normal = v1;
+        o.tlight = h * rsqrt(dot(h, h));
+    } else {
+        // vs #9/#7/#5: oT3 = L0, oT4 = N, oT5 = V.
+        o.tlight = l.dir[0].xyz;
+        o.local_normal = v1;
+        o.tview = v;
+    }
+}
+
 vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffer(0)]], constant MeshConst &c [[buffer(1)]],
-                       constant WorldFog &fog [[buffer(2)]], constant SkyConst &sky [[buffer(3)]]) {
+                       constant WorldFog &fog [[buffer(2)]], constant SkyConst &sky [[buffer(3)]], constant Material &m [[buffer(4)]],
+                       constant Lights &l [[buffer(5)]], constant EnvMatrix &wv [[buffer(6)]]) {
     const device float *v = verts + vid * (c.stride / 4);
     float4 p = float4(v[0], v[1], v[2], 1);
     MeshOut o;
@@ -654,6 +698,11 @@ vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffe
     // the clip position, sampled projectively (texldp): the screen position
     // in the reflection target.
     o.clip = o.pos;
+    o.env = 0;
+    if (c.effect == 4) {
+        CarVertex(o, p.xyz, o.local_normal, o.color, c, m, l, wv);
+        return o;
+    }
     if (c.effect == 19) {
         // IDI_SKYBOX_FX (c.pad = pass). Second uv set (dcl_texcoord1) after
         // the first in the longer vertex formats.
@@ -750,13 +799,6 @@ vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffe
     return o;
 }
 
-// Fallback while no environment cube exists yet: brighter above (z up).
-float3 EnvColour(float3 r) {
-    return mix(float3(0.08, 0.08, 0.09), float3(0.55, 0.57, 0.6), saturate(r.z * 0.5 + 0.5));
-}
-
-// EnvMapMatrix rows (Port3DDraw::envmap).
-
 // Shadow map samples (NVIDIA path: texldp on the D24S8 depth texture is a
 // hardware depth compare, bilinearly filtered; ZFUNC LESSEQUAL).
 // ShadowMapScale = 1/1024 (sub_6C86B0); the four-tap techniques offset
@@ -825,80 +867,52 @@ float CarShadow(constant MeshConst &c, float4 p, depth2d<float> sm, texture2d<fl
     return mix(0.2 + c.inv_shadow, 1.0, lit);
 }
 
-struct EnvMatrix { float4 row[3]; };
-
-// PC CAR effect, technique 'car' shader=1 (IDI_CAR_FX vs #11 / ps #10), per
-// pixel: fresnel-style diffuse/specular/envmap ranges from the light
-// material, three directional lights, and a 2*(N.H)^8 highlight.
-float4 CarShade(MeshOut in, float4 t, constant MeshConst &c, constant Material &m, constant Lights &l, bool lit,
-                texturecube<float> env_map, constant EnvMatrix &em, float shadow) {
-    float3 light_dir[3] = {normalize(float3(-0.3, -0.4, 0.85)), normalize(float3(0.6, 0.5, 0.3)), normalize(float3(0.0, 0.8, -0.2))};
-    float3 light_col[3] = {float3(0.85, 0.85, 0.82), float3(0.35, 0.38, 0.45), float3(0.25, 0.25, 0.28)};
-    float3 n = normalize(in.normal);
-    float3 v = normalize(c.eye.xyz - in.world_pos);
-    if (lit) {
-        // The game's lights, in model space as on PC.
-        for (int i = 0; i < 3; i++) {
-            light_dir[i] = l.dir[i].xyz;
-            light_col[i] = l.colour[i].rgb;
-        }
-        n = normalize(in.local_normal);
-        v = normalize(l.eye.xyz - in.local_pos);
-    }
-    float ndotv = max(dot(n, v), 0.01);
-    float ao = saturate(in.color.r * 2.0); // vertex colour red: occlusion mask
-    float3 spec = (m.specular_min.rgb + pow(ndotv, m.specular_power) * m.specular_range.rgb) * ao;
-    float env_strength = ao * (m.envmap_min + pow(ndotv, m.envmap_power) * m.envmap_range);
-    float3 lights = 0;
-    for (int i = 0; i < 3; i++) {
-        lights += saturate(dot(n, light_dir[i]) + 0.1) * light_col[i];
-    }
-    float4 diffuse = saturate(m.diffuse_min + ndotv * m.diffuse_range);
-    // vs_1_1 colour outputs are clamped: oD0 = diffuse lighting, oD1.xyz =
-    // specular colour, oD1.w = env-map strength.
-    float3 d = saturate(ao * lights * diffuse.rgb);
-    spec = saturate(spec);
-    env_strength = saturate(env_strength);
-    float highlight;
-    // Shadow level 0: technique #0; 1: technique #1 (ps #8); 2: #2 (ps #6).
-    bool technique1 = c.shadow_level != 0;
-    if (technique1) {
-        // technique #1/#2 'car' shader=3 (ps #8 / #6): Phong highlight from the key
-        // light reflected about N, against the eye vector: 2 (R.V)^16.
-        float3 refl = 2.0 * dot(n, light_dir[0]) * n - light_dir[0];
-        float rv = saturate(dot(refl, v));
-        highlight = 2.0 * pow(rv, 16.0);
-    } else {
-        // technique #0 'car' shader=1 (ps #10): 2 (N.H)^8.
-        float3 h = normalize(v + light_dir[0]);
-        highlight = 2.0 * pow(saturate(dot(n, h)), 8.0);
-    }
-    // vs #11: oT0 = (2 (N.V) N - V) * WorldView; ps #10: t0 = texCUBE(oT0),
-    // env term t0 * oD1.w * oD0.w.
-    float3 r = 2.0 * ndotv * n - v;
-    float3 env = 0;
-    if (c.shade & 16) {
-        float3 re = r.x * em.row[0].xyz + r.y * em.row[1].xyz + r.z * em.row[2].xyz;
-        if (c.shade & 8) {
-            constexpr sampler es(filter::linear, mip_filter::linear, address::clamp_to_edge);
-            env = env_map.sample(es, re).rgb;
-        } else {
-            env = EnvColour(float3(re.x, re.z, -re.y)); // camera space, y down
-        }
-    } else if (!lit) {
-        env = EnvColour(r);
+// IDI_CAR_FX pixel shaders, from the vertex shader's colour registers (v0 =
+// oD0: ao x lights x diffuse, alpha the diffuse alpha; v1 = oD1: specular
+// colour, alpha the env-map amount), t0 = texCUBE(EnvMapTex, oT0), t1 = the
+// diffuse texture at oT1.
+float4 CarShade(MeshOut in, float4 t1, constant MeshConst &c, texturecube<float> env_map, float shadow) {
+    float4 v0 = in.d0, v1 = in.d1;
+    float3 t0 = 0;
+    if ((c.shade & 24) == 24) { // a cube is bound and the draw has the env map (CarRender's disable_env_flag)
+        constexpr sampler es(filter::linear, mip_filter::linear, address::clamp_to_edge); // envmap_sampler
+        t0 = env_map.sample(es, in.env).rgb;
     }
     if (c.shade & 32) {
-        return float4(env, 1); // NFSMW_SHADE=envmap: the cube lookup alone
+        return float4(t0, 1); // NFSMW_SHADE=envmap: the cube lookup alone
     }
-    if (!technique1) {
-        float3 rgb = t.rgb * d + highlight * diffuse.a * spec + env * env_strength * diffuse.a;
-        return float4(rgb, t.a * diffuse.a);
+    if (c.shadow_level == 0) {
+        // ps #10 (ps_1_1, technique #0). texcoord t2/t3 hand the
+        // interpolated oT2 (N) and oT3 (H) over as colours, clamped to 0..1.
+        float3 t2 = saturate(in.local_normal), t3 = saturate(in.tlight);
+        float r0w = saturate(dot(t2, t3));                       // dp3_sat r0, t2, t3
+        r0w = r0w * r0w;                                         // mul r0.w, r0.w, r0.w
+        r0w = r0w * r0w;                                         // mul r0.w, r0.w, r0.w
+        float3 r1 = v0.w * v1.rgb;                               // +mul r1.xyz, v0.w, v1
+        r0w = 2.0 * (r0w * r0w);                                 // mul_x2 r0.w, r0.w, r0.w
+        float3 t2c = t1.rgb * v0.rgb;                            // +mul t2.xyz, t1, v0
+        float3 r0 = r0w * r1 + t2c;                              // mad r0.xyz, r0.w, r1, t2
+        r1 = t0 * v1.w;                                          // mul r1.xyz, t0, v1.w
+        float a = t1.a * v0.w;                                   // +mul r0.w, t1.w, v0.w
+        r0 = r1 * v0.w + r0;                                     // mad r0.xyz, r1, v0.w, r0
+        return saturate(float4(r0, a));
     }
-    // ps #8 / #6: (t oD0 + highlight oD0.w oD1 s) s + 0.5 env oD1.w oD0.w
-    // (the highlight is scaled by the shadow factor s twice).
-    float3 rgb = (t.rgb * d + highlight * diffuse.a * spec * shadow) * shadow + env * env_strength * diffuse.a * 0.5;
-    return float4(rgb, t.a * diffuse.a);
+    // ps #8 / #6 / #4 (technique #1..#3): Phong (R_L . V)^16 x 2 with R_L =
+    // 2 (N . L0) N - L0 from the unnormalised interpolated N (t4), L0 (t3)
+    // and V (t5); s = lerp(0.2 + InvShadowStrength, 1, lit) (CarShadow).
+    float3 n = in.local_normal;
+    float ndl = dot(n, in.tlight);                               // dp3 r5.x, r4, t3
+    float3 rl = (ndl + ndl) * n - in.tlight;                     // add, mad r4.xyz, r1.w, r4, -t3
+    float x = saturate(dot(rl, in.tview));                       // dp3_sat r4.x, r4, t5
+    x = x * x;
+    x = x * x;
+    x = x * x;
+    x = x * x;
+    float hl = x + x;                                            // add r1.w, r1.w, r1.w
+    float3 r2 = hl * (v0.w * v1.rgb) * shadow;                   // mul r2.xyz, v0.w, v1; x hl; x s
+    float3 r0 = v0.rgb * t1.rgb + r2;                            // mad r0.xyz, v0, r0, r2
+    float3 env = t0 * v1.w * v0.w * 0.5;                         // mul r1.xyz, r1, v1.w; x v0.w; x 0.5
+    return float4(r0 * shadow + env, t1.a * v0.w);               // mad r0.xyz, r0, r1.w, r1
 }
 
 // shade: bit 0 texture-only debug view, bit 1 alpha test (punch-through
@@ -912,11 +926,12 @@ fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(
                         texture2d<float> reflected [[texture(9)]],
                         constant SkyConst &sky [[buffer(5)]],
                         constant WorldFog &fog [[buffer(4)]],
-                        constant MeshConst &c [[buffer(0)]], constant Material &m [[buffer(1)]], constant Lights &l [[buffer(2)]],
-                        constant EnvMatrix &em [[buffer(3)]], sampler s [[sampler(0)]]) {
+                        constant MeshConst &c [[buffer(0)]], sampler s [[sampler(0)]]) {
     float4 t = tex.sample(s, in.uv);
     float4 out;
-    if (c.shade & 1) {
+    if (c.shade & 512) {
+        out = float4(in.color.rgb, 1); // NFSMW_SHADE=vcolour: the vertex colour
+    } else if (c.shade & 1) {
         out = t;
     } else if (c.effect == 19) {
         // IDI_SKYBOX_FX: p0 (ps #4) the sky colour: a = 2 t0.a t2.a
@@ -939,7 +954,7 @@ fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(
         }
         return out;
     } else if (c.effect == 4) {
-        out = CarShade(in, t, c, m, l, (c.shade & 4) != 0, env_map, em, CarShadow(c, in.shadow_pos, shadow_map, shadow_colour));
+        out = CarShade(in, t, c, env_map, CarShadow(c, in.shadow_pos, shadow_map, shadow_colour));
     } else if (NormalMapped(c)) {
         // ps #12 of IDI_WORLDNORMALMAP_FX / IDI_WORLDREFLECT_FX: N from the
         // normal map, L = normalize(oT2), R = 2 (N.L) N - L, V = normalize(oT3);
@@ -1816,6 +1831,9 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 if (shade_env && strcmp(shade_env, "shadow") == 0) {
                     c.shade |= 256;
                 }
+                if (shade_env && strcmp(shade_env, "vcolour") == 0) {
+                    c.shade |= 512;
+                }
                 if (d.flags & PORT_3D_ALPHA_TEST) {
                     c.shade |= 2;
                 }
@@ -1880,10 +1898,11 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 [enc setFragmentTexture:(_shadowValid ? _shadowColour : _black) atIndex:5];
                 [enc setFragmentTexture:(_reflBound ? _reflBound : _white) atIndex:9];
                 [enc setFragmentBytes:&fog length:sizeof(fog) atIndex:4];
-                [enc setFragmentBytes:d.envmap length:sizeof(d.envmap) atIndex:3];
                 [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
-                [enc setFragmentBytes:d.material length:sizeof(d.material) atIndex:1];
-                [enc setFragmentBytes:d.lights length:sizeof(d.lights) atIndex:2];
+                // The car effect's vertex constants (IDI_CAR_FX vs #11/#9/...).
+                [enc setVertexBytes:d.material length:sizeof(d.material) atIndex:4];
+                [enc setVertexBytes:d.lights length:sizeof(d.lights) atIndex:5];
+                [enc setVertexBytes:d.envmap length:sizeof(d.envmap) atIndex:6];
                 struct {
                     float scroll;
                     float pad[3];
