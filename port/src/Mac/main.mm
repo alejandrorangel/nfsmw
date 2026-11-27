@@ -17,6 +17,8 @@ extern void bMemoryInit();
 extern int IsSoundEnabled;
 extern int IsMemcardEnabled; // save system: the decomp's layer is GameCube-specific
 // Keyboard events -> game input (InputMac.mm).
+#include "../Audio/AudioMixer.h"
+
 extern void PortInputInstallKeyboardMonitor();
 
 static int g_argc;
@@ -31,6 +33,9 @@ static void *GameThread(void *) {
         IsMemcardEnabled = 0; // no saves until the PC profile layer is ported
     }
     bMemoryInit();
+    if (getenv("NFSMW_TEST_AUDIO") != nullptr && port_audio::StartAudioOutput()) {
+        port_audio::RunAudioSelfTest();
+    }
     int rc = NFSMW_GameMain(g_argc, g_argv);
     NSLog(@"NFSMW: game main returned %d", rc);
     dispatch_async(dispatch_get_main_queue(), ^{
