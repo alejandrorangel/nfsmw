@@ -31,7 +31,7 @@ class QRCarSelectBustedManager {
 
     void NotificationMessage(u32 msg, FEObject *pobj, u32 param1, u32 param2);
 
-    static void TextureLoadedCallbackAccessor(uint32 this_screen) {
+    static void TextureLoadedCallbackAccessor(uintptr_t this_screen) {
         reinterpret_cast<QRCarSelectBustedManager *>(this_screen)->TextureLoadedCallback();
     }
 

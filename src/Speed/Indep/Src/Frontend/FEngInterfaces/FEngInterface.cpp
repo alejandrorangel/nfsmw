@@ -42,7 +42,7 @@ cFEng::cFEng() {
 }
 
 // UNSOLVED
-void cFEng::PushErrorPackage(const char *pPackageName, int pArg, u32 ControlMask) {
+void cFEng::PushErrorPackage(const char *pPackageName, intptr_t pArg, u32 ControlMask) {
     if (FEDatabase == nullptr) {
         if (!cFEng::Get()->IsPackagePushed(pPackageName)) {
             return;
@@ -129,7 +129,7 @@ void cFEng::ResumeAllSystems(bool flushActions) {
     }
 }
 
-void cFEng::QueuePackagePush(const char *pPackageName, int pArg, u32 ControlMask, bool pSuppressSimPause) {
+void cFEng::QueuePackagePush(const char *pPackageName, intptr_t pArg, u32 ControlMask, bool pSuppressSimPause) {
     PrintLoadedPackages();
     if (TheGameFlowManager.IsInGame() && !pSuppressSimPause && !FEManager::IsPaused()) {
         FEManager::RequestPauseSimulation(pPackageName);
@@ -165,7 +165,7 @@ void cFEng::QueuePackagePop(int numPackagesToPop) {
     }
 }
 
-void cFEng::QueuePackageSwitch(const char *pPackageName, int pArg, u32 ControlMask, bool pSuppressSimPause) {
+void cFEng::QueuePackageSwitch(const char *pPackageName, intptr_t pArg, u32 ControlMask, bool pSuppressSimPause) {
     PrintLoadedPackages();
     if (TheGameFlowManager.IsInGame() && !pSuppressSimPause && !FEManager::IsPaused()) {
         FEManager::RequestPauseSimulation(pPackageName);

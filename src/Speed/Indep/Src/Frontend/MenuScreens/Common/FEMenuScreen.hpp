@@ -11,7 +11,7 @@ class ScreenConstructorData {
   public:
     const char *PackageFilename; // offset 0x0, size 0x4
     struct FEPackage *pPackage;  // offset 0x4, size 0x4
-    int Arg;                     // offset 0x8, size 0x4
+    intptr_t Arg;                // offset 0x8, size 0x4 (screens pass pointers)
 };
 
 // total size: 0x2C

@@ -67,7 +67,7 @@ void UIQRTrackSelect::NotificationMessage(u32 msg, FEObject *pobj, u32 param1, u
                     return;
                 }
             }
-            cFEng::Get()->QueuePackageSwitch("Track_Options.fng", reinterpret_cast<u32>(pCurrentTrack), 0, false);
+            cFEng::Get()->QueuePackageSwitch("Track_Options.fng", reinterpret_cast<intptr_t>(pCurrentTrack), 0, false);
             RefreshHeader();
             break;
         case __PAD_BACK__:

@@ -45,7 +45,7 @@ cFrontendDatabase *FEDatabase;
 
 // UNSOLVED
 char *SaveSomeData(void *save_to, void *save_from, int bytes, void *maxptr) {
-    if (reinterpret_cast<uint32>(save_to) + bytes <= reinterpret_cast<uint32>(maxptr)) {
+    if (reinterpret_cast<uintptr_t>(save_to) + bytes <= reinterpret_cast<uintptr_t>(maxptr)) {
         bMemCpy(save_to, save_from, bytes);
         save_to = static_cast<char *>(save_to) + bytes;
     }
@@ -53,7 +53,7 @@ char *SaveSomeData(void *save_to, void *save_from, int bytes, void *maxptr) {
 }
 // UNSOLVED
 char *LoadSomeData(void *load_to, void *load_from, int bytes, void *maxptr) {
-    if (reinterpret_cast<uint32>(load_from) + bytes <= reinterpret_cast<uint32>(maxptr)) {
+    if (reinterpret_cast<uintptr_t>(load_from) + bytes <= reinterpret_cast<uintptr_t>(maxptr)) {
         bMemCpy(load_to, load_from, bytes);
     }
     return static_cast<char *>(load_from) + bytes;

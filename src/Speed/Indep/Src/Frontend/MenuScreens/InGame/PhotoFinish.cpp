@@ -81,7 +81,7 @@ void SillyTextureStreamerManager::LoadCallback() {
         if (LoadInfos[i].LoadingTexture != 0 && !LoadInfos[i].IsLoaded) {
             mCurrentlyLoading = true;
             mCurrentLoadingIndex = i;
-            eLoadStreamingTexture(LoadInfos[i].LoadingTexture, LoadCallbackBridge, reinterpret_cast<uint32>(this), 7);
+            eLoadStreamingTexture(LoadInfos[i].LoadingTexture, LoadCallbackBridge, reinterpret_cast<uintptr_t>(this), 7);
             return;
         }
     }

@@ -221,7 +221,7 @@ void uiSMS::NotificationMessage(u32 msg, FEObject *obj, u32 param1, u32 param2) 
             }
             if (the_msg != nullptr && bAutoPlay) {
                 FEngSetScript(GetPackageName(), 0x47ff4e7c, bStringHash("READ"), true);
-                cFEng::Get()->QueuePackagePush("SMS_Message.fng", reinterpret_cast<int>(the_msg), 0, false);
+                cFEng::Get()->QueuePackagePush("SMS_Message.fng", reinterpret_cast<intptr_t>(the_msg), 0, false);
             }
             bInitCompleted = false;
             break;
@@ -294,7 +294,7 @@ void uiSMS::NotificationMessage(u32 msg, FEObject *obj, u32 param1, u32 param2) 
             if (GetCurrentDatum() == nullptr) {
                 break;
             }
-            cFEng::Get()->QueuePackagePush("SMS_Message.fng", reinterpret_cast<int>(the_msg), 0, false);
+            cFEng::Get()->QueuePackagePush("SMS_Message.fng", reinterpret_cast<intptr_t>(the_msg), 0, false);
             break;
         case __PAD_BACK__:
             button_pressed = __PAD_BACK__;

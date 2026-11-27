@@ -6,8 +6,10 @@
 #include "InputBridge.h"
 #include "MetalBridge.h"
 
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <vector>
 
 static std::mutex gInputLock;
 static float gKeys[PORT_KEY_COUNT];
@@ -156,11 +158,44 @@ void PortInputInstallKeyboardMonitor() {
                                           }];
 }
 
+// NFSMW_AUTO_ENTER=<seconds>[,<seconds>...]: holds Enter for 0.2 s at each
+// time after launch, for automated runs past the splash and menus.
+static bool AutoEnterHeld() {
+    static std::vector<double> times = [] {
+        std::vector<double> t;
+        if (const char *env = getenv("NFSMW_AUTO_ENTER")) {
+            for (const char *p = env; *p;) {
+                t.push_back(atof(p));
+                const char *comma = strchr(p, ',');
+                if (!comma) {
+                    break;
+                }
+                p = comma + 1;
+            }
+        }
+        return t;
+    }();
+    if (times.empty()) {
+        return false;
+    }
+    static const double start = CFAbsoluteTimeGetCurrent();
+    double now = CFAbsoluteTimeGetCurrent() - start;
+    for (double t : times) {
+        if (now >= t && now < t + 0.2) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void PortInputGetState(PortInputState *out) {
     std::memset(out, 0, sizeof(*out));
     {
         std::lock_guard<std::mutex> guard(gInputLock);
         std::memcpy(out->keys, gKeys, sizeof(gKeys));
+        if (AutoEnterHeld()) {
+            out->keys[PORT_KEY_ENTER] = 1.0f;
+        }
         PortMetalViewToFEScreen(gMouseU, gMouseV, &out->mouse_x, &out->mouse_y);
         out->mouse_buttons = gMouseButtons;
     }

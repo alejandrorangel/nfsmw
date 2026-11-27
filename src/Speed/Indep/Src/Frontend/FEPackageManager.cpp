@@ -176,7 +176,7 @@ FEPackageData *FEPackageManager::FindFEPackageData(const char *pkg_name) {
     return nullptr;
 }
 
-bool FEPackageManager::SetPackageDataArg(const char *pPackageName, const int pArg) {
+bool FEPackageManager::SetPackageDataArg(const char *pPackageName, const intptr_t pArg) {
     FEPackageData *packageData = mInstance->FindFEPackageData(pPackageName);
     if (packageData != nullptr) {
         packageData->SetArgument(pArg);

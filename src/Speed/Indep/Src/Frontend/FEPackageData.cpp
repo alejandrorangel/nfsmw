@@ -550,7 +550,7 @@ static ScreenFactoryDatum ScreenFactoryData[] = {
 };
 
 // UNSOLVED
-static MenuScreen *ScreenFactory(uint32 screen_filename_hash, FEPackage *pkg, int arg) {
+static MenuScreen *ScreenFactory(uint32 screen_filename_hash, FEPackage *pkg, intptr_t arg) {
     for (int i = 0; i < NUM_ENTRIES(ScreenFactoryData); i++) {
         if (screen_filename_hash == FEHashUpper(ScreenFactoryData[i].FEngPackageFilename) && (ScreenFactoryData[i].ConstructorFunction != nullptr)) {
             ScreenConstructorData sd = {};
@@ -654,7 +654,7 @@ FEPackageData::~FEPackageData() {
     DataChunk = nullptr;
 }
 
-void FEPackageData::Activate(FEPackage *pkg, int arg) {
+void FEPackageData::Activate(FEPackage *pkg, intptr_t arg) {
     pPackage = pkg;
     pkg->SetUserParam(reinterpret_cast<unsigned long>(this));
     mInScreenConstructor++;

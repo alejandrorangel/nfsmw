@@ -9,7 +9,7 @@
 class FEResponse {
   public:
     u32 ResponseID;     // offset 0x0, size 0x4, Decl: 93
-    u32 ResponseParam;  // offset 0x4, size 0x4, Decl: 94
+    uintptr_t ResponseParam; // offset 0x4, size 0x4, Decl: 94 (a number, or an owned string)
     u32 ResponseTarget; // offset 0x8, size 0x4, Decl: 95
 
     FEResponse() : ResponseID(0), ResponseParam(0), ResponseTarget(0) {} // Decl: 97

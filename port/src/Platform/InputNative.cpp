@@ -32,18 +32,25 @@ unsigned int stringhash32(const char *k) {
 
 namespace {
 
-// What a device scalar reads from the platform snapshot.
+// What a device scalar reads from the platform snapshot. ACTION scalars are
+// the PC keyboard device's named actions: a key, optionally also a pad input.
 struct ScalarSource {
     const char *name;
     DeviceScalarType type;
-    enum { KEY, PAD, PAD_NEG, PAD_POS } kind;
+    enum { KEY, PAD, PAD_NEG, PAD_POS, ACTION } kind;
     int index;
+    int pad = -1;     // ACTION: pad button/axis, or -1
+    int pad_dir = 0;  // ACTION: 0 button, -1/+1 half-axis
 };
 
 #define KEY(n, k) {n, kDigitalButton, ScalarSource::KEY, PORT_KEY_##k}
 #define PAD(n, p) {n, kAnalogButton, ScalarSource::PAD, PORT_PAD_##p}
 #define AXIS_NEG(n, p) {n, kJoyAxis, ScalarSource::PAD_NEG, PORT_PAD_##p}
 #define AXIS_POS(n, p) {n, kJoyAxis, ScalarSource::PAD_POS, PORT_PAD_##p}
+#define ACT(n, k) {n, kDigitalButton, ScalarSource::ACTION, PORT_KEY_##k}
+#define ACT_PAD(n, k, p) {n, kDigitalButton, ScalarSource::ACTION, PORT_KEY_##k, PORT_PAD_##p, 0}
+#define ACT_DIR(n, k, p, a, d) {n, kDigitalButton, ScalarSource::ACTION, PORT_KEY_##k, PORT_PAD_##p, 0} // key or d-pad
+#define KEYN(c) (PORT_KEY_0 + (c))
 
 const ScalarSource kScalars[] = {
     // Keyboard: DirectInput scan-code names (DIK_* without the prefix).
@@ -80,6 +87,33 @@ const ScalarSource kScalars[] = {
     {"SC_4", kDigitalButton, ScalarSource::KEY, PORT_KEY_0 + 4}, {"SC_5", kDigitalButton, ScalarSource::KEY, PORT_KEY_0 + 5},
     {"SC_6", kDigitalButton, ScalarSource::KEY, PORT_KEY_0 + 6}, {"SC_7", kDigitalButton, ScalarSource::KEY, PORT_KEY_0 + 7},
     {"SC_8", kDigitalButton, ScalarSource::KEY, PORT_KEY_0 + 8}, {"SC_9", kDigitalButton, ScalarSource::KEY, PORT_KEY_0 + 9},
+
+    // Named actions of the PC keyboard device, with its default keys (scalar
+    // table @ speed.exe 1.3 0x8F6D80..0x8F7D00, DirectInput scan codes).
+    ACT_DIR("FE_ACTION_UP", UP, DUP, LY, +1), ACT_DIR("FE_ACTION_DOWN", DOWN, DDOWN, LY, -1),
+    ACT_DIR("FE_ACTION_LEFT", LEFT, DLEFT, LX, -1), ACT_DIR("FE_ACTION_RIGHT", RIGHT, DRIGHT, LX, +1),
+    ACT_PAD("FE_ACTION_ACCEPT", ENTER, A), ACT_PAD("FE_ACTION_CANCEL", ESCAPE, B), ACT_PAD("FE_ACTION_START", SPACE, START),
+    ACT_PAD("FE_ACTION_LTRIGGER", F2, LTRIGGER), ACT_PAD("FE_ACTION_RTRIGGER", F1, RTRIGGER),
+    {"FE_ACTION_LTRIG", kDigitalButton, ScalarSource::ACTION, KEYN(9), PORT_PAD_LSHOULDER, 0},
+    {"FE_ACTION_RTRIG", kDigitalButton, ScalarSource::ACTION, KEYN(0), PORT_PAD_RSHOULDER, 0},
+    {"FE_ACTION_B0", kDigitalButton, ScalarSource::ACTION, KEYN(3), PORT_PAD_X, 0},
+    {"FE_ACTION_B1", kDigitalButton, ScalarSource::ACTION, PORT_KEY_A + 12 /* M */, PORT_PAD_Y, 0},
+    {"FE_ACTION_B2", kDigitalButton, ScalarSource::ACTION, PORT_KEY_A + 19 /* T */, PORT_PAD_BACK, 0},
+    {"FE_ACTION_B3", kDigitalButton, ScalarSource::ACTION, KEYN(4)},
+    {"FE_ACTION_B4", kDigitalButton, ScalarSource::ACTION, KEYN(2)},
+    {"FE_ACTION_B5", kDigitalButton, ScalarSource::ACTION, KEYN(1)},
+    ACT("GAME_ACTION_GAS", UP), ACT("GAME_ACTION_BRAKE", DOWN), ACT("GAME_ACTION_STEERLEFT", LEFT), ACT("GAME_ACTION_STEERRIGHT", RIGHT),
+    ACT("GAME_ACTION_HANDBRAKE", SPACE), ACT("GAME_ACTION_GAMEBREAKER", RCONTROL), ACT("GAME_ACTION_NOS", LALT),
+    ACT("GAME_ACTION_SHIFTDOWN", LCONTROL), ACT("GAME_ACTION_SHIFTUP", LSHIFT),
+    {"GAME_ACTION_RESET", kDigitalButton, ScalarSource::ACTION, PORT_KEY_A + 17 /* R */},
+    ACT("HUDACTION_ENGAGE_EVENT", ENTER), ACT("HUDACTION_SKIPNIS", ENTER), ACT("HUDACTION_PAUSEREQUEST", ESCAPE),
+    {"HUDACTION_PAD_DOWN", kDigitalButton, ScalarSource::ACTION, PORT_KEY_A + 1 /* B */},
+    {"HUDACTION_PAD_LEFT", kDigitalButton, ScalarSource::ACTION, PORT_KEY_A + 12 /* M */},
+    ACT("HUDACTION_PAD_RIGHT", TAB),
+    {"HUDACTION_NEXTSONG", kDigitalButton, ScalarSource::ACTION, PORT_KEY_A + 19 /* T */},
+    {"CAM_ACTION_CHANGE", kDigitalButton, ScalarSource::ACTION, PORT_KEY_A + 2 /* C */},
+    {"CAM_ACTION_LOOKBACK", kDigitalButton, ScalarSource::ACTION, PORT_KEY_A + 11 /* L */},
+    {"CAM_ACTION_PULLBACK", kDigitalButton, ScalarSource::ACTION, PORT_KEY_A + 15 /* P */},
 
     // Gamepad: Xbox-style names used by the controller configs. Sticks are
     // split into half-axes (ALX_L = left stick pushed left, ...).
@@ -133,6 +167,16 @@ class MacInputDevice : public InputDevice {
             case ScalarSource::PAD_POS:
                 v = state.pad[s.index] > 0.0f ? state.pad[s.index] : 0.0f;
                 break;
+            case ScalarSource::ACTION:
+                v = state.keys[s.index];
+                if (s.pad >= 0) {
+                    float p = state.pad[s.pad];
+                    if (s.pad_dir != 0) {
+                        p = (p * s.pad_dir > 0.5f) ? 1.0f : 0.0f; // stick past half-way
+                    }
+                    v = v > p ? v : p;
+                }
+                break;
             }
             this->fPrevValues[i] = this->fCurrentValues[i];
             this->fCurrentValues[i] = v;
@@ -156,8 +200,13 @@ void DumpControllerConfigs() {
                 continue;
             }
             Attrib::Attribute attribute = atr.Get(Attrib::StringToKey(action));
-            for (unsigned int i = 0; i < attribute.GetLength(); i++) {
-                const ControllerDataRecord &rec = attribute.Get<ControllerDataRecord>(i);
+            unsigned int length = attribute.GetLength();
+            for (unsigned int i = 0; i < length; i++) {
+                ControllerDataRecord rec;
+                if (!attribute.Get(i, rec)) {
+                    std::fprintf(stderr, "[input]   %-32s [%u/%u] unreadable\n", action, i, length);
+                    continue;
+                }
                 if (!rec.mDeviceID.IsEmpty()) {
                     std::fprintf(stderr, "[input]   %-32s %s\n", action, static_cast<const char *>(rec.mDeviceID.GetString()));
                 }
@@ -214,11 +263,13 @@ void IOModule::PollDevices() {
 
 void IOModule::UpdateAllDevices() {
     PollDevices();
+    ActionQueue::PortUpdateAllFromDevices();
 }
 
+// PC @ 0x645EC0: poll, then let every action queue read its device.
 void IOModule::Update() {
     if (fUpdateEnabled) {
-        PollDevices();
+        UpdateAllDevices();
     }
 }
 

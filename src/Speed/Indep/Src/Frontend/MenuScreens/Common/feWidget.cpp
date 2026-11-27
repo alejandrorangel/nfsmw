@@ -827,7 +827,7 @@ int CTextScroller::WordWrapAddLines(int16 *pTextStart, int16 *pTextEnd, bool bCo
     }
 
     for (; pTextStart < pTextEnd; NumLines++) {
-        int StringLength = (reinterpret_cast<unsigned int>(pTextEnd) - reinterpret_cast<unsigned int>(pTextStart)) >> 1;
+        int StringLength = (reinterpret_cast<uintptr_t>(pTextEnd) - reinterpret_cast<uintptr_t>(pTextStart)) >> 1;
         int StringSize = 0;
         float TextWidth = 0.0f;
         int16 *pChar = pTextStart;

@@ -460,15 +460,15 @@ class CarPartModel {
     }
 
     void SetModel(struct eModel *model) {
-        this->mModel = reinterpret_cast<unsigned int>(model) | this->IsHidden();
+        this->mModel = reinterpret_cast<uintptr_t>(model) | this->IsHidden();
     }
 
     bool IsLodMissing() const {
-        return (this->mModel & ~3u) == 0;
+        return (this->mModel & ~static_cast<uintptr_t>(3)) == 0;
     }
 
   private:
-    uint32 mModel; // offset 0x0, size 0x4
+    uintptr_t mModel; // offset 0x0, size 0x4 (tagged eModel *)
 };
 
 static const float Tweak_ResetFlashOff = 0.05f;

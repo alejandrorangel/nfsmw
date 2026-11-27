@@ -29,13 +29,24 @@ class SelectCarCameraMover : public CameraMover {
     void SetZoomSpeed(float f);
     void SetCurrentOrientation(bVector3 &orbit, float roll, float fov, bVector3 &lookAt);
     void SetDesiredOrientation(bVector3 &orbit, float roll, float fov, bVector3 &lookAt, float animSpeed, float damping, int periods);
-    float GetTotalAnimationTime() {};
-    float GetCurrentAnimationTime() {};
-    float GetVAngle() {};
-    float GetHAngle() {}
-    float GetZoom() {};
+    float GetTotalAnimationTime() {
+        return TotalAnimationTime;
+    }
+    float GetCurrentAnimationTime() {
+        return CurrentAnimationTime;
+    }
+    float GetVAngle() {
+        return CurrentCameraData.OrbitVAngle;
+    }
+    float GetHAngle() {
+        return CurrentCameraData.OrbitHAngle;
+    }
+    float GetZoom() {
+        return CurrentCameraData.Radius;
+    }
 
   private:
+    void BeginUserControl();
     static void CreateCameraMatrix(bMatrix4 *camera_matrix, SelectCarCameraData *camera_data);
     float FindBestAngleGoal(float start, float goal);
 

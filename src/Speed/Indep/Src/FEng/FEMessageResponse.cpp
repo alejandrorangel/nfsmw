@@ -24,7 +24,7 @@ void FEResponse::SetParam(const char *pString) {
         u32 Len = FEngStrLen(pString);
         char *pPathCopy = FNEW char[Len + 1];
         FEngStrCpy(pPathCopy, pString);
-        ResponseParam = reinterpret_cast<u32>(pPathCopy);
+        ResponseParam = reinterpret_cast<uintptr_t>(pPathCopy);
     }
 }
 

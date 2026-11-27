@@ -129,7 +129,7 @@ void MyCarsManager::NotificationMessage(u32 msg, FEObject *obj, u32 param1, u32 
             if (bGoToShowcase) {
                 Showcase::FromArgs = 0;
                 Showcase::FromPackage = GetPackageName();
-                cFEng::Get()->QueuePackageSwitch("Showcase.fng", reinterpret_cast<int>(pSelectedCar), 0, false);
+                cFEng::Get()->QueuePackageSwitch("Showcase.fng", reinterpret_cast<intptr_t>(pSelectedCar), 0, false);
             }
             break;
 

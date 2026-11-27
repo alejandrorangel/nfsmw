@@ -165,7 +165,7 @@ void QRCarSelectBustedManager::LoadImpoundTexture() {
             break;
     }
 
-    eLoadStreamingTexture(ImpoundStampHash, TextureLoadedCallbackAccessor, reinterpret_cast<uint32>(this), 0);
+    eLoadStreamingTexture(ImpoundStampHash, TextureLoadedCallbackAccessor, reinterpret_cast<uintptr_t>(this), 0);
 }
 
 void QRCarSelectBustedManager::SetSelectedCar(FECarRecord *record) {
@@ -535,7 +535,7 @@ void UIQRCarSelect::NotificationMessage(u32 msg, FEObject *pobj, u32 param1, u32
                 ForceCar = pSelectedCar->mHandle;
                 Showcase::FromArgs = iPlayerNum;
                 Showcase::FromPackage = this->GetPackageName();
-                cFEng::Get()->QueuePackageSwitch("Showcase.fng", reinterpret_cast<int>(pCar), 0, false);
+                cFEng::Get()->QueuePackageSwitch("Showcase.fng", reinterpret_cast<intptr_t>(pCar), 0, false);
                 return;
             }
             ForceCar = INVALID_CAR_HANDLE;

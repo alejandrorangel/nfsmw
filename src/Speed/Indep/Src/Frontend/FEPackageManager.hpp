@@ -39,7 +39,7 @@ class FEPackageManager {
 
     const char *GetBasePkgName(const char *pkg_name);
 
-    bool SetPackageDataArg(const char *pPackageName, const int pArg);
+    bool SetPackageDataArg(const char *pPackageName, const intptr_t pArg);
 
   private:
     static FEPackageManager *mInstance; // size: 0x4, address: 0x8041CB64, Decl: 4

@@ -93,6 +93,10 @@ class ActionQueue : public UTL::Collections::Listable<ActionQueue, MAX_ACTIONQ> 
 
     static void BeginJoylogFrame();
     static void EndJoylogFrame();
+#if defined(EA_PORT_NATIVE)
+    // IOModule::UpdateAllDevices (PC @ 0x6450C0): every queue reads its device.
+    static void PortUpdateAllFromDevices();
+#endif
 
   private:
     UCircularQueue<ActionData, 50> fQueue; // offset 0x4, size 0x268

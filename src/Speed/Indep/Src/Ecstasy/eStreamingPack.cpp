@@ -666,9 +666,16 @@ int eStreamPackLoader::TestLoadStreamingEntry(unsigned int *name_hash_table, int
         }
     }
 
-    // TODO
-
+    // PC (speed.exe 1.3 @ 0x5087A0): returns the bytes that didn't fit.
+    if (error_if_out_in_main_pool && amount_not_alloc_main_mem != 0) {
+        bBreak();
+    }
+    // The list's nodes live in load_info_table: unlink them before freeing it.
+    while (!load_info_list.IsEmpty()) {
+        load_info_list.RemoveHead();
+    }
     bFree(load_info_table);
+    return amount_not_alloc;
 }
 
 bool eStreamPackLoader::DefragmentAllocation(void *allocation) {

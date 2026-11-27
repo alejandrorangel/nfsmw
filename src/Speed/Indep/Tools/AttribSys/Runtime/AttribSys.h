@@ -584,7 +584,20 @@ class Attribute {
     bool SetLength(unsigned int);
     void SendChangeMsg() const;
     // TODO
+#if defined(EA_PORT_NATIVE)
+    // Declared but never defined in the decomp (every use linked to a stub
+    // returning a null reference). The element, or a zeroed T when absent.
+    template <typename T> const T &Get(unsigned int index) const {
+        const T *resultptr = reinterpret_cast<const T *>(GetElementPointer(index));
+        if (resultptr != nullptr) {
+            return *resultptr;
+        }
+        static const T empty = T();
+        return empty;
+    }
+#else
     template <typename T> const T &Get(unsigned int index) const;
+#endif
 
     void operator delete(void *ptr, std::size_t bytes) {
         Free(ptr, bytes, "Attrib::Attribute");

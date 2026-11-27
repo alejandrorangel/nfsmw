@@ -410,10 +410,10 @@ class CustomizeParts : public CustomizationScreen {
     void LoadNextHudTexturePack();
     void TexturePackLoadedCallback();
     void TextureLoadedCallback();
-    static void TexturePackLoadedCallbackAccessor(uint32 parts_screen) {
+    static void TexturePackLoadedCallbackAccessor(uintptr_t parts_screen) {
         reinterpret_cast<CustomizeParts *>(parts_screen)->TexturePackLoadedCallback();
     }
-    static void TextureLoadedCallbackAccessor(uint32 parts_screen) {
+    static void TextureLoadedCallbackAccessor(uintptr_t parts_screen) {
         reinterpret_cast<CustomizeParts *>(parts_screen)->TextureLoadedCallback();
     }
     void ShowHudObjects();

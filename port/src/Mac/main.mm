@@ -116,6 +116,9 @@ int main(int argc, const char *argv[]) {
     g_argc = argc;
     g_argv = const_cast<char **>(argv);
     @autoreleasepool {
+        // No window state restoration: after a crash or a killed run, AppKit
+        // would otherwise block launch with a modal "reopen windows?" prompt.
+        [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"ApplePersistenceIgnoreState"];
         NSApplication *app = [NSApplication sharedApplication];
         [app setActivationPolicy:NSApplicationActivationPolicyRegular];
         AppDelegate *delegate = [[AppDelegate alloc] init];

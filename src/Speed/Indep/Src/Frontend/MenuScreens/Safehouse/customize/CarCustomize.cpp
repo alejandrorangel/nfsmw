@@ -1319,7 +1319,7 @@ void CustomizeCategoryScreen::NotificationMessage(u32 msg, FEObject *pobj, u32 p
             CustomizeMainOption *opt = static_cast<CustomizeMainOption *>(Options.GetCurrentOption());
             Showcase::FromArgs = Category | CC_MAKE_HIWORD(opt->Category);
             Showcase::FromPackage = GetPackageName();
-            cFEng::Get()->QueuePackageSwitch("Showcase.fng", reinterpret_cast<int>(gCarCustomizeManager.GetTuningCar()), 0, false);
+            cFEng::Get()->QueuePackageSwitch("Showcase.fng", reinterpret_cast<intptr_t>(gCarCustomizeManager.GetTuningCar()), 0, false);
             break;
         }
         case dialog_message_cancelled:
@@ -2783,7 +2783,7 @@ void CustomizeParts::LoadNextHudTexturePack() {
     char sztemp[64];
     bSPrintf(sztemp, "GLOBAL\\HUDS_Custom_%2.2d.bin", PacksLoadedCount);
     CustomizeHUDTexPackResources[PacksLoadedCount] =
-        (eLoadStreamingTexturePack(sztemp, TexturePackLoadedCallbackAccessor, reinterpret_cast<uint32>(this), 0) != 0);
+        (eLoadStreamingTexturePack(sztemp, TexturePackLoadedCallbackAccessor, reinterpret_cast<uintptr_t>(this), 0) != 0);
 }
 
 void CustomizeParts::TexturePackLoadedCallback() {
@@ -2794,7 +2794,7 @@ void CustomizeParts::TexturePackLoadedCallback() {
     CustomizeHUDTexTextureResources[hud_num][2] = FEngHashString("TURBO_LINES_%2.2d", hud_num);
     CustomizeHUDTexTextureResources[hud_num][3] = FEngHashString("TACH_NEEDLE_%2.2d", hud_num);
     CustomizeHUDTexTextureResources[hud_num][4] = FEngHashString("TURBO_NEEDLE_%2.2d", hud_num);
-    eLoadStreamingTexture(CustomizeHUDTexTextureResources[hud_num], 5, TextureLoadedCallbackAccessor, reinterpret_cast<uint32>(this), 0);
+    eLoadStreamingTexture(CustomizeHUDTexTextureResources[hud_num], 5, TextureLoadedCallbackAccessor, reinterpret_cast<uintptr_t>(this), 0);
 }
 
 void CustomizeParts::TextureLoadedCallback() {
@@ -4255,7 +4255,7 @@ void CustomizeNumbers::NotificationMessage(u32 msg, FEObject *pobj, u32 param1, 
             Showcase::FromArgs = Category | CC_MAKE_HIWORD(FromCategory);
             Showcase::FromPackage = GetPackageName();
             bShowcaseOn = true;
-            cFEng::Get()->QueuePackageSwitch("Showcase.fng", reinterpret_cast<uint32>(gCarCustomizeManager.GetTuningCar()), 0, false);
+            cFEng::Get()->QueuePackageSwitch("Showcase.fng", reinterpret_cast<intptr_t>(gCarCustomizeManager.GetTuningCar()), 0, false);
             break;
         case __PAD_START__:
             CustomizeShoppingCart::ShowShoppingCart(GetPackageName());

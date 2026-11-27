@@ -30,7 +30,7 @@ class FEPackageData : public bTNode<FEPackageData> {
         return MyChunk->GetID() == BCHUNK_FENG_COMPRESSED_PACKAGE;
     }
 
-    void Activate(FEPackage *pkg, int arg);
+    void Activate(FEPackage *pkg, intptr_t arg);
 
     void NotificationMessage(u32 Message, FEObject *pObject, u32 Param1, u32 Param2);
 
@@ -51,10 +51,10 @@ class FEPackageData : public bTNode<FEPackageData> {
         return IsPermanent;
     }
 
-    void SetArgument(int pArg) { // Decl: 34
+    void SetArgument(intptr_t pArg) { // Decl: 34
         mArg = pArg;
     }
-    int GetArgument() { // Decl: 35
+    intptr_t GetArgument() { // Decl: 35
         return mArg;
     }
 
@@ -101,7 +101,7 @@ class FEPackageData : public bTNode<FEPackageData> {
     int16 IsVisible;                // offset 0x22, size 0x2, Decl: 60
     ScreenFactoryDatum *CreateData; // offset 0x24, size 0x4, Decl: 61
     FEPackageRenderInfo RenderInfo; // offset 0x28, size 0x8
-    int mArg;                       // offset 0x30, size 0x4, Decl: 62
+    intptr_t mArg;                  // offset 0x30, size 0x4, Decl: 62 (screens pass pointers)
 
     static int mInScreenConstructor; // size: 0x4, address: 0x8041CB60, Decl: 730
 };

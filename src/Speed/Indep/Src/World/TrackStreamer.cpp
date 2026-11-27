@@ -1886,7 +1886,7 @@ void TrackStreamer::MakeSpaceInPool(int size, void (*callback)(intptr_t), intptr
         this->MakeSpaceInPoolCallback = callback;
         this->MakeSpaceInPoolCallbackParam = param;
         this->pCallback = ReadyToMakeSpaceInPoolBridge;
-        this->CallbackParam = reinterpret_cast<int>(this);
+        this->CallbackParam = reinterpret_cast<intptr_t>(this);
     }
 }
 

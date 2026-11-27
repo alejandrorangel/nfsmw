@@ -8,6 +8,8 @@
 #include "Speed/Indep/Src/Ecstasy/Ecstasy.hpp"
 #include "Speed/Indep/Src/Ecstasy/EcstasyData.hpp"
 #include "Speed/Indep/Src/Ecstasy/Texture.hpp"
+#include "Speed/Indep/Src/Camera/Camera.hpp"
+#include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/FEPkg_GarageMain.hpp"
 #include "Speed/Indep/Src/Misc/ResourceLoader.hpp"
 #include "Speed/Indep/bWare/Inc/bWare.hpp"
 
@@ -189,14 +191,83 @@ void SmokeDraw() {
 
 } // namespace
 
+void RenderFrontEndCars(eView *view, int reflection); // CarRender.cpp
+
+namespace {
+
+// The view's camera: world -> camera (D3D-style, camera y down) times a
+// projection whose field of view is horizontal at 4:3 and kept vertical for
+// wider windows (Hor+), into Metal clip space.
+bool ViewProjectionFor(eView *view, M44 out) {
+    Camera *camera = view->GetCamera();
+    if (camera == nullptr) {
+        return false;
+    }
+    float fov_h = camera->GetFieldOfView() * (2.0f * 3.1415927f / 65536.0f);
+    if (fov_h <= 0.0f) {
+        return false;
+    }
+    float znear = camera->GetNearZ() > 0.0f ? camera->GetNearZ() : 0.5f;
+    float zfar = camera->GetFarZ() > znear ? camera->GetFarZ() : 12000.0f;
+    float sx43 = 1.0f / std::tan(fov_h * 0.5f);
+    float sy = sx43 * (4.0f / 3.0f);
+    float sx = sy / PortMetalViewAspect();
+    float a = zfar / (zfar - znear);
+    float b = -znear * zfar / (zfar - znear);
+    M44 proj = {sx, 0, 0, 0, 0, -sy, 0, 0, 0, 0, a, 1, 0, 0, b, 0};
+    M44 world_to_camera;
+    std::memcpy(world_to_camera, camera->GetWorldToCameraMatrix(), sizeof(M44));
+    Multiply(out, world_to_camera, proj);
+    return true;
+}
+
+// Frontend: the garage backdrop and the player's car (PC ___eDisplayFrame,
+// game flow state 3: GarageMainScreen::HandleRender(1), RenderFrontEndCars).
+bool RenderFrontEndScene() {
+    GarageMainScreen *garage = GarageMainScreen::GetInstance();
+    if (garage == nullptr) {
+        return false;
+    }
+    eView *view = eGetView(1, false);
+    M44 view_proj;
+    if (!ViewProjectionFor(view, view_proj)) {
+        return false;
+    }
+    PortMetal3DBeginFrame(view_proj);
+    garage->HandleRender(1);
+    RenderFrontEndCars(view, 0);
+    return true;
+}
+
+} // namespace
+
+// eViewPlatInterface::Render(eModel *...): one model instance into the
+// current 3D frame. Lighting and blending matrices come with the shaders.
+void eViewPlatInterface::Render(eModel *model, bMatrix4 *local_to_world, eLightContext *light_context, uint32 flags,
+                                bMatrix4 *blending_matricies) {
+    if (model == nullptr || model->GetSolid() == nullptr) {
+        return;
+    }
+    M44 world;
+    if (local_to_world) {
+        std::memcpy(world, local_to_world, sizeof(M44));
+    } else {
+        Identity(world);
+    }
+    DrawSolid(model->GetSolid(), world);
+}
+
 // Builds this frame's 3D scene (published with the frontend).
 void PortRenderScene(int frame) {
     M44 view_proj;
     Identity(view_proj);
-    bool smoke = SmokeSetup(frame, view_proj);
-    PortMetal3DBeginFrame(view_proj);
-    if (smoke) {
+    if (SmokeSetup(frame, view_proj)) {
+        PortMetal3DBeginFrame(view_proj);
         PortMetal3DSetOverlay(true);
         SmokeDraw();
+        return;
+    }
+    if (!RenderFrontEndScene()) {
+        PortMetal3DBeginFrame(view_proj);
     }
 }

@@ -340,7 +340,7 @@ void HudResourceManager::LoadingCompleteCallback() {
             int num_textures_to_load = 1;
             uint32 textures_to_load[16];
             textures_to_load[0] = bStringHash(texture_name);
-            eLoadStreamingTexture(textures_to_load, num_textures_to_load, LoadingCompleteCallbackBridge, reinterpret_cast<uint32>(this),
+            eLoadStreamingTexture(textures_to_load, num_textures_to_load, LoadingCompleteCallbackBridge, reinterpret_cast<uintptr_t>(this),
                                   BMEMORY_MAIN_POOL);
         } else {
             LoadingCompleteCallback();
@@ -357,7 +357,7 @@ void HudResourceManager::LoadingCompleteCallback() {
             ChooseLoadableTextures(LoadingResourcesForHudType, mTachLinesHash, redlineRotation);
             FEngSetMultiImageRot(reinterpret_cast<FEMultiImage *>(FEngFindObject(mPackageName, 0xcdfce1b0)), redlineRotation);
             FEngSetTextureHash(mPackageName, 0x309878bc, static_cast<uint32>(mTachLinesHash));
-            eLoadStreamingTexture(static_cast<uint32>(mTachLinesHash), LoadingCompleteCallbackBridge, reinterpret_cast<uint32>(this),
+            eLoadStreamingTexture(static_cast<uint32>(mTachLinesHash), LoadingCompleteCallbackBridge, reinterpret_cast<uintptr_t>(this),
                                   BMEMORY_MAIN_POOL);
         }
     } else if (mPhase == 3) {

@@ -58,7 +58,7 @@ void uiRepSheetRivalBio::NotificationMessage(u32 msg, FEObject *obj, u32 param1,
                 Showcase::FromArgs = 0;
                 Showcase::FromPackage = GetPackageName();
                 Showcase::BlackListNumber = iCurrentViewBin;
-                cFEng::Get()->QueuePackageSwitch("Showcase.fng", reinterpret_cast<int>(pCar), 0, false);
+                cFEng::Get()->QueuePackageSwitch("Showcase.fng", reinterpret_cast<intptr_t>(pCar), 0, false);
             }
             break;
         case __PAD_BUTTON4__:

@@ -420,7 +420,11 @@ void GarageMainScreen::RefreshBackground() {
         eRemoveFEEnvMapPlat();
         eInitFEEnvMapPlat();
         UnloadResourceFile(pGarageBackground);
+#if defined(EA_PORT_NATIVE)
+        GameFlowLoadGarageScreen(reinterpret_cast<ASYNCFILE_CALLBACK *>(BackgroundLoaded), 0);
+#else
         GameFlowLoadGarageScreen(BackgroundLoaded, 0);
+#endif
     }
 }
 
@@ -541,7 +545,12 @@ float GarageMainScreen::GetGeometryZPos() {
 
 void GarageMainScreen::UpdateRenderingCarParameters(FrontEndRenderingCar *fe_car) {
     RideInfo *loaded_ride_info = fe_car->GetRideInfo();
+#if defined(EA_PORT_NATIVE)
+    // The 32-bit build compiled the null test on &fe_car->RideInfo as fe_car == -8.
+    if (loaded_ride_info == nullptr || loaded_ride_info->Type == CARTYPE_NONE || HideEntireScreen) {
+#else
     if (reinterpret_cast<int>(fe_car) == -8 || loaded_ride_info->Type == CARTYPE_NONE || HideEntireScreen) {
+#endif
         fe_car->Visible = 0;
         return;
     }

@@ -238,3 +238,36 @@ bMatrix4 *eInvertRotationMatrix(bMatrix4 *dest, bMatrix4 *src) {
     Store(dest, r);
     return dest;
 }
+
+// PC @ 0x6CF0A0: camera axes as columns, x = normalize(-up x f),
+// y = normalize(f x x), z = f = normalize(center - eye); then translated by
+// -eye (a left-handed look-at; with the game's z-up world, camera y points down).
+void eCreateLookAtMatrix(bMatrix4 *mat, bVector3 &eye, bVector3 &center, bVector3 &up) {
+    auto normalize = [](float v[3]) {
+        float l = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+        if (l > 0.0f) {
+            v[0] /= l, v[1] /= l, v[2] /= l;
+        }
+    };
+    auto cross = [](float out[3], const float a[3], const float b[3]) {
+        float r[3] = {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+        out[0] = r[0], out[1] = r[1], out[2] = r[2];
+    };
+    float f[3] = {center.x - eye.x, center.y - eye.y, center.z - eye.z};
+    normalize(f);
+    float neg_up[3] = {-up.x, -up.y, -up.z};
+    float x[3], y[3];
+    cross(x, neg_up, f);
+    cross(y, f, x);
+    normalize(x);
+    normalize(y);
+    M44 rot = {{x[0], y[0], f[0], 0}, {x[1], y[1], f[1], 0}, {x[2], y[2], f[2], 0}, {0, 0, 0, 1}};
+    M44 tran;
+    Identity(tran);
+    tran[3][0] = -eye.x;
+    tran[3][1] = -eye.y;
+    tran[3][2] = -eye.z;
+    M44 r;
+    Multiply(r, tran, rot);
+    Store(mat, r);
+}

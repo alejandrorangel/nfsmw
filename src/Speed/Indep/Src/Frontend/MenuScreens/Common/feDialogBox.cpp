@@ -306,9 +306,9 @@ dialog_handle DialogInterface::ShowDialog(feDialogConfig *conf) {
 
     if (SecretDialogInfo.Title == dialog_fatalerror) {
         int port = FEDatabase->GetPlayersJoystickPort(0);
-        cFEng::Get()->PushErrorPackage(SecretDialogInfo.DialogPackage, reinterpret_cast<int>(&SecretDialogInfo), FEngMapJoyportToJoyParam(port));
+        cFEng::Get()->PushErrorPackage(SecretDialogInfo.DialogPackage, reinterpret_cast<intptr_t>(&SecretDialogInfo), FEngMapJoyportToJoyParam(port));
     } else {
-        cFEng::Get()->QueuePackagePush(SecretDialogInfo.DialogPackage, reinterpret_cast<int>(&SecretDialogInfo), 0, false);
+        cFEng::Get()->QueuePackagePush(SecretDialogInfo.DialogPackage, reinterpret_cast<intptr_t>(&SecretDialogInfo), 0, false);
     }
     return SecretDialogInfo.DialogHandle;
 }

@@ -810,7 +810,7 @@ int CarLoader::LoadCar(LoadedCar *loaded_car) {
         this->LoadingInProgress = 1;
         StreamingSolidPackLoader.EnableStreamingPack(nullptr);
         profile_node.End();
-        eLoadStreamingSolid(model_hashes, num_model_hashes, LoadedCarCallbackBridge, reinterpret_cast<unsigned int>(loaded_car),
+        eLoadStreamingSolid(model_hashes, num_model_hashes, LoadedCarCallbackBridge, reinterpret_cast<uintptr_t>(loaded_car),
                             CarLoaderMemoryPoolNumber);
         return 1;
     }

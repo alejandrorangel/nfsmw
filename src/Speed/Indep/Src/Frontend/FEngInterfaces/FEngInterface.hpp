@@ -16,12 +16,12 @@ class cFEng {
         return mInstance;
     }
 
-    void QueuePackagePush(const char *pPackageName, int pArg, u32 ControlMask,
+    void QueuePackagePush(const char *pPackageName, intptr_t pArg, u32 ControlMask,
                           bool pSuppressSimPause); // Decl: 31
 
     void QueuePackagePop(int numPackagesToPop); // Decl: 32
 
-    void QueuePackageSwitch(const char *pPackageName, int pArg, u32 ControlMask,
+    void QueuePackageSwitch(const char *pPackageName, intptr_t pArg, u32 ControlMask,
                             bool pSuppressSimPause); // Decl: 30
     void QueuePopChildPackages(const char *pPackageName);
 
@@ -30,7 +30,7 @@ class cFEng {
 
     void PopNoControlPackage(const char *pPackageName); // Decl: 37
 
-    void PushErrorPackage(const char *pPackageName, int pArg, u32 ControlMask); // Decl: 41
+    void PushErrorPackage(const char *pPackageName, intptr_t pArg, u32 ControlMask); // Decl: 41
     void PopErrorPackage();                                                     // Decl: 42
     bool IsErrorState() {                                                       // Decl: 43
 #ifdef EA_PLATFORM_WIN32
