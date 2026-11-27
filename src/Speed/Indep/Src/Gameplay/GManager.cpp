@@ -653,14 +653,14 @@ void GManager::Update(float dT) {
     if (const char *skip = std::getenv("NFSMW_DEBUG_SKIP_RACE")) {
         static bool sSkipped = false;
         GRaceStatus &raceStatus = GRaceStatus::Get();
-        if (raceStatus.GetPlayMode() != GRaceStatus::kPlayMode_Racing || raceStatus.GetRaceParameters() == nullptr) {
+        const char *colon = std::strchr(skip, ':');
+        float delay = colon != nullptr ? static_cast<float>(std::atof(colon + 1)) : 5.0f;
+        float elapsed = raceStatus.GetRaceTimeElapsed();
+        if (raceStatus.GetPlayMode() != GRaceStatus::kPlayMode_Racing || raceStatus.GetRaceParameters() == nullptr || elapsed <= delay) {
             sSkipped = false;
         } else if (!sSkipped) {
             int place = std::atoi(skip);
-            const char *colon = std::strchr(skip, ':');
-            float delay = colon != nullptr ? static_cast<float>(std::atof(colon + 1)) : 5.0f;
-            float elapsed = raceStatus.GetRaceTimeElapsed();
-            if (elapsed > delay) {
+            {
                 sSkipped = true;
                 std::fprintf(stderr, "[race] NFSMW_DEBUG_SKIP_RACE: finishing in place %d\n", place);
                 raceStatus.SkipToEndOfRaceInPlace(place < 1 ? 1 : place, elapsed + 60.0f);
@@ -669,6 +669,9 @@ void GManager::Update(float dT) {
     }
     // NFSMW_TRACE_LUA: the race status every 5 s of sim time.
     static float sNextTrace = 0.0f;
+    if (Sim::GetTime() + 5.0f < sNextTrace) {
+        sNextTrace = 0.0f; // a new race
+    }
     if (std::getenv("NFSMW_TRACE_LUA") != nullptr && Sim::GetTime() >= sNextTrace) {
         sNextTrace = Sim::GetTime() + 5.0f;
         GRaceStatus &raceStatus = GRaceStatus::Get();

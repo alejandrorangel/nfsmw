@@ -177,6 +177,18 @@ void PostRaceResultsScreen::Setup() {
     }
 }
 
+#if defined(EA_PORT_NATIVE)
+static GRacerInfo *PortRacerInfoByRank(int rank, int fallback) {
+    GRaceStatus &raceStatus = GRaceStatus::Get();
+    for (int j = 0; j < raceStatus.GetRacerCount(); j++) {
+        if (raceStatus.GetRacerInfo(j).GetRanking() == rank) {
+            return &raceStatus.GetRacerInfo(j);
+        }
+    }
+    return &raceStatus.GetRacerInfo(fallback);
+}
+#endif
+
 void PostRaceResultsScreen::SetupResults() {
     FEngSetVisible(GetPackageName(), 0x586AB4A6);
     FEngSetVisible(GetPackageName(), 0x44AC8987);
@@ -214,12 +226,18 @@ void PostRaceResultsScreen::SetupResults() {
         case GRace::kRaceType_Knockout:
         case GRace::kRaceType_Tollbooth:
             for (int i = 0; i < mNumberOfRacers; i++) {
+#if defined(EA_PORT_NATIVE)
+                // PC 0x5964A0: the racer ranked i + 1 (the decomp's search
+                // started at rank 0 and ran off the racer table).
+                GRacerInfo *info = PortRacerInfoByRank(i + 1, i);
+#else
                 int rank = 0;
 
                 GRacerInfo *info = &GRaceStatus::Get().GetRacerInfo(rank);
                 while (info->GetRanking() != rank) {
                     info = &GRaceStatus::Get().GetRacerInfo(rank++);
                 }
+#endif
                 ResultStat *stat = new ("RaceResultStat", 0)
                     RaceResultStat(RaceResults.GetCurrentString("COLUMN2_DATA"), RaceResults.GetCurrentString("COLUMN3_DATA"),
                                    RaceResults.GetCurrentString("COLUMN1_DATA"), info);
@@ -228,12 +246,18 @@ void PostRaceResultsScreen::SetupResults() {
             break;
         case GRace::kRaceType_SpeedTrap:
             for (int i = 0; i < mNumberOfRacers; i++) {
+#if defined(EA_PORT_NATIVE)
+                // PC 0x5964A0: the racer ranked i + 1 (the decomp's search
+                // started at rank 0 and ran off the racer table).
+                GRacerInfo *info = PortRacerInfoByRank(i + 1, i);
+#else
                 int rank = 0;
 
                 GRacerInfo *info = &GRaceStatus::Get().GetRacerInfo(rank);
                 while (info->GetRanking() != rank) {
                     info = &GRaceStatus::Get().GetRacerInfo(rank++);
                 }
+#endif
 
                 float totalSpeed = info->GetPointTotal();
                 if (FEDatabase->GetGameplaySettings()->SpeedoUnits == 0) {
