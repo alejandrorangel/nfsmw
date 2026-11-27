@@ -9,7 +9,7 @@
 #include "Speed/Indep/Src/Generated/Events/ESndGameState.hpp"
 #include "Speed/Indep/bWare/Inc/Strings.hpp"
 
-static bool bSawLoadingScreen = false;
+bool bSawLoadingScreen = false; // PC: global, cleared by ELoadingScreenOn
 
 void *LoadingScreen::mLoadingScreenPtr;
 

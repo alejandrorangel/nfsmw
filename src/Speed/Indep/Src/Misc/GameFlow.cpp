@@ -102,7 +102,11 @@ const char *HudSplitScreenTexturePackFilename = "GLOBAL\\HUDTEXSPLIT.BIN"; // De
 const char *HudDragSplitScreenTexturePackFilename = "GLOBAL\\HUDTEXDRAGSPLIT.BIN";
 const char *LoadingBootName = "loading_boot.fng"; // Decl: 218
 
+#ifdef EA_PLATFORM_WIN32
+const char *LoadingControllerScreenPackageName = "PC_Loading.fng"; // PC: 0x8F7EEC
+#else
 const char *LoadingControllerScreenPackageName = "Loading_Controller.fng"; // Decl: 220
+#endif
 
 VMFile *pFrontEndVirtualMemBundle = nullptr;
 

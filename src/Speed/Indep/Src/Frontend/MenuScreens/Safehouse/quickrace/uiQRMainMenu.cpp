@@ -66,7 +66,9 @@ void UIQRMainMenu::Setup() {
     } else {
         AddOption(new ("QuickPlay", 0) QuickPlay(0xe6313967, 0xb5e8f82f, 0));
         AddOption(new ("CustomRace", 0) CustomRace(0x2a49b5e2, 0x25bbd4c3, 0));
+#ifndef EA_PLATFORM_WIN32 // PC: UIQRMainMenu::Setup 0x7AA730 has no split-screen icon
         AddOption(new ("SplitScreen", 0) SplitScreen(0xf365b5f5, 0x841d518a, 0));
+#endif
     }
     SetInitialOption(FEngGetLastButton(GetPackageName()));
     FEDatabase->RefreshCurrentRide();

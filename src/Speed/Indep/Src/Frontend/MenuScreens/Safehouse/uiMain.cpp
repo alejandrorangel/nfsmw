@@ -13,6 +13,10 @@
 #include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/FEPkg_GarageMain.hpp"
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterface.hpp"
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterfaceFEObjects.hpp"
+#ifdef EA_PLATFORM_WIN32
+#include "Speed/Indep/Src/Frontend/FEManager.hpp"
+#include "Speed/Indep/Src/Frontend/FEngFrontend.hpp"
+#endif
 
 const char *gOnlineMainMenu = "OL_MAIN.fng";
 
@@ -39,6 +43,46 @@ class MainCustomize : public IconOption {
         FEDatabase->SetGameMode(eFE_GAME_MODE_CUSTOMIZE);
     };
 };
+
+#ifdef EA_PLATFORM_WIN32
+#ifndef EA_PORT_NATIVE
+void AllocOnlineMemoryPool();
+class OnlineLoginScreenManager {
+  public:
+    static void EnterFront(const char *pkg_name);
+};
+#endif
+
+// PC: MainLAN::React 0x51AD70
+class MainLAN : public IconOption {
+  public:
+    MainLAN(uint32 tex_hash, uint32 name_hash, uint32 desc_hash) : IconOption(tex_hash, name_hash, desc_hash) {}
+    ~MainLAN() override {}
+    void React(const char *pkg_name, uint32 data, FEObject *obj, uint32 param1, uint32 param2) override {
+        if (data != __BUTTON_PRESSED__)
+            return;
+        FEDatabase->SetGameMode(eFE_GAME_MODE_LAN);
+#ifndef EA_PORT_NATIVE
+        AllocOnlineMemoryPool();
+#endif
+        FEDatabase->SetPlayersJoystickPort(0, FEngMapJoyParamToJoyport(param1));
+    }
+};
+
+// PC: MainOnline::React 0x51ADE0
+class MainOnline : public IconOption {
+  public:
+    MainOnline(uint32 tex_hash, uint32 name_hash, uint32 desc_hash) : IconOption(tex_hash, name_hash, desc_hash) {}
+    ~MainOnline() override {}
+    void React(const char *pkg_name, uint32 data, FEObject *obj, uint32 param1, uint32 param2) override {
+        if (data != __BUTTON_PRESSED__)
+            return;
+        FEDatabase->SetPlayersJoystickPort(0, FEngMapJoyParamToJoyport(param1));
+        FEManager::Get()->AllowControllerError(true);
+        FEDatabase->SetGameMode(eFE_GAME_MODE_ONLINE);
+    }
+};
+#endif
 
 class MainProfileManager : public IconOption {
   public:
@@ -102,6 +146,77 @@ UIMain::UIMain(ScreenConstructorData *sd) : IconScrollerMenu(sd) {
     Setup();
 }
 
+#ifdef EA_PLATFORM_WIN32
+// PC: UIMain::NotificationMessage 0x559FC0. Unlike the console build there's no
+// FEHASH_INITCOMPLETE memcard autoload and no 0x7E998E5E profile refresh; the
+// LAN/Online icons lead into the PC network flows.
+void UIMain::NotificationMessage(u32 msg, FEObject *obj, u32 param1, u32 param2) {
+    IconScrollerMenu::NotificationMessage(msg, obj, param1, param2);
+    switch (msg) {
+        case 0xc6c6b68f:
+#ifdef EA_PORT_NATIVE
+            // TODO(port): online isn't ported (PC: AllocOnlineMemoryPool +
+            // OnlineLoginScreenManager::EnterFront); come back to the menu.
+            FEDatabase->ClearGameMode(eFE_GAME_MODE_ONLINE);
+            cFEng::Get()->QueuePackageSwitch("MainMenu.fng", 0, 0, false);
+#else
+            AllocOnlineMemoryPool();
+            OnlineLoginScreenManager::EnterFront(GetPackageName());
+#endif
+            break;
+        case 0x1265ece9:
+            GarageMainScreen::GetInstance()->UpdateCurrentCameraView(false);
+            break;
+        case 0x34dc1bcf:
+            cFEng::Get()->QueuePackageSwitch("MainMenu.fng", 0, 0, false);
+            break;
+        case __PAD_BUTTON5__:
+            if (FEDatabase->bProfileLoaded) {
+                cFEng::Get()->QueuePackageMessage(FEHashUpper(m_bStatsShowing ? "GAMESTATS_LEAVE" : "GAMESTATS_APPEAR"), GetPackageName(), nullptr);
+                m_bStatsShowing = !m_bStatsShowing;
+            }
+            break;
+        case 0xd05fc3a3:
+            MemoryCard::GetInstance()->SetAutoSaveEnabled(false);
+            break;
+        case FEHASH_EXITCOMPLETE:
+            if (PrevButtonMessage != __BUTTON_PRESSED__) {
+                break;
+            }
+            if (FEDatabase->IsCareerMode() || FEDatabase->IsCareerManagerMode() || FEDatabase->IsQuickRaceMode() || FEDatabase->IsOptionsMode()) {
+                cFEng::Get()->QueuePackageSwitch("MainMenu_Sub.fng", 0, 0, false);
+            } else if (FEDatabase->IsProfileManagerMode()) {
+                cFEng::Get()->QueuePackageSwitch("MC_ProfileManager.fng", 0, 0, false);
+            } else if (FEDatabase->IsChallengeMode()) {
+                cFEng::Get()->QueuePackageSwitch("ChallengeSeries.fng", 0, 0, false);
+            } else if (FEDatabase->IsLANMode()) {
+#ifdef EA_PORT_NATIVE
+                // TODO(port): the PC LAN screens (UI_PC_LAN_ServerSelect.fng,
+                // UI_PC_LAN.fng) have no screen classes natively; stay on the
+                // main menu instead.
+                FEDatabase->ClearGameMode(eFE_GAME_MODE_LAN);
+                cFEng::Get()->QueuePackageSwitch("MainMenu.fng", 0, 0, false);
+#else
+                cFEng::Get()->QueuePackageSwitch("UI_PC_LAN_ServerSelect.fng", 0, 0, false);
+#endif
+            } else if (FEDatabase->IsOnlineMode()) {
+#ifdef EA_PORT_NATIVE
+                // TODO(port): PC queues 0xD05FC3A3 to itself here (autosave
+                // off), then enters the online login flow on 0xC6C6B68F.
+                // Online isn't ported, so stay on the main menu and leave
+                // autosave alone.
+                FEDatabase->ClearGameMode(eFE_GAME_MODE_ONLINE);
+                cFEng::Get()->QueuePackageSwitch("MainMenu.fng", 0, 0, false);
+#else
+                cFEng::Get()->QueueGameMessage(0xd05fc3a3, GetPackageName(), 0xff);
+#endif
+            } else if (FEDatabase->IsCustomizeMode()) {
+                cFEng::Get()->QueuePackageSwitch("MyCarsManager.fng", 0, 0, false);
+            }
+            break;
+    }
+}
+#else
 void UIMain::NotificationMessage(u32 msg, FEObject *obj, u32 param1, u32 param2) {
     IconScrollerMenu::NotificationMessage(msg, obj, param1, param2);
     switch (msg) {
@@ -147,6 +262,7 @@ void UIMain::NotificationMessage(u32 msg, FEObject *obj, u32 param1, u32 param2)
             break;
     }
 }
+#endif
 
 void UIMain::Setup() {
     const u32 FEObj_TITLEGROUP = __TITLE_GROUP__;
@@ -167,6 +283,11 @@ void UIMain::Setup() {
         AddOption(new ("Challenge", 0) Challenge(0x9a962438, 0xcc8cb746, 0));
         AddOption(new ("MainQuickRace", 0) MainQuickRace(0x4e6fbb02, 0x54020a7a, 0));
         AddOption(new ("MainCustomize", 0) MainCustomize(0xb0c46023, 0x1afd5be6, 0));
+#ifdef EA_PLATFORM_WIN32
+        // PC: UIMain::Setup 0x544E50 adds the LAN and Online icons here.
+        AddOption(new ("MainLAN", 0) MainLAN(0xd13a2e66, 0xd6db74de, 0));
+        AddOption(new ("MainOnline", 0) MainOnline(0x771849a5, 0x74fb90a8, 0));
+#endif
         if (IsMemcardEnabled) {
             AddOption(new ("MainProfileManager", 0) MainProfileManager(0x6b303856, 0xbcb18f38, 0));
         }

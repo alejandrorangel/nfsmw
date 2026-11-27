@@ -8,6 +8,8 @@
 #include "Speed/Indep/Src/Generated/Events/EFadeScreenOff.hpp"
 #include "Speed/Indep/Src/Generated/Events/EFadeScreenOn.hpp"
 #include "Speed/Indep/Src/Generated/Events/EGTriggerInternal.hpp"
+#include "Speed/Indep/Src/Generated/Events/ELoadingScreenOff.hpp"
+#include "Speed/Indep/Src/Generated/Events/ELoadingScreenOn.hpp"
 #include "Speed/Indep/Src/Generated/Events/ESndGameState.hpp"
 #include "Speed/Indep/Src/Generated/Events/ESimulate.hpp"
 #include "Speed/Indep/Src/Main/Event.h"
@@ -25,6 +27,8 @@ const EventEntry kEvents[] = {
     {0xC34649C0, EGTriggerInternal_MakeEvent_Callback},
     {0x5F8C3748, EFadeScreenOn_MakeEvent_Callback},
     {0x77803D76, EFadeScreenOff_MakeEvent_Callback},
+    {0x28F13822, ELoadingScreenOn_MakeEvent_Callback},
+    {0x396E0F75, ELoadingScreenOff_MakeEvent_Callback},
     {0x75B0D22B, ESndGameState_MakeEvent_Callback},
     {0x2AF7332B, EEnterBin_MakeEvent_Callback},
     // TODO(port): ECinematicMoment (0x7D2B68BD) needs its name pointers

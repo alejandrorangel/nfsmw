@@ -56,6 +56,11 @@ void uiCareerManager::Setup() {
     AddOption(pLoadOption);
 
     if (FEDatabase->GetCareerSettings()->IsGameOver()) {
+#ifdef EA_PLATFORM_WIN32
+        // PC: uiCareerManager::Setup 0x532890 hides the PC back button once the
+        // career is over (there's nowhere to go back to).
+        FEngSetInvisible(GetPackageName(), FEHashUpper("PC BACK"));
+#endif
         SetInitialOption(Options.GetOptionIndex(pLoadOption));
     } else {
         SetInitialOption(FEngGetLastButton(GetPackageName()));

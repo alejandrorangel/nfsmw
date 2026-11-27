@@ -46,6 +46,10 @@
 
 #include "Speed/Indep/Src/Generated/Events/EFadeScreenOff.cpp"
 
+#include "Speed/Indep/Src/Generated/Events/ELoadingScreenOn.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/ELoadingScreenOff.cpp"
+
 #include "Speed/Indep/Src/Generated/Events/ESndGameState.cpp"
 
 #include "Speed/Indep/Src/Generated/Events/ECinematicMoment.cpp"
