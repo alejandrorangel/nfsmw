@@ -8,6 +8,8 @@
 //   view 3   own camera, shares view 1's rain (active)
 //   view 4   view 1's camera and rain (active)
 //   view 15  own camera, view 1's rain (active)
+//   PC view 15 (0x919C70, the shadow map view: static camera 0x986F70, set by
+//   0x6C0883) is this decomp's EVIEW_SHADOWMAP1 (13).
 // Render targets come with the 3D renderer.
 
 #include "Speed/Indep/Src/Camera/Camera.hpp"
@@ -59,6 +61,10 @@ void epInitViews() {
     eView *view8 = eGetView(8, false);
     view8->pCamera = camera_view8;
     view8->Active = 1;
+
+    eView *shadow_view = eGetView(EVIEW_SHADOWMAP1, false);
+    shadow_view->pCamera = new Camera();
+    shadow_view->Active = 1;
 
     eView *view15 = eGetView(15, false);
     view15->pCamera = camera_view15;

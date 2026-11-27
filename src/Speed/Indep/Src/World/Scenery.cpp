@@ -1167,9 +1167,17 @@ void GrandSceneryCullInfo::StuffScenery(eView *view, int stuff_flags) {
     } else if (stuff_flags & 8) {
         exclude_flags = 0x2000;
     }
+#if defined(EA_PLATFORM_WIN32)
+    // PC (0x723FA0): the shadow map's Shadow Detail 1 pass (0x2000) also
+    // stuffs only the 0x10000 (shadow caster) instances.
+    if (stuff_flags & 0x2300) {
+        exclusive_flags = 0x10000;
+    }
+#else
     if (stuff_flags & 0x300) {
         exclusive_flags = 0x10000;
     }
+#endif
     if (stuff_flags & 0x800) {
         exclude_flags |= 0x400000;
     }
@@ -1228,6 +1236,31 @@ void GrandSceneryCullInfo::StuffScenery(eView *view, int stuff_flags) {
             if (info->SceneryInst->ExcludeFlags & 0x80000) {
                 flags |= 0x400000;
             }
+#if defined(EA_PLATFORM_WIN32)
+            // PC (0x723FA0): shadow casters are the 0x100000 / 0x200000
+            // instances (not shadow-map meshes, 0x4000000) and 0x40000000 at
+            // Shadow Detail 2 (0x200), only 0x40000000 at 1 (0x2000).
+            {
+                unsigned int inst = info->SceneryInst->ExcludeFlags;
+                bool isShadowMapMesh = (inst & 0x4000000) != 0;
+                if (stuff_flags & 0x200) {
+                    if ((inst & 0x300000) != 0 && !isShadowMapMesh) {
+                        flags |= 0x10000;
+                    }
+                    if ((inst & 0x40000000) != 0) {
+                        flags |= 0x10000;
+                    }
+                }
+                if ((stuff_flags & 0x2000) && (inst & 0x40000000) != 0) {
+                    flags |= 0x10000;
+                }
+                if (stuff_flags & 0x100) {
+                    if ((inst & 0x40300000) != 0) {
+                        flags |= 0x10000;
+                    }
+                }
+            }
+#else
             if (stuff_flags & 0x200) {
                 bool isShadowMapMesh = (info->SceneryInst->ExcludeFlags & 0x4000000) != 0;
                 if ((info->SceneryInst->ExcludeFlags & 0x200000) != 0 && !isShadowMapMesh) {
@@ -1245,6 +1278,7 @@ void GrandSceneryCullInfo::StuffScenery(eView *view, int stuff_flags) {
                     flags |= 0x10000;
                 }
             }
+#endif
             if (vis_state == EVISIBLESTATE_FULL) {
                 flags |= 4;
             }

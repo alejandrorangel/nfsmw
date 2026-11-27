@@ -173,6 +173,7 @@ struct Draw3D {
     float material[20];
     float lights[28];
     float envmap[12];
+    uint32_t shadow_level;
 };
 
 // One face of the dynamic environment cube (PC env-map views).
@@ -195,6 +196,13 @@ struct Frame3D {
     PortVisualTreatment vt;
     id<MTLTexture> gain_map;
     PortWorldFog fog = {};
+    // PC shadow map pass (PortMetal3DBeginShadow).
+    bool shadow_active = false;
+    float shadow_view_proj[16];
+    std::vector<Draw3D> shadow_draws;
+    bool shadow_transform_set = false;
+    float shadow_transform[16];
+    float inv_shadow_strength = 0;
 };
 static Frame3D g3DBuilding;
 static Frame3D g3DPublished;
@@ -220,6 +228,27 @@ void PortMetal3DBeginFrame(const float view_proj[16]) {
     g3DBuilding.treatment = false;
     g3DBuilding.gain_map = nil;
     g3DBuilding.fog = {};
+    g3DBuilding.shadow_active = false;
+    g3DBuilding.shadow_draws.clear();
+    g3DBuilding.shadow_transform_set = false;
+    g3DBuilding.inv_shadow_strength = 0;
+}
+
+void PortMetal3DBeginShadow(const float view_proj[16]) {
+    g3DBuilding.shadow_active = true;
+    g3DBuilding.shadow_draws.clear();
+    memcpy(g3DBuilding.shadow_view_proj, view_proj, sizeof(g3DBuilding.shadow_view_proj));
+    g3DTarget = &g3DBuilding.shadow_draws;
+}
+
+void PortMetal3DEndShadow() {
+    g3DTarget = &g3DBuilding.draws;
+}
+
+void PortMetal3DSetShadowTransform(const float shadow_transform[16], float inv_shadow_strength) {
+    g3DBuilding.shadow_transform_set = true;
+    memcpy(g3DBuilding.shadow_transform, shadow_transform, sizeof(g3DBuilding.shadow_transform));
+    g3DBuilding.inv_shadow_strength = inv_shadow_strength;
 }
 
 void PortMetal3DSetFog(const PortWorldFog *fog) {
@@ -338,6 +367,7 @@ void PortMetal3DAdd(const Port3DDraw *draw) {
         memcpy(d.material, draw->material, sizeof(d.material));
         memcpy(d.lights, draw->lights, sizeof(d.lights));
         memcpy(d.envmap, draw->envmap, sizeof(d.envmap));
+        d.shadow_level = draw->shadow_level;
         g3DTarget->push_back(d);
     }
 }
@@ -395,9 +425,13 @@ fragment float4 fe_fs(FEOut in [[stage_in]], texture2d<float> tex [[texture(0)]]
 // 3D meshes. Vertices are pulled from the raw 36-byte PC layout.
 // view_x: the camera's x axis in world space (first column of the view
 // matrix, so dot(world normal, view_x) is the WorldView x of a model normal).
-struct MeshConst { float4x4 mvp; float4x4 world; uint stride; uint shade; uint effect; uint pad; float4 eye; float4 view_x; };
+// shadow: model -> shadow texture (the effects' ShadowTransform), used when
+// shadow_level > 0; shadow_map: a shadow map was drawn this frame (else
+// every tap reads lit).
+struct MeshConst { float4x4 mvp; float4x4 world; uint stride; uint shade; uint effect; uint pad; float4 eye; float4 view_x;
+                   float4x4 shadow; float inv_shadow; uint shadow_level; uint shadow_map; float pad2; };
 struct MeshOut { float4 pos [[position]]; float2 uv; float4 color; float3 normal; float3 world_pos; float3 local_normal; float3 local_pos;
-                 float4 d0; float4 d1; float3 inscatter; float2 uv1; float spec; float3 tlight; float3 tview; };
+                 float4 d0; float4 d1; float3 inscatter; float2 uv1; float spec; float3 tlight; float3 tview; float4 shadow_pos; };
 
 // PortWorldFog (MetalBridge.h).
 struct WorldFog {
@@ -476,6 +510,8 @@ vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffe
     o.spec = 0;
     o.tlight = 0;
     o.tview = 0;
+    // The shadowed techniques' vertex shaders: oT = v0 * ShadowTransform.
+    o.shadow_pos = c.shadow * p;
     if (NormalMapped(c)) {
         // IDI_WORLDNORMALMAP_FX vs #13 / IDI_WORLDREFLECT_FX vs #13 (technique
         // #0): tangent frame T (tangent), B = (N x T) T.w, N. oT2/oT3 =
@@ -556,13 +592,79 @@ float3 EnvColour(float3 r) {
 
 // EnvMapMatrix rows (Port3DDraw::envmap).
 
+// Shadow map samples (NVIDIA path: texldp on the D24S8 depth texture is a
+// hardware depth compare, bilinearly filtered; ZFUNC LESSEQUAL).
+// ShadowMapScale = 1/1024 (sub_6C86B0); the four-tap techniques offset
+// the projected coordinate by +-0.5 ShadowMapScale w in x and y.
+constant float kShadowMapScale = 1.0 / 1024.0;
+constant float2 kShadowTaps[4] = { float2(-0.5, -0.5), float2(0.5, -0.5), float2(-0.5, 0.5), float2(0.5, 0.5) };
+
+float ShadowCompare(depth2d<float> sm, float4 p) {
+    constexpr sampler ss(compare_func::less_equal, filter::linear, address::clamp_to_edge);
+    return sm.sample_compare(ss, p.xy / p.w, p.z / p.w);
+}
+
+float ShadowColour(texture2d<float> cm, float4 p) {
+    constexpr sampler cs(filter::linear, address::clamp_to_edge);
+    return cm.sample(cs, p.xy / p.w).r;
+}
+
+float4 ShadowTap(float4 p, int i) {
+    return float4(p.xy + kShadowTaps[i] * (kShadowMapScale * p.w), p.zw);
+}
+
+// World effects (IDI_WORLD_FX ps #10 / ps #8 and the WORLDNORMALMAP,
+// WORLDREFLECT, GLOSSYWINDOW equivalents): saturate(depth compare (one tap,
+// or the mean of four) + saturate((0.2 - v) 5) + InvShadowStrength); the
+// middle term fades the shadow out towards the top of the map (far end).
+float WorldShadow(constant MeshConst &c, float4 p, depth2d<float> sm) {
+    if (c.shadow_level == 0 || !c.shadow_map) {
+        return 1.0;
+    }
+    float lit;
+    if (c.shadow_level == 1) {
+        lit = ShadowCompare(sm, p);
+    } else {
+        lit = 0;
+        for (int i = 0; i < 4; i++) {
+            lit += ShadowCompare(sm, ShadowTap(p, i));
+        }
+        lit *= 0.25;
+    }
+    float fade = saturate((0.2 - p.y / p.w) * 5.0);
+    return saturate(lit + fade + c.inv_shadow);
+}
+
+// IDI_CAR_FX ps #8 (one tap) / ps #6 (four): cars in the colour map (red,
+// IDI_CAR_SHADOW_MAP_FX) don't shadow cars, so where it reads > 0.5 (one
+// tap) or more than one of the four taps is a car, the pixel is lit; the
+// factor is lerp(0.2 + InvShadowStrength, 1, lit).
+float CarShadow(constant MeshConst &c, float4 p, depth2d<float> sm, texture2d<float> cm) {
+    if (c.shadow_level == 0 || !c.shadow_map) {
+        return 1.0;
+    }
+    float lit;
+    if (c.shadow_level == 1) {
+        lit = 0.5 - ShadowColour(cm, p) >= 0 ? ShadowCompare(sm, p) : 1.0;
+    } else {
+        float depth = 0, colour = 0;
+        for (int i = 0; i < 4; i++) {
+            float4 t = ShadowTap(p, i);
+            depth += ShadowCompare(sm, t);
+            colour += ShadowColour(cm, t);
+        }
+        lit = 1.0 - colour >= 0 ? depth * 0.25 : 1.0;
+    }
+    return mix(0.2 + c.inv_shadow, 1.0, lit);
+}
+
 struct EnvMatrix { float4 row[3]; };
 
 // PC CAR effect, technique 'car' shader=1 (IDI_CAR_FX vs #11 / ps #10), per
 // pixel: fresnel-style diffuse/specular/envmap ranges from the light
 // material, three directional lights, and a 2*(N.H)^8 highlight.
 float4 CarShade(MeshOut in, float4 t, constant MeshConst &c, constant Material &m, constant Lights &l, bool lit,
-                texturecube<float> env_map, constant EnvMatrix &em) {
+                texturecube<float> env_map, constant EnvMatrix &em, float shadow) {
     float3 light_dir[3] = {normalize(float3(-0.3, -0.4, 0.85)), normalize(float3(0.6, 0.5, 0.3)), normalize(float3(0.0, 0.8, -0.2))};
     float3 light_col[3] = {float3(0.85, 0.85, 0.82), float3(0.35, 0.38, 0.45), float3(0.25, 0.25, 0.28)};
     float3 n = normalize(in.normal);
@@ -591,9 +693,10 @@ float4 CarShade(MeshOut in, float4 t, constant MeshConst &c, constant Material &
     spec = saturate(spec);
     env_strength = saturate(env_strength);
     float highlight;
-    bool technique1 = (c.shade & 64) != 0;
+    // Shadow level 0: technique #0; 1: technique #1 (ps #8); 2: #2 (ps #6).
+    bool technique1 = c.shadow_level != 0;
     if (technique1) {
-        // technique #1 'car' shader=3 (ps #8): Phong highlight from the key
+        // technique #1/#2 'car' shader=3 (ps #8 / #6): Phong highlight from the key
         // light reflected about N, against the eye vector: 2 (R.V)^16.
         float3 refl = 2.0 * dot(n, light_dir[0]) * n - light_dir[0];
         float rv = saturate(dot(refl, v));
@@ -621,10 +724,13 @@ float4 CarShade(MeshOut in, float4 t, constant MeshConst &c, constant Material &
     if (c.shade & 32) {
         return float4(env, 1); // NFSMW_SHADE=envmap: the cube lookup alone
     }
-    // ps #8 also scales the env term by 0.5 and the lit colour by the shadow
-    // map factor (no car shadow map natively yet: 1).
-    float env_scale = technique1 ? 0.5 : 1.0;
-    float3 rgb = t.rgb * d + highlight * diffuse.a * spec + env * env_strength * diffuse.a * env_scale;
+    if (!technique1) {
+        float3 rgb = t.rgb * d + highlight * diffuse.a * spec + env * env_strength * diffuse.a;
+        return float4(rgb, t.a * diffuse.a);
+    }
+    // ps #8 / #6: (t oD0 + highlight oD0.w oD1 s) s + 0.5 env oD1.w oD0.w
+    // (the highlight is scaled by the shadow factor s twice).
+    float3 rgb = (t.rgb * d + highlight * diffuse.a * spec * shadow) * shadow + env * env_strength * diffuse.a * 0.5;
     return float4(rgb, t.a * diffuse.a);
 }
 
@@ -634,6 +740,7 @@ float4 CarShade(MeshOut in, float4 t, constant MeshConst &c, constant Material &
 // draw has an EnvMapMatrix.
 fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(0)]], texturecube<float> env_map [[texture(1)]],
                         texture2d<float> tex2 [[texture(2)]], texture2d<float> tex3 [[texture(3)]],
+                        depth2d<float> shadow_map [[texture(4)]], texture2d<float> shadow_colour [[texture(5)]],
                         constant WorldFog &fog [[buffer(4)]],
                         constant MeshConst &c [[buffer(0)]], constant Material &m [[buffer(1)]], constant Lights &l [[buffer(2)]],
                         constant EnvMatrix &em [[buffer(3)]], sampler s [[sampler(0)]]) {
@@ -642,7 +749,7 @@ fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(
     if (c.shade & 1) {
         out = t;
     } else if (c.effect == 4) {
-        out = CarShade(in, t, c, m, l, (c.shade & 4) != 0, env_map, em);
+        out = CarShade(in, t, c, m, l, (c.shade & 4) != 0, env_map, em, CarShadow(c, in.shadow_pos, shadow_map, shadow_colour));
     } else if (NormalMapped(c)) {
         // ps #12 of IDI_WORLDNORMALMAP_FX / IDI_WORLDREFLECT_FX: N from the
         // normal map, L = normalize(oT2), R = 2 (N.L) N - L, V = normalize(oT3);
@@ -659,7 +766,10 @@ fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(
         bool world_reflect = c.effect == 1;
         float3 spec = pow(rv, fog.specular_power) * fog.specular.rgb * sm * (world_reflect ? 2.0 : 1.0);
         float3 diffuse = fog.lit ? fog.diffuse.rgb : float3(0);
-        float3 col = (t.rgb * (saturate(ndl) * diffuse) + spec + t.rgb * in.d0.rgb) * in.d1.rgb;
+        // Shadowed techniques (#1/#2: ps #10 / #8): the diffuse + specular sum
+        // times the shadow factor.
+        float sh = WorldShadow(c, in.shadow_pos, shadow_map);
+        float3 col = ((t.rgb * (saturate(ndl) * diffuse) + spec) * sh + t.rgb * in.d0.rgb) * in.d1.rgb;
         out = float4(saturate(2.0 * col + in.inscatter), world_reflect ? 1.0 : t.a * in.d0.a);
     } else if (c.effect == 6) {
         // IDI_TREE_FX ps #0: 2 (t oD1 + t oD0) + oT2, alpha t.a.
@@ -668,19 +778,52 @@ fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(
         // IDI_GLOSSYWINDOW_FX ps #10: 2 (t oD1 + t oD0 + 2 t.a spec) (the
         // mad_x2 doubles the running sum) + t.a reflection (WindowReflection,
         // wrap, LOD bias -1) + in-scatter; alpha t.a.
+        // Shadowed (technique #1 ps #8, #2): 2 ((t oD0 + 2 t.a spec) s + t oD1) + ...
         float3 refl = tex2.sample(s, in.uv1, bias(-1.0)).rgb;
-        float3 rgb = 2.0 * (t.rgb * in.d1.rgb + t.rgb * in.d0.rgb + 2.0 * t.a * in.spec) + t.a * refl + in.inscatter;
+        float sh = WorldShadow(c, in.shadow_pos, shadow_map);
+        float3 rgb = 2.0 * (t.rgb * in.d1.rgb + (t.rgb * in.d0.rgb + 2.0 * t.a * in.spec) * sh) + t.a * refl + in.inscatter;
         out = float4(saturate(rgb), t.a);
     } else {
         // PC WORLD (ps #12): 2 x texture x (oD0 + oD1) + in-scatter (mad_x2,
         // then add t2); alpha texture x oD0 alpha. WORLDPRELIT and the
         // unlit effects: oD0 = vertex colour, oD1 = 0.
-        out = float4(saturate(2.0 * t.rgb * (in.d0.rgb + in.d1.rgb) + in.inscatter), t.a * in.d0.a);
+        // Shadowed WORLD (technique #1 ps #10, #2 ps #8): 2 (t oD1 s + t oD0) + t2.
+        float sh = WorldShadow(c, in.shadow_pos, shadow_map);
+        out = float4(saturate(2.0 * t.rgb * (in.d0.rgb + in.d1.rgb * sh) + in.inscatter), t.a * in.d0.a);
     }
     if ((c.shade & 2) && out.a < (95.0 / 255.0)) { // ALPHAREF 0x5F (sub_6C68B0)
         discard_fragment();
     }
+    if (c.shade & 256) {
+        // NFSMW_SHADE=shadow: the shadow factor (red: level 1, green: 2).
+        float f = c.effect == 4 ? CarShadow(c, in.shadow_pos, shadow_map, shadow_colour) : WorldShadow(c, in.shadow_pos, shadow_map);
+        return float4(c.shadow_level == 1 ? f : f * 0.5, c.shadow_level == 2 ? f : f * 0.5, f * 0.5, 1);
+    }
     return out;
+}
+
+// Shadow map pass (render target type 4). IDI_CAR_SHADOW_MAP_FX: position
+// only, colour (1, 0, 0, 0) with ColorWriteMode 1 (red); the world effects
+// (WORLDNOFOG / WORLDNORMALMAPNOFOG substitutes) write depth only with their
+// alpha test. alpha_test: discard below 0.5 of texture x vertex alpha.
+struct ShadowConst { float4x4 mvp; uint stride; uint alpha_test; uint pad[2]; };
+struct ShadowOut { float4 pos [[position]]; float2 uv; float alpha; };
+
+vertex ShadowOut shadow_vs(uint vid [[vertex_id]], const device float *verts [[buffer(0)]], constant ShadowConst &c [[buffer(1)]]) {
+    const device float *v = verts + vid * (c.stride / 4);
+    ShadowOut o;
+    o.pos = c.mvp * float4(v[0], v[1], v[2], 1);
+    o.uv = float2(v[7], v[8]);
+    o.alpha = float(as_type<uint>(v[6]) >> 24) / 255.0;
+    return o;
+}
+
+fragment float4 shadow_fs(ShadowOut in [[stage_in]], texture2d<float> tex [[texture(0)]], constant ShadowConst &c [[buffer(0)]],
+                          sampler s [[sampler(0)]]) {
+    if (c.alpha_test && tex.sample(s, in.uv).a * in.alpha < 0.5) {
+        discard_fragment();
+    }
+    return float4(1, 0, 0, 0);
 }
 
 // Full-screen triangle for the post-process passes.
@@ -767,6 +910,14 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     id<MTLTexture> _blackCube; // bound when there is none
     unsigned _envFacesDrawn; // faces drawn at least once (bit per face)
     bool _drawingEnvFace;    // drawDraws is drawing a dynamic env-map face
+    // PC shadow map (sub_6E44C0): 1024x1024 depth (0x982CF8) and colour
+    // (0x982CF0) targets; pipelines for car (red) and world (depth only) draws.
+    id<MTLTexture> _shadowDepth, _shadowColour;
+    id<MTLTexture> _shadowDepthLit; // 1x1 depth 1, bound when no map was drawn
+    id<MTLRenderPipelineState> _shadowPipelines[2];
+    bool _shadowValid;        // this frame's scene has a shadow map
+    float _shadowTransform[16];
+    float _invShadowStrength;
     uint64_t _frame;
 }
 
@@ -833,6 +984,21 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
             }
         }
         if (lib) {
+            MTLRenderPipelineDescriptor *sd = [MTLRenderPipelineDescriptor new];
+            sd.vertexFunction = [lib newFunctionWithName:@"shadow_vs"];
+            sd.fragmentFunction = [lib newFunctionWithName:@"shadow_fs"];
+            sd.colorAttachments[0].pixelFormat = MTLPixelFormatR8Unorm;
+            sd.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
+            for (int i = 0; i < 2; i++) {
+                // ColorWriteMode: 1 (red) for the cars, 0 for the world.
+                sd.colorAttachments[0].writeMask = i == 0 ? MTLColorWriteMaskRed : MTLColorWriteMaskNone;
+                _shadowPipelines[i] = [_device newRenderPipelineStateWithDescriptor:sd error:&error];
+                if (!_shadowPipelines[i]) {
+                    NSLog(@"NFSMW: shadow pipeline %d failed: %@", i, error);
+                }
+            }
+        }
+        if (lib) {
             MTLRenderPipelineDescriptor *pd = [MTLRenderPipelineDescriptor new];
             pd.vertexFunction = [lib newFunctionWithName:@"quad_vs"];
             pd.fragmentFunction = [lib newFunctionWithName:@"filter_fs"];
@@ -877,6 +1043,14 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         _black = [_device newTextureWithDescriptor:wd];
         uint32_t opaque_black = 0xFF000000;
         [_black replaceRegion:MTLRegionMake2D(0, 0, 1, 1) mipmapLevel:0 withBytes:&opaque_black bytesPerRow:4];
+        {
+            MTLTextureDescriptor *ld = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float width:1 height:1 mipmapped:NO];
+            ld.usage = MTLTextureUsageShaderRead;
+            ld.storageMode = MTLStorageModeShared;
+            _shadowDepthLit = [_device newTextureWithDescriptor:ld];
+            float one = 1.0f;
+            [_shadowDepthLit replaceRegion:MTLRegionMake2D(0, 0, 1, 1) mipmapLevel:0 withBytes:&one bytesPerRow:4];
+        }
         MTLTextureDescriptor *bd = [MTLTextureDescriptor textureCubeDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm size:1 mipmapped:NO];
         _blackCube = [_device newTextureWithDescriptor:bd];
         uint32_t black = 0xFF000000;
@@ -958,6 +1132,95 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     }
 }
 
+// PC sub_6E54E0 / sub_6E44C0: the shadow view (render target type 4,
+// cleared to black and depth 1 by sub_6BD3B0) before the player view, with
+// D3DRS_DEPTHBIAS 4 * 2^-24 and D3DRS_SLOPESCALEDEPTHBIAS 4 (Metal's
+// constant bias is in units of the float depth's resolution there: the same
+// for depths in 0.5..1). IDI_CAR_SHADOW_MAP_FX writes red; the world depth
+// only. Guess: alpha-blended world draws (no depth writes in the main pass)
+// and additive draws cast no shadow.
+- (void)drawShadowMap:(const Frame3D &)scene commandBuffer:(id<MTLCommandBuffer>)cmd {
+    _shadowValid = false;
+    if (!scene.shadow_active || !scene.shadow_transform_set || !_shadowPipelines[0] || !_shadowPipelines[1]) {
+        return;
+    }
+    const NSUInteger size = 1024; // sub_6C8770, sub_6C86B0
+    if (_shadowDepth == nil) {
+        MTLTextureDescriptor *dd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float
+                                                                                      width:size
+                                                                                     height:size
+                                                                                  mipmapped:NO];
+        dd.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+        dd.storageMode = MTLStorageModePrivate;
+        _shadowDepth = [_device newTextureWithDescriptor:dd];
+        _shadowDepth.label = @"Shadow map depth";
+        MTLTextureDescriptor *cd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR8Unorm
+                                                                                      width:size
+                                                                                     height:size
+                                                                                  mipmapped:NO];
+        cd.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+        cd.storageMode = MTLStorageModePrivate;
+        _shadowColour = [_device newTextureWithDescriptor:cd];
+        _shadowColour.label = @"Shadow colour map";
+    }
+    MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+    rp.colorAttachments[0].texture = _shadowColour;
+    rp.colorAttachments[0].loadAction = MTLLoadActionClear;
+    rp.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
+    rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+    rp.depthAttachment.texture = _shadowDepth;
+    rp.depthAttachment.loadAction = MTLLoadActionClear;
+    rp.depthAttachment.clearDepth = 1.0;
+    rp.depthAttachment.storeAction = MTLStoreActionStore;
+    id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rp];
+    enc.label = @"Shadow map";
+    [enc setViewport:(MTLViewport){0, 0, (double)size, (double)size, 0, 1}];
+    [enc setCullMode:MTLCullModeNone];
+    [enc setDepthStencilState:_depthWrite];
+    [enc setDepthBias:4.0f slopeScale:4.0f clamp:0.0f];
+    [enc setFragmentSamplerState:_meshSamplers[gTextureFiltering.load() % 3] atIndex:0];
+    int bound = -1;
+    for (const Draw3D &d : scene.shadow_draws) {
+        bool car = d.effect == 4;
+        if ((d.flags & PORT_3D_ADDITIVE) || (!car && (d.flags & PORT_3D_ALPHA_BLEND))) {
+            continue;
+        }
+        struct {
+            float mvp[16];
+            uint32_t stride;
+            uint32_t alpha_test;
+            uint32_t pad[2];
+        } c = {};
+        for (int i = 0; i < 4; i++) {
+            for (int j = 0; j < 4; j++) {
+                float sum = 0;
+                for (int k = 0; k < 4; k++) {
+                    sum += d.world[i * 4 + k] * scene.shadow_view_proj[k * 4 + j];
+                }
+                c.mvp[i * 4 + j] = sum;
+            }
+        }
+        c.stride = d.vertex_stride;
+        c.alpha_test = (!car && (d.flags & PORT_3D_ALPHA_TEST)) ? 1 : 0;
+        int pipeline = car ? 0 : 1;
+        if (pipeline != bound) {
+            [enc setRenderPipelineState:_shadowPipelines[pipeline]];
+            bound = pipeline;
+        }
+        [enc setVertexBuffer:d.vertex_buffer offset:0 atIndex:0];
+        [enc setVertexBytes:&c length:sizeof(c) atIndex:1];
+        [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
+        [enc setFragmentTexture:(d.texture ? d.texture : _white) atIndex:0];
+        [enc drawIndexedPrimitives:MTLPrimitiveTypeTriangle
+                        indexCount:d.num_indices
+                         indexType:MTLIndexTypeUInt16
+                       indexBuffer:d.index_buffer
+                 indexBufferOffset:d.first_index * 2];
+    }
+    [enc endEncoding];
+    _shadowValid = true;
+}
+
 - (void)drawDraws:(const std::vector<Draw3D> &)draws viewProj:(const float *)view_proj eye:(const float *)eye fog:(const PortWorldFog &)fog
            envMap:(id<MTLTexture>)env_map width:(double)width height:(double)height encoder:(id<MTLRenderCommandEncoder>)enc {
     if (!draws.empty() && _meshPipelines[0]) {
@@ -1006,6 +1269,11 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                     uint32_t pad;
                     float eye[4];
                     float view_x[4];
+                    float shadow[16];
+                    float inv_shadow;
+                    uint32_t shadow_level;
+                    uint32_t shadow_map;
+                    float pad2;
                 } c = {};
                 c.stride = d.vertex_stride;
                 c.effect = d.effect;
@@ -1028,6 +1296,9 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 if (shade_env && strcmp(shade_env, "envmap") == 0) {
                     c.shade |= 32;
                 }
+                if (shade_env && strcmp(shade_env, "shadow") == 0) {
+                    c.shade |= 256;
+                }
                 if (d.flags & PORT_3D_ALPHA_TEST) {
                     c.shade |= 2;
                 }
@@ -1043,20 +1314,23 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 if ((c.effect == 1 || c.effect == 3) && d.texture2 && d.texture3 && d.vertex_stride >= 60) {
                     c.shade |= 128;
                 }
-                // IDI_CAR_FX technique. speed.exe 1.3 (sub_6D5C10, sub_6D7500,
-                // sub_6E0AB0) picks per draw a shadow level: 0 when shadow
-                // detail (0x901830) is off or outside the shadow range, else up
-                // to 0x982C3C (2 with D24S8 shadow maps, NVIDIA path), and the
-                // car then uses technique #0 (level 0), #1..#3 (levels 1..3) or
-                // #4/#5 (ATI DF16 path). The top preset has shadows on, so near
-                // cars draw #2 (ps #6 = ps #8 plus 4-tap PCF). The port has no
-                // shadow map yet: it uses the shadowed techniques' lighting
-                // (ps #8) fully lit, or technique #0 with NFSMW_CAR_SHADER=1.
-                // TODO(port): ShadowDetail video setting and the shadow-map
-                // pass (render target type 4, view 0x919C70, CAR_SHADOW_MAP).
-                static const char *car_shader = getenv("NFSMW_CAR_SHADER");
-                if (!(car_shader && strcmp(car_shader, "1") == 0)) {
-                    c.shade |= 64;
+                // Shadow level (sub_6E0AB0, see Port3DDraw::shadow_level): the
+                // technique of the shadowed effects (CAR #0..#2, WORLD #0..#2,
+                // ...), with ShadowTransform = world x the shadow view's
+                // texture matrix (sub_6C82B0).
+                c.shadow_level = d.shadow_level;
+                c.shadow_map = _shadowValid ? 1 : 0;
+                c.inv_shadow = _invShadowStrength;
+                if (d.shadow_level != 0) {
+                    for (int i = 0; i < 4; i++) {
+                        for (int j = 0; j < 4; j++) {
+                            float sum = 0;
+                            for (int k = 0; k < 4; k++) {
+                                sum += d.world[i * 4 + k] * _shadowTransform[k * 4 + j];
+                            }
+                            c.shadow[i * 4 + j] = sum;
+                        }
+                    }
                 }
                 // mvp = world * view_proj (row vectors).
                 for (int i = 0; i < 4; i++) {
@@ -1079,6 +1353,8 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 [enc setFragmentTexture:(env_map ? env_map : _blackCube) atIndex:1];
                 [enc setFragmentTexture:(d.texture2 ? d.texture2 : _black) atIndex:2];
                 [enc setFragmentTexture:(d.texture3 ? d.texture3 : _black) atIndex:3];
+                [enc setFragmentTexture:(_shadowValid ? _shadowDepth : _shadowDepthLit) atIndex:4];
+                [enc setFragmentTexture:(_shadowValid ? _shadowColour : _black) atIndex:5];
                 [enc setFragmentBytes:&fog length:sizeof(fog) atIndex:4];
                 [enc setFragmentBytes:d.envmap length:sizeof(d.envmap) atIndex:3];
                 [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
@@ -1233,6 +1509,11 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
 
     id<MTLCommandBuffer> cmd = [_queue commandBuffer];
     [self drawEnvFaces:scene commandBuffer:cmd];
+    [self drawShadowMap:scene commandBuffer:cmd];
+    if (scene.shadow_transform_set) {
+        memcpy(_shadowTransform, scene.shadow_transform, sizeof(_shadowTransform));
+    }
+    _invShadowStrength = scene.inv_shadow_strength;
     bool treated = !scene.overlay && scene.treatment && !scene.draws.empty() && _filterPipeline && _treatmentPipeline;
     if (treated) {
         [self drawTreatedScene:scene commandBuffer:cmd view:view];

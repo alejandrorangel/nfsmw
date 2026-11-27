@@ -74,6 +74,10 @@ struct Port3DDraw {
     // xyzw each), when PORT_3D_ENVMAP: takes the model-space reflection
     // vector into the space of the environment cube.
     float envmap[12];
+    // PC shadow level (sub_6E0AB0): 0 no shadow map (technique #0), 1 one
+    // hardware-compare tap, 2 four taps (PCF). Only effects WORLD,
+    // WORLDREFLECT, WORLDNORMALMAP, CAR and GLOSSYWINDOW use it.
+    uint32_t shadow_level;
 };
 enum { PORT_3D_ALPHA_BLEND = 1, PORT_3D_ADDITIVE = 2, PORT_3D_ALPHA_TEST = 4, PORT_3D_LIT = 8, PORT_3D_ENVMAP = 16 };
 
@@ -148,6 +152,19 @@ void PortMetal3DSetEnvMap(PortEnvMapMode mode, void *static_cube);
 // rendered before this frame's scene (cleared to black, PC sub_6BD3B0).
 void PortMetal3DBeginEnvFace(int face, const float view_proj[16], const float eye[3]);
 void PortMetal3DEndEnvFace();
+// PC shadow map (speed.exe 1.3 sub_6E44C0, NVIDIA path): draws added between
+// PortMetal3DBeginShadow and PortMetal3DEndShadow go to the 1024x1024 shadow
+// map (D24S8 depth texture 0x982CF8 plus an A8R8G8B8 colour map 0x982CF0,
+// cleared to depth 1 / black), rendered before this frame's scene with
+// view_proj (world -> shadow clip). CAR draws use IDI_CAR_SHADOW_MAP_FX
+// (depth, and red = 1 in the colour map); everything else writes depth only
+// (ColorWriteMode 0). Depth bias 4 / 2^24, slope scale 4 (sub_6E54E0).
+void PortMetal3DBeginShadow(const float view_proj[16]);
+void PortMetal3DEndShadow();
+// The effects' ShadowTransform (world -> shadow texture, projective) and
+// InvShadowStrength for the shadowed techniques this frame.
+void PortMetal3DSetShadowTransform(const float shadow_transform[16], float inv_shadow_strength);
+
 // A cube texture from six 2D textures of one size and format (level 0 is
 // copied; PC EnvMapTextureLoadedCallback copies each face's pixels).
 void *PortMetalCreateCube(void *const faces[6], const char *label);

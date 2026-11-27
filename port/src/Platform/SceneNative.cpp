@@ -154,6 +154,50 @@ void *WindowReflectionTexture() {
     return MetalTextureOf(GetTextureInfo(hash, 1, 0));
 }
 
+// The player view's world -> clip matrix while its models are submitted
+// (render target type 1), for the per-draw shadow level; null otherwise
+// (env-map faces, the shadow map: level 0).
+const float *gShadowLevelClip = nullptr;
+
+// speed.exe 1.3 sub_6E0AB0, in the player view: the shadow level of a
+// WORLD/WORLDREFLECT/WORLDNORMALMAP/CAR/GLOSSYWINDOW (or PARTICLES) draw from
+// the clip-space z of its group's bound centre (TransformBound, then the
+// view's projection; about the view depth): 0 with Shadow Detail (0x901830)
+// off or beyond 400 (0x8FAE60); below 100 (0x8FAE58) the effect's highest
+// level up to 0x982C3C (2: CAR/WORLD/... have levels 1..3 on the NVIDIA
+// path, sub_6D5C10, capped at 2 by sub_6D2100); 100..400 level 1 (the
+// min(..., 0x982C3C - 1 or - 2) results are raised to 1).
+uint32_t ShadowLevel(const eSolidPlatGroup &group, const M44 world) {
+    if (gShadowLevelClip == nullptr || gPCGraphicsOptions.ShadowDetail < 1) {
+        return 0;
+    }
+    switch (group.Effect) {
+    case PORT_EFFECT_WORLD:
+    case PORT_EFFECT_WORLDREFLECT:
+    case PORT_EFFECT_WORLDNORMALMAP:
+    case PORT_EFFECT_CAR:
+    case PORT_EFFECT_GLOSSYWINDOW:
+        break;
+    default:
+        return 0;
+    }
+    float c[3] = {(group.AABBMin[0] + group.AABBMax[0]) * 0.5f, (group.AABBMin[1] + group.AABBMax[1]) * 0.5f,
+                  (group.AABBMin[2] + group.AABBMax[2]) * 0.5f};
+    float w[3];
+    for (int j = 0; j < 3; j++) {
+        w[j] = c[0] * world[0 * 4 + j] + c[1] * world[1 * 4 + j] + c[2] * world[2 * 4 + j] + world[3 * 4 + j];
+    }
+    const float *m = gShadowLevelClip;
+    float z = w[0] * m[2] + w[1] * m[6] + w[2] * m[10] + m[14];
+    if (z > 400.0f) {
+        return 0;
+    }
+    if (z < 100.0f) {
+        return 2;
+    }
+    return z == 100.0f ? 0 : 1;
+}
+
 // render_flags: eViewPlatInterface::Render flags (bit 0: CarRender's
 // disable_env_flag, no environment map).
 void DrawSolid(eSolid *solid, const M44 world, const eDynamicLightContext *lights = nullptr, unsigned int render_flags = 0) {
@@ -207,6 +251,7 @@ void DrawSolid(eSolid *solid, const M44 world, const eDynamicLightContext *light
             }
         }
         d.num_indices = group.NumIndices;
+        d.shadow_level = ShadowLevel(group, world);
         // sub_6C68B0: alpha test when the texture is punch-through (ref
         // 0x5F); blending only by AlphaBlendType -- SRCCOPY draws opaque even
         // when the alpha is MODULATED (car skins: alpha is a gloss mask).
@@ -608,6 +653,165 @@ eVisibleState ClassifyBox(int view_id, const bVector3 *aabb_min, const bVector3 
     return ClassifyPoints(view_id, corners, 8, local_world);
 }
 
+// ---------------------------------------------------------------------------
+// PC shadow map (speed.exe 1.3, NVIDIA depth-texture path, shadow mode
+// 0x982C08 = 1). ___eDisplayFrame calls sub_6E54E0 for the player view with
+// Shadow Detail (0x901830) > 0; sub_6E44C0 then aims the shadow view (PC
+// view 15, 0x919C70; here EVIEW_SHADOWMAP1) from the sun and fits a
+// light-space perspective projection to the near part of the player's view.
+// ---------------------------------------------------------------------------
+
+void Transform3(const M44 m, const float p[3], float out[3], bool point) {
+    for (int j = 0; j < 3; j++) {
+        out[j] = p[0] * m[0 * 4 + j] + p[1] * m[1 * 4 + j] + p[2] * m[2 * 4 + j] + (point ? m[3 * 4 + j] : 0.0f);
+    }
+}
+
+// D3DXMatrixPerspectiveLH / D3DXMatrixOrthoLH.
+void PerspectiveLH(M44 m, float w, float h, float zn, float zf) {
+    std::memset(m, 0, sizeof(M44));
+    m[0] = 2.0f * zn / w;
+    m[5] = 2.0f * zn / h;
+    m[10] = zf / (zf - zn);
+    m[11] = 1.0f;
+    m[14] = zn * zf / (zn - zf);
+}
+
+void OrthoLH(M44 m, float w, float h, float zn, float zf) {
+    std::memset(m, 0, sizeof(M44));
+    m[0] = 2.0f / w;
+    m[5] = 2.0f / h;
+    m[10] = 1.0f / (zf - zn);
+    m[14] = zn / (zn - zf);
+    m[15] = 1.0f;
+}
+
+// bSin/bCos of an angle in 65536ths of a turn (the ftol'd argument).
+float BangTan(float bangs) {
+    unsigned short a = static_cast<unsigned short>(static_cast<int>(bangs));
+    return std::tan(a * (2.0f * 3.1415927f / 65536.0f));
+}
+
+// sub_6E44C0's matrices: view_proj (world -> shadow clip, the shadow view's
+// projection) and texture (view_proj times the texture bias, the effects'
+// ShadowTransform before the model's world matrix).
+//
+// The shadow camera sits 2000 (0x8FAEB8) towards the sun from the player
+// camera, looking at it (eCreateLookAtMatrix, z up); sub_6D7950 gives it a
+// 10 degree (0x8FAEE0) field of view and near/far 1650/2250 (0x8FAEC0/C4).
+// The focus volume is the player camera's frustum with near 0.01 and far 50
+// (0x901AAC/0x901AB0), horizontal half-angle 0.75 fov / 2 (0x901AB4) and
+// vertical fov h/w / 2 (0x901AB8 = 1); sub_6C8CD0 builds its planes and
+// corners in camera space. In camera space, with L the sun direction
+// (normalised), B = normalize(L x (0, 0, -1)) and C = normalize(L x B), the
+// corners are rotated into (B, L, C); the eye goes 20.1 (0x901AA0 + 0.1)
+// behind their near z, centred in x and y; a perspective along C with
+// width 2 * max|x/z| * 20.1 * 1.5 (0x901A94), height 2 * max|y/z| * 20.1 *
+// 10 (0x901A98), near 20.1, far max z * 10 (0x901A9C) follows, then the
+// fixed swap (x, z - 0.5w, 1.5w - y) and D3DXMatrixOrthoLH(2, 1, 0.5, 2.5)
+// (0x901A84..90) so the light direction becomes the map's depth. The bias is
+// (0.5x + 0.5w, -0.5y + 0.5w, z) (PC adds 1/2048 to both for D3D9's
+// half-texel; Metal samples texel centres without it).
+bool ComputeShadowMatrices(eView *view, V3 sun, M44 view_proj, M44 texture) {
+    Camera *camera = view->GetCamera();
+    if (camera == nullptr) {
+        return false;
+    }
+    // The shadow camera (culling and LOD use it, as on PC).
+    eView *shadow_view = eGetView(EVIEW_SHADOWMAP1, false);
+    Camera *shadow_camera = shadow_view ? shadow_view->GetCamera() : nullptr;
+    if (shadow_camera == nullptr) {
+        return false;
+    }
+    bVector3 *centre = camera->GetPosition();
+    bVector3 eye(centre->x + sun.x * 2000.0f, centre->y + sun.y * 2000.0f, centre->z + sun.z * 2000.0f);
+    bVector3 target(centre->x, centre->y, centre->z);
+    bVector3 up(0.0f, 0.0f, 1.0f);
+    bMatrix4 look;
+    eCreateLookAtMatrix(&look, eye, target, up);
+    shadow_camera->SetCameraMatrix(look, 0.0f);
+    shadow_camera->SetFieldOfView(static_cast<unsigned short>(static_cast<int>(10.0f * 65536.0f) / 360));
+    shadow_camera->SetNearZ(1650.0f);
+    shadow_camera->SetFarZ(2250.0f);
+
+    float fov = camera->GetFieldOfView();
+    float h_over_w = 1.0f / PortMetalViewAspect();
+    float tan_x = BangTan(fov * 0.75f * 0.5f);
+    float tan_y = BangTan(fov * h_over_w * 0.5f);
+    const float znear = 0.01f, zfar = 50.0f;
+    M44 v;
+    std::memcpy(v, camera->GetWorldToCameraMatrix(), sizeof(M44));
+
+    float l[3];
+    const float s[3] = {sun.x, sun.y, sun.z};
+    Transform3(v, s, l, false);
+    V3 L = {l[0], l[1], l[2]};
+    if (Dot(L, L) < 1e-12f) {
+        return false;
+    }
+    L = Normalize(L);
+    V3 B = {-L.y, L.x, 0.0f}; // L x (0, 0, -1)
+    if (Dot(B, B) < 1e-12f) {
+        return false; // sun along the view axis (PC doesn't guard)
+    }
+    B = Normalize(B);
+    V3 C = Normalize(Cross(L, B));
+    M44 r = {B.x, L.x, C.x, 0, B.y, L.y, C.y, 0, B.z, L.z, C.z, 0, 0, 0, 0, 1};
+
+    float pts[8][3];
+    for (int i = 0; i < 8; i++) {
+        float z = (i & 4) ? zfar : znear;
+        float p[3] = {(i & 1 ? 1.0f : -1.0f) * z * tan_x, (i & 2 ? 1.0f : -1.0f) * z * tan_y, z};
+        Transform3(r, p, pts[i], true);
+    }
+    float lo[3] = {3.4e38f, 3.4e38f, 3.4e38f}, hi[3] = {-3.4e38f, -3.4e38f, -3.4e38f};
+    for (auto &p : pts) {
+        for (int j = 0; j < 3; j++) {
+            lo[j] = std::fmin(lo[j], p[j]);
+            hi[j] = std::fmax(hi[j], p[j]);
+        }
+    }
+    const float back = 20.0f + 0.1f;
+    float cx = (lo[0] + hi[0]) * 0.5f, cy = (lo[1] + hi[1]) * 0.5f, ez = lo[2] - back;
+    float max_x = 0.0f, max_y = 0.0f, max_z = 0.0f;
+    for (auto &p : pts) {
+        float dz = p[2] - ez;
+        if (dz > 0.0f) {
+            max_x = std::fmax(max_x, std::fabs((p[0] - cx) / dz));
+            max_y = std::fmax(max_y, std::fabs((p[1] - cy) / dz));
+            max_z = std::fmax(max_z, dz);
+        }
+    }
+    if (max_x <= 0.0f || max_y <= 0.0f || max_z <= back) {
+        return false;
+    }
+    M44 t = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -cx, -cy, -ez, 1};
+    M44 persp, ortho, swap = {1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, -0.5f, 1.5f, 1};
+    PerspectiveLH(persp, 2.0f * max_x * back * 1.5f, 2.0f * max_y * back * 10.0f, back, max_z * 10.0f);
+    OrthoLH(ortho, 2.0f, 1.0f, 0.5f, 2.5f);
+    M44 m;
+    Multiply(m, swap, ortho);
+    Multiply(r, r, t);
+    Multiply(r, r, persp);
+    Multiply(r, r, m);
+    Multiply(view_proj, v, r);
+    M44 bias = {0.5f, 0, 0, 0, 0, -0.5f, 0, 0, 0, 0, 1, 0, 0.5f, 0.5f, 0, 1};
+    Multiply(texture, view_proj, bias);
+    return true;
+}
+
+// ___eDisplayFrame 0x6DE33E: InvShadowStrength fades in (0.3/s, 0x8F9340)
+// while the player view is in a tunnel and out (2/s, 0x8F9344) after.
+float gTunnelShadowFade;
+
+void TickTunnelShadowFade(eView *view) {
+    if (AmIinATunnel(view, 1) == 0) {
+        gTunnelShadowFade = std::fmax(gTunnelShadowFade - 2.0f * WorldTimeElapsed, 0.0f);
+    } else {
+        gTunnelShadowFade = std::fmin(gTunnelShadowFade + 0.3f * WorldTimeElapsed, 1.0f);
+    }
+}
+
 // Frontend: the garage backdrop and the player's car (PC ___eDisplayFrame,
 // game flow state 3: GarageMainScreen::HandleRender(1), RenderFrontEndCars).
 int gSceneDraws; // NFSMW_TRACE_SCENE
@@ -661,9 +865,14 @@ bool RenderFrontEndScene() {
     PortMetal3DSetOverlay(on_top);
     gSceneDraws = 0;
     gSceneCalls = gSceneNoSolid = 0;
+    // The frontend's shadow map holds no casters (no scenery or race cars;
+    // the garage car draws through RenderFrontEndCars), so the shadowed
+    // techniques read lit: only their level matters here.
+    gShadowLevelClip = view_proj;
     garage->HandleRender(1);
     int backdrop = gSceneDraws;
     RenderFrontEndCars(view, 0);
+    gShadowLevelClip = nullptr;
     if (log) {
         std::fprintf(stderr, "[scene] draws: backdrop %d, cars %d (render calls %d, no solid %d)\n", backdrop, gSceneDraws - backdrop,
                      gSceneCalls, gSceneNoSolid);
@@ -902,6 +1111,18 @@ bool RenderWorldScene(int frame) {
     // The env-map views: sub_6BFDD0 culls each active one with 0x1100 at
     // Shadow Detail (0x901830) < 2, else 0x1000.
     const int shadow_detail = gPCGraphicsOptions.ShadowDetail;
+    // The shadow view (sub_6BFDD0: exclude 0x4100 with Shadow Detail > 0).
+    // PC culls it with last frame's matrices; here they're computed first.
+    TickTunnelShadowFade(view);
+    eView *shadow_view = shadow_detail > 0 ? eGetView(EVIEW_SHADOWMAP1, false) : nullptr;
+    M44 shadow_proj, shadow_texture;
+    if (shadow_view && !(gHaveSun && ComputeShadowMatrices(view, gSunDirection, shadow_proj, shadow_texture))) {
+        shadow_view = nullptr;
+    }
+    if (shadow_view) {
+        SetViewClip(shadow_view, shadow_proj);
+        SetupCullInfo(shadow_view, &gWorldCullInfo.SceneryCullInfos[gWorldCullInfo.NumCullInfos++], 0x4100);
+    }
     eEnvMap *envmap = PortEnvMapQuality() != 0 ? eGetEnvMap() : nullptr;
     if (envmap) {
         UpdateEnvironmentMapCameras(); // eDisplayFrame 0x6E736A
@@ -945,13 +1166,32 @@ bool RenderWorldScene(int frame) {
         envmap_draws = gSceneDraws;
         gSceneDraws = 0;
     }
+    int shadow_draws = 0;
+    if (shadow_view) {
+        // sub_6E44C0: the world models, the scenery (stuff flags 0x2000 at
+        // Shadow Detail 1, else 0x200; 0x8FAECC = 1) and the cars (the view
+        // anchor's, then every other loaded one: all of them).
+        // TODO(port): the shadow-map meshes (sub_6D7F70, list 0x982D10,
+        // IDI_SHADOW_MAP_MESH_FX) and the caster test against the narrower
+        // frustum and its sweep along the light (sub_6D7A40) are not ported.
+        PortMetal3DBeginShadow(shadow_proj);
+        RenderWorldModels(shadow_view, 0);
+        gWorldCullInfo.StuffScenery(shadow_view, shadow_detail == 1 ? 0x2000 : 0x200);
+        VehicleRenderConn::RenderAll(shadow_view, 0);
+        PortMetal3DEndShadow();
+        PortMetal3DSetShadowTransform(shadow_texture, gTunnelShadowFade);
+        shadow_draws = gSceneDraws;
+        gSceneDraws = 0;
+    }
+    gShadowLevelClip = view_proj;
     gWorldCullInfo.StuffScenery(view, 0x20);
     int scenery = gSceneDraws;
     RenderWorldModels(view, 0);
     int models = gSceneDraws - scenery;
     DrawTestCars(view, 0); // ___eDisplayFrame 0x6DEE44: sub_750B10 → VehicleRenderConn::RenderAll
+    gShadowLevelClip = nullptr;
     if (log) {
-        std::fprintf(stderr, "[world] cars %d, env map faces %d draws\n", gSceneDraws - scenery - models, envmap_draws);
+        std::fprintf(stderr, "[world] cars %d, env map faces %d draws, shadow map %d\n", gSceneDraws - scenery - models, envmap_draws, shadow_draws);
         std::fprintf(stderr, "[world] camera (%.1f %.1f %.1f) dir (%.2f %.2f %.2f) draws: scenery %d, models %d (calls %d, no solid %d)\n",
                      eye->x, eye->y, eye->z, view->GetCamera()->GetDirection()->x, view->GetCamera()->GetDirection()->y,
                      view->GetCamera()->GetDirection()->z, scenery, gSceneDraws - scenery, gSceneCalls, gSceneNoSolid);
