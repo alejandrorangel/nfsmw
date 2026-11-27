@@ -64,11 +64,17 @@ PortPrelitBlend BlendFor(TextureInfo *t, uint32_t *flags) {
     }
 }
 
-// The views whose prelit quads reach the frame natively: the player views
-// (the PC also draws flares into the reflection and env-map targets).
+// The views whose prelit quads reach the frame natively: the player views.
 bool DrawsPrelit(eView *view) {
     int id = view->GetID();
     return id == EVIEW_FLAILER || (id >= EVIEW_FIRST_PLAYER && id <= EVIEW_LAST_PLAYER);
+}
+
+// ePoly quads also go to the road reflection (view 4) and the env-map faces,
+// where the PC draws their light flares (PortRenderViewFlares).
+bool DrawsPolys(eView *view) {
+    int id = view->GetID();
+    return DrawsPrelit(view) || id == EVIEW_PLAYER1_GLOW || (id >= EVIEW_FIRST_ENVMAP && id <= EVIEW_LAST_ENVMAP);
 }
 
 // The batch between PlatStartParticleRender and PlatEndParticleRender (the
@@ -203,7 +209,7 @@ void DrawXenonEmitters(eView *view) {}
 // = local_to_world x the view's, in the effect the caller began.
 void eViewPlatInterface::Render(ePoly *poly, TextureInfo *texture_info, bMatrix4 *local_to_world, int use_previous_data, float bbRad) {
     eView *view = static_cast<eView *>(this);
-    if (!DrawsPrelit(view)) {
+    if (!DrawsPolys(view)) {
         return;
     }
     uint32_t flags;
