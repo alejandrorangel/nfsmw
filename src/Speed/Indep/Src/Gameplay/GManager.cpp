@@ -18,6 +18,9 @@
 #include "Speed/Indep/Src/Generated/Events/EAutoSave.hpp"
 #include "Speed/Indep/Src/Generated/Messages/MNotifyMilestoneProgress.h"
 #include "Speed/Indep/Src/Sim/Simulation.h"
+#include "Speed/Indep/Src/Generated/AttribSys/Classes/milestonetypes.h"
+#include "Speed/Indep/Src/Misc/MD5.hpp"
+#include <vector>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -780,5 +783,356 @@ void GManager::RestorePursuitBreakerIcons(int sectionID) {
             icon->SetFlag(1);
         }
     }
+}
+#endif
+
+#if defined(EA_PORT_NATIVE)
+// ---------------------------------------------------------------------------
+// Object state blocks and the saved gameplay data (the career's first 0x4000
+// bytes in a profile).
+// ---------------------------------------------------------------------------
+
+// PC: 0x5ED960. The session block first.
+void *GManager::GetObjectStateBlock(Attrib::Key collectionKey) {
+    const uint32 key32 = Get32BitCollectionKey(collectionKey);
+    for (unsigned int i = 0; i < 2; i++) {
+        ObjectStateMap &blocks = i == 0 ? mSessionStateBlocks : mPersistentStateBlocks;
+        ObjectStateMap::iterator it = blocks.find(key32);
+        if (it != blocks.end()) {
+            return it->second + 1;
+        }
+    }
+    return nullptr;
+}
+
+// PC: 0x5F30F0. The storage is only reclaimed by the next defrag.
+void GManager::ClearObjectStateBlock(Attrib::Key collectionKey) {
+    const uint32 key32 = Get32BitCollectionKey(collectionKey);
+    for (unsigned int i = 0; i < 2; i++) {
+        ObjectStateMap &blocks = i == 0 ? mSessionStateBlocks : mPersistentStateBlocks;
+        ObjectStateMap::iterator it = blocks.find(key32);
+        if (it != blocks.end()) {
+            blocks.erase(it);
+        }
+    }
+}
+
+// PC: 0x5F5D40. Moves the live blocks down to the start of the buffer, in
+// address order.
+void GManager::DefragObjectStateStorage() {
+    std::vector<ObjectStateBlockHeader *> live;
+    live.reserve(mPersistentStateBlocks.size() + mSessionStateBlocks.size());
+    for (ObjectStateMap::iterator it = mPersistentStateBlocks.begin(); it != mPersistentStateBlocks.end(); ++it) {
+        live.push_back(it->second);
+    }
+    for (ObjectStateMap::iterator it = mSessionStateBlocks.begin(); it != mSessionStateBlocks.end(); ++it) {
+        live.push_back(it->second);
+    }
+    std::sort(live.begin(), live.end());
+    uint8 *dest = mObjectStateBuffer;
+    for (std::size_t i = 0; i < live.size(); i++) {
+        ObjectStateBlockHeader *block = live[i];
+        const unsigned int size = (block->mSize + 0x17) & ~0xFu;
+        if (reinterpret_cast<uint8 *>(block) != dest) {
+            std::memmove(dest, block, size);
+            const uint32 key32 = Get32BitCollectionKey(reinterpret_cast<ObjectStateBlockHeader *>(dest)->mKey);
+            for (unsigned int m = 0; m < 2; m++) {
+                ObjectStateMap &blocks = m == 0 ? mSessionStateBlocks : mPersistentStateBlocks;
+                ObjectStateMap::iterator it = blocks.find(key32);
+                if (it != blocks.end() && it->second == block) {
+                    it->second = reinterpret_cast<ObjectStateBlockHeader *>(dest);
+                }
+            }
+        }
+        dest += size;
+    }
+    mObjectStateBufferFree = dest;
+}
+
+// PC: 0x5F5F10. Blocks are 16-byte aligned with an 8-byte header.
+void *GManager::AllocObjectStateBlock(Attrib::Key collectionKey, unsigned int size, bool persistent) {
+    ObjectStateMap &blocks = persistent ? mPersistentStateBlocks : mSessionStateBlocks;
+    const uint32 key32 = Get32BitCollectionKey(collectionKey);
+    ObjectStateMap::iterator it = blocks.find(key32);
+    if (it != blocks.end()) {
+        ObjectStateBlockHeader *block = it->second;
+        if (size <= block->mSize) {
+            block->mSize = size;
+            return block + 1;
+        }
+        ClearObjectStateBlock(collectionKey);
+    }
+    const unsigned int alignedSize = (size + 0x17) & ~0xFu;
+    for (unsigned int attempt = 0; attempt < 2; attempt++) {
+        if (static_cast<unsigned int>(mObjectStateBufferFree - mObjectStateBuffer) + alignedSize > mObjectStateBufferSize) {
+            if (attempt != 0) {
+                return nullptr;
+            }
+            DefragObjectStateStorage();
+        }
+    }
+    ObjectStateBlockHeader *block = reinterpret_cast<ObjectStateBlockHeader *>(mObjectStateBufferFree);
+    mObjectStateBufferFree += alignedSize;
+    if (persistent) {
+        std::memset(block, 0, alignedSize);
+    }
+    block->mSize = size;
+    block->mKey = collectionKey;
+    blocks[key32] = block;
+    return block + 1;
+}
+
+// PC: 0x5E4B10
+void GManager::ResetTimers() {
+    for (unsigned int i = 0; i < 8; i++) {
+        mTimers[i].mRunning = false;
+        mTimers[i].mElapsed = 0.0f;
+        mTimers[i].mInterval = 1.0f;
+        mTimers[i].mNameHash = 0;
+        mTimers[i].mName[0] = '\0';
+    }
+}
+
+// PC: 0x5E4C40
+unsigned int GManager::SaveTimerInfo(SavedTimerInfo *saveInfo) {
+    for (unsigned int i = 0; i < 8; i++) {
+        saveInfo[i].mElapsed = mTimers[i].mElapsed;
+        saveInfo[i].mInterval = mTimers[i].mInterval;
+        saveInfo[i].mRunning = mTimers[i].mRunning;
+        bSafeStrCpy(saveInfo[i].mName, mTimers[i].mName, 0x13);
+    }
+    return 8;
+}
+
+// PC: 0x5E4C90
+void GManager::LoadTimerInfo(SavedTimerInfo *saveInfo, unsigned int count) {
+    for (unsigned int i = 0; i < count && i < 8; i++) {
+        mTimers[i].mElapsed = saveInfo[i].mElapsed;
+        mTimers[i].mInterval = saveInfo[i].mInterval;
+        mTimers[i].mRunning = saveInfo[i].mRunning;
+        bSafeStrCpy(mTimers[i].mName, saveInfo[i].mName, 0x13);
+        mTimers[i].mNameHash = bStringHash(mTimers[i].mName);
+    }
+}
+
+// PC: 0x5F62F0. One entry per milestone type collection, with no values yet.
+void GManager::ResetMilestoneTrackingInfo() {
+    mMilestoneTypeInfo.clear();
+    if (mMilestoneClass == nullptr) {
+        return;
+    }
+    for (Attrib::Key key = mMilestoneClass->GetFirstCollection(); key != 0; key = mMilestoneClass->GetNextCollection(key)) {
+        Attrib::Gen::milestonetypes type(key, 0, nullptr);
+        MilestoneTypeInfo info;
+        info.mTypeKey = key;
+        info.mLastKnownValue = -1.0f;
+        info.mBestValue = -1.0f;
+        info.mFlags = type.MilestoneType() != 2 ? 1 : 0;
+        if (type.ResetWhenPursuitStarts()) {
+            info.mFlags |= 2;
+        }
+        mMilestoneTypeInfo[key] = info;
+    }
+}
+
+// PC: 0x5EDCB0
+unsigned int GManager::SaveMilestoneInfo(MilestoneTypeInfo *dest) {
+    for (MilestoneInfoMap::iterator it = mMilestoneTypeInfo.begin(); it != mMilestoneTypeInfo.end(); ++it) {
+        *dest++ = it->second;
+    }
+    return static_cast<unsigned int>(mMilestoneTypeInfo.size());
+}
+
+// PC: 0x5F6430
+void GManager::LoadMilestoneInfo(MilestoneTypeInfo *savedInfo, unsigned int count) {
+    ResetMilestoneTrackingInfo();
+    for (unsigned int i = 0; i < count; i++) {
+        MilestoneInfoMap::iterator it = mMilestoneTypeInfo.find(savedInfo[i].mTypeKey);
+        if (it != mMilestoneTypeInfo.end()) {
+            it->second.mBestValue = savedInfo[i].mBestValue;
+            it->second.mLastKnownValue = savedInfo[i].mLastKnownValue;
+        }
+    }
+}
+
+// PC: 0x5F4D40 resets every milestone from its challenge collection.
+// TODO(port): the milestones aren't allocated natively (AllocateMilestones),
+// so there are none to reset.
+void GManager::ResetMilestones() {}
+
+// PC: inlined into SaveGameplayData.
+unsigned int GManager::SaveMilestones(GMilestone *dest) {
+    if (mNumMilestones != 0) {
+        std::memcpy(dest, mMilestones, mNumMilestones * sizeof(GMilestone));
+    }
+    return mNumMilestones;
+}
+
+// PC: 0x5DDBD0
+void GManager::LoadMilestones(GMilestone *src, unsigned int count) {
+    for (; count != 0; count--, src++) {
+        for (unsigned int i = 0; i < mNumMilestones; i++) {
+            if (mMilestones[i].GetChallengeKey() == src->GetChallengeKey()) {
+                mMilestones[i] = *src;
+                break;
+            }
+        }
+    }
+}
+
+// PC: inlined into SaveGameplayData.
+unsigned int GManager::SaveSpeedTraps(GSpeedTrap *dest) {
+    if (mNumSpeedTraps != 0) {
+        std::memcpy(dest, mSpeedTraps, mNumSpeedTraps * sizeof(GSpeedTrap));
+    }
+    return mNumSpeedTraps;
+}
+
+// PC: inlined into SaveGameplayData. The PC steps two slots per message, so
+// with more than one pending only every other one is saved (and the rest of
+// the slots stay zero); kept for the format.
+unsigned int GManager::SaveSMSInfo(int *saveInfo) {
+    const unsigned int count = static_cast<unsigned int>(mPendingSMS.size());
+    PendingSMSList::iterator it = mPendingSMS.begin();
+    for (unsigned int i = 0; i < count; i += 2, ++it) {
+        saveInfo[i] = *it;
+    }
+    return count;
+}
+
+// PC: 0x5F50C0
+void GManager::LoadSMSInfo(int *loadInfo, unsigned int count) {
+    mPendingSMS.clear();
+    for (; count != 0; count--) {
+        mPendingSMS.push_back(*loadInfo++);
+    }
+}
+
+// PC: 0x5F7730
+void GManager::ResetAllGameplayData() {
+    mPersistentStateBlocks.clear();
+    mSessionStateBlocks.clear();
+    mObjectStateBufferFree = mObjectStateBuffer;
+    ResetMilestoneTrackingInfo();
+    ResetMilestones();
+    ResetSpeedTraps();
+    bMemSet(mHidingSpotFound, 0, sizeof(mHidingSpotFound));
+    ResetTimers();
+    mFreeRoamStartMarker = 0;
+    mOverrideFreeRoamStartMarker = 0;
+    mFreeRoamFromSafeHouseStartMarker = 0;
+    mStartFreeRoamFromSafeHouse = false;
+    mPendingSMS.clear();
+}
+
+namespace {
+// The PC aligns the addresses; its buffers are 16-byte aligned, so natively
+// the offsets are aligned instead, for the same layout whatever the buffer.
+inline uint8 *AlignSave16(uint8 *base, uint8 *p) {
+    return base + ((p - base + 0xF) & ~static_cast<intptr_t>(0xF));
+}
+} // namespace
+
+// PC: 0x5F7410. A SavedGameplayDataHeader (with the MD5 of the rest of the
+// buffer first), then from 0x80, each section 16-byte aligned: the persistent
+// object state blocks, the timers, the milestone types, the milestones, the
+// speed traps, the hiding spot bits, the race bins, the pending SMS and the
+// free roam start markers. (The alignment is of the addresses, as on PC.)
+bool GManager::SaveGameplayData(uint8 *dest, unsigned int maxSize) {
+    static_assert(sizeof(GMilestone) == 0x14 && sizeof(GSpeedTrap) == 0x14 && sizeof(SavedTimerInfo) == 0x20 && sizeof(MilestoneTypeInfo) == 0x10,
+                  "PC gameplay data layout");
+    bMemSet(dest, 0, maxSize);
+    for (GObjectIterator<GActivity> iter(0xffffffff); iter.IsValid(); iter.Advance()) {
+        iter.GetInstance()->SerializeVars(false);
+    }
+    if (maxSize < 0x80) {
+        return false;
+    }
+    SavedGameplayDataHeader *header = reinterpret_cast<SavedGameplayDataHeader *>(dest);
+    header->mMagic = 0x656d6147; // 'Game'
+    header->mVersion = 8;
+    header->mNumPersistent = static_cast<uint32>(mPersistentStateBlocks.size());
+    uint8 *p = dest + 0x80;
+    uint8 *end = dest + maxSize;
+    for (ObjectStateMap::iterator it = mPersistentStateBlocks.begin(); it != mPersistentStateBlocks.end(); ++it) {
+        const unsigned int size = (it->second->mSize + 0x17) & ~0xFu;
+        if (p + size > end) {
+            return false;
+        }
+        std::memcpy(p, it->second, size);
+        p += size;
+    }
+    p = AlignSave16(dest, p);
+    header->mNumSavedTimers = SaveTimerInfo(reinterpret_cast<SavedTimerInfo *>(p));
+    p += header->mNumSavedTimers * sizeof(SavedTimerInfo);
+    header->mNumMilestoneTypes = SaveMilestoneInfo(reinterpret_cast<MilestoneTypeInfo *>(p));
+    p += header->mNumMilestoneTypes * sizeof(MilestoneTypeInfo);
+    header->mNumMilestoneRecords = SaveMilestones(reinterpret_cast<GMilestone *>(p));
+    p = AlignSave16(dest, p + header->mNumMilestoneRecords * sizeof(GMilestone));
+    header->mNumSpeedTrapRecords = SaveSpeedTraps(reinterpret_cast<GSpeedTrap *>(p));
+    p = AlignSave16(dest, p + header->mNumSpeedTrapRecords * sizeof(GSpeedTrap));
+    header->mNumHidingSpotFlags = sizeof(mHidingSpotFound) * 8;
+    std::memcpy(p, mHidingSpotFound, sizeof(mHidingSpotFound));
+    p += sizeof(mHidingSpotFound);
+    header->mNumBytesBinStats = GRaceDatabase::Exists() ? GRaceDatabase::Get().SerializeBins(p) : 0;
+    p = AlignSave16(dest, p + header->mNumBytesBinStats);
+    header->mNumPendingSMS = SaveSMSInfo(reinterpret_cast<int *>(p));
+    p = AlignSave16(dest, p + header->mNumPendingSMS * sizeof(int));
+    *reinterpret_cast<uint32 *>(p) = mFreeRoamStartMarker;
+    *reinterpret_cast<uint32 *>(p + 0x10) = mFreeRoamFromSafeHouseStartMarker;
+    MD5 md5;
+    md5.Update(dest + 0x10, static_cast<int>(maxSize - 0x10));
+    std::memcpy(header->mChecksum, md5.GetRaw(), sizeof(header->mChecksum));
+    return true;
+}
+
+// PC: 0x5F81D0
+bool GManager::LoadGameplayData(uint8 *src, unsigned int maxSize) {
+    if (maxSize < 0x80) {
+        return false;
+    }
+    SavedGameplayDataHeader *header = reinterpret_cast<SavedGameplayDataHeader *>(src);
+    MD5 md5;
+    md5.Update(src + 0x10, static_cast<int>(maxSize - 0x10));
+    if (std::memcmp(md5.GetRaw(), header->mChecksum, sizeof(header->mChecksum)) != 0 || header->mMagic != 0x656d6147 || header->mVersion < 8) {
+        return false;
+    }
+    ResetAllGameplayData();
+    uint8 *p = src + 0x80;
+    for (uint32 i = 0; i < header->mNumPersistent; i++) {
+        ObjectStateBlockHeader *saved = reinterpret_cast<ObjectStateBlockHeader *>(p);
+        void *block = AllocObjectStateBlock(saved->mKey, saved->mSize, true);
+        if (block != nullptr) {
+            std::memcpy(block, saved + 1, saved->mSize);
+        }
+        p += (saved->mSize + 0x17) & ~0xFu;
+    }
+    p = AlignSave16(src, p);
+    LoadTimerInfo(reinterpret_cast<SavedTimerInfo *>(p), header->mNumSavedTimers);
+    p += header->mNumSavedTimers * sizeof(SavedTimerInfo);
+    LoadMilestoneInfo(reinterpret_cast<MilestoneTypeInfo *>(p), header->mNumMilestoneTypes);
+    p += header->mNumMilestoneTypes * sizeof(MilestoneTypeInfo);
+    LoadMilestones(reinterpret_cast<GMilestone *>(p), header->mNumMilestoneRecords);
+    p = AlignSave16(src, p + header->mNumMilestoneRecords * sizeof(GMilestone));
+    LoadSpeedTraps(reinterpret_cast<GSpeedTrap *>(p), header->mNumSpeedTrapRecords);
+    p = AlignSave16(src, p + header->mNumSpeedTrapRecords * sizeof(GSpeedTrap));
+    const unsigned int hidingBytes = (header->mNumHidingSpotFlags + 7) >> 3;
+    std::memcpy(mHidingSpotFound, p, hidingBytes < sizeof(mHidingSpotFound) ? hidingBytes : sizeof(mHidingSpotFound));
+    p = AlignSave16(src, p + hidingBytes);
+    if (GRaceDatabase::Exists()) {
+        p = AlignSave16(src, p + GRaceDatabase::Get().DeserializeBins(p));
+    }
+    LoadSMSInfo(reinterpret_cast<int *>(p), header->mNumPendingSMS);
+    p = AlignSave16(src, p + header->mNumPendingSMS * sizeof(int));
+    // The saved start markers are only taken when they still exist.
+    const uint32 freeRoamStart = *reinterpret_cast<uint32 *>(p);
+    if (Attrib::Gen::gameplay(freeRoamStart, 0, nullptr).IsValid()) {
+        mFreeRoamStartMarker = freeRoamStart;
+    }
+    const uint32 safeHouseStart = *reinterpret_cast<uint32 *>(p + 0x10);
+    if (Attrib::Gen::gameplay(safeHouseStart, 0, nullptr).IsValid()) {
+        mFreeRoamFromSafeHouseStartMarker = safeHouseStart;
+    }
+    return true;
 }
 #endif

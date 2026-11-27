@@ -221,6 +221,13 @@ class Scrollerina {
     void SetClickToSelectMode(bool flag) {
         bInClickToSelectMode = flag;
     }
+#ifdef EA_PLATFORM_WIN32
+    // PC: 0x5926F0
+    void SetScrollRegion(FEObject *region) {
+        pScrollRegion = region;
+        FindSize();
+    }
+#endif
 
   protected:
     virtual void Print();

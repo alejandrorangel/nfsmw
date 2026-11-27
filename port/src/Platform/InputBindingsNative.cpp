@@ -9,8 +9,9 @@
 // of an Xbox 360 pad (buttons A B X Y LB RB Back Start LS RS, POV d-pad, X/Y
 // left stick, Z triggers, Rx/Ry right stick).
 //
-// The PC saves the bindings in the user profile; the port writes them to
-// $NFSMW_CONTROLS_CONFIG or ~/Library/Application Support/NFSMW/Controls.cfg.
+// The PC saves the bindings in the user profile, as the port does; without
+// profiles (NFSMW_MEMCARD=0) the port writes them to $NFSMW_CONTROLS_CONFIG or
+// ~/Library/Application Support/NFSMW/Controls.cfg.
 
 #include "InputBindingsNative.h"
 
@@ -36,6 +37,7 @@ struct PCGameAction {
     const char *Name;
     PCInputBinding Bindings[4];
 };
+static_assert(sizeof(PCInputBinding) * 4 == 0x30, "a profile saves 0x30 bytes of bindings per action");
 
 #define KB(k) {{PCINPUT_KEY, k, 0}, {}, {}, {}}
 #define KB2(k, k2) {{PCINPUT_KEY, k, 0}, {PCINPUT_KEY, k2, 0}, {}, {}}
@@ -798,7 +800,50 @@ const char *PCInputGetDeviceName(int device) {
 
 // sub_56E180 (UserProfile::SaveToBuffer): the joystick identity and the
 // rebindable actions' bindings.
+char *PCInputSaveBindingsToBuffer(char *buf, char *maxbuf) {
+    const uint32 identity = JoystickIdentity();
+    if (buf + sizeof(identity) <= maxbuf) {
+        std::memcpy(buf, &identity, sizeof(identity));
+        buf += sizeof(identity);
+    }
+    for (int i = 0; i < PCINPUT_NUM_CONFIG_ACTIONS; i++) {
+        const int size = sizeof(gGameActions[i].Bindings);
+        if (buf + size <= maxbuf) {
+            std::memcpy(buf, gGameActions[i].Bindings, size);
+            buf += size;
+        }
+    }
+    return buf;
+}
+
+// sub_56E200 (UserProfile::LoadFromBuffer): a different joystick than the one
+// the bindings were saved for gets its defaults (sub_63CD80).
+char *PCInputLoadBindingsFromBuffer(char *buf, char *maxbuf) {
+    uint32 saved_identity = 0;
+    char *p = buf + sizeof(saved_identity);
+    if (p <= maxbuf) {
+        std::memcpy(&saved_identity, buf, sizeof(saved_identity));
+    }
+    for (int i = 0; i < PCINPUT_NUM_CONFIG_ACTIONS; i++) {
+        const int size = sizeof(gGameActions[i].Bindings);
+        if (p + size <= maxbuf) {
+            std::memcpy(gGameActions[i].Bindings, p, size);
+        }
+        p += size;
+    }
+    gJoystickIdentity = saved_identity;
+    const uint32 current = JoystickIdentity();
+    if (saved_identity != current && current != 0) {
+        DefaultJoystick();
+    }
+    return p;
+}
+
 void PCInputSaveBindings() {
+    extern int IsMemcardEnabled;
+    if (IsMemcardEnabled) {
+        return; // saved with the profile
+    }
     const std::string path = ConfigPath();
     FILE *f = std::fopen(path.c_str(), "w");
     if (f == nullptr) {
@@ -842,7 +887,10 @@ void PCInputInitializeDevice() {
     gPrevRaw = gRaw;
     gJoyRest = gRaw.Joy;
     DefaultJoystick();
-    LoadBindings();
+    extern int IsMemcardEnabled;
+    if (!IsMemcardEnabled) {
+        LoadBindings(); // with profiles they load with the profile, as on PC
+    }
 }
 
 // sub_6349B0 (the device's PollDevice): while capturing only the capture runs

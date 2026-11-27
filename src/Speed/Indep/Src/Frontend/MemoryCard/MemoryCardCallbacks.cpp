@@ -23,6 +23,457 @@ UIMemcardBase *MemcardCallbacks::GetScreen() {
     return MemoryCard::GetInstance()->GetScreen();
 }
 
+#ifdef EA_PLATFORM_WIN32
+// The PC callbacks (speed.exe 1.3, vtable 0x89CD78).
+
+// PC: 0x560980
+void MemcardCallbacks::ShowMessage(const wchar_t *msg, uint32_t nOptions, const wchar_t **options) {
+    JLog(MJ_ShowMesssage);
+    JLog(msg);
+    JLog(nOptions);
+    for (uint32 i = 0; i < nOptions; i++) {
+        JLog(options[i]);
+    }
+    DisplayMessage(msg, nOptions, options);
+    GetMemcard()->m_bWaitingForResponse = true;
+    if (!GetMemcard()->m_bInAutoSave || gMemcardSetup.GetCommand() == MCO_AutoSave) {
+        UIMemcardBase *pScreen = GetScreen();
+        if ((GetMemcard()->m_MemOp < MemoryCard::MO_FakeLoad || GetMemcard()->m_MemOp > MemoryCard::MO_LoadYNCF || nOptions != 0) &&
+            pScreen != nullptr) {
+            if (pScreen->IsInButtonAnimation()) {
+                GetMemcard()->ReleasePendingMessage();
+                GetMemcard()->m_PendingMessage = new ("Memcard Msg", 0) MemoryCardMessage(msg, nOptions, options);
+                return;
+            }
+            pScreen->ShowMessage(msg, nOptions, options[0], options[1], options[2]);
+        }
+        return;
+    }
+    if (nOptions == 0) {
+        GetMemcard()->m_bWaitingForResponse = false;
+        return;
+    }
+    GetMemcard()->m_PendingMessage = new ("Memcard Msg", 0) MemoryCardMessage(msg, nOptions, options);
+    GetMemcard()->HandleAutoSaveError();
+}
+
+// PC: 0x518FE0
+void MemcardCallbacks::ClearMessage() {
+    if (!GetMemcard()->m_bInAutoSave) {
+        JLog(MJ_ClearMessage);
+    }
+}
+
+// PC: 0x559AC0. MemoryCardImp::BootupCheckDone looks for profiles.
+void MemcardCallbacks::BootupCheckDone(RealmcIface::CardStatus status, RealmcIface::BootupCheckResults res) {
+    JLog(MJ_BootupCheckDone);
+    JLog(status);
+    JLog(res.mEntryFound);
+    GetMemcard()->m_MemOp = MemoryCard::MO_NONE;
+    GetMemcard()->m_pImp->DestructSaveInfo();
+    GetMemcard()->m_LastError = static_cast<unsigned short>(status);
+    GetMemcard()->m_SpecialError = static_cast<unsigned short>(status);
+    GetMemcard()->m_pImp->BootupCheckDone(status, &res);
+    GetMemcard()->SetBootFound(res.mEntryFound);
+    if (GetMemcard()->m_bRetryBootCheck) {
+        GetScreen()->HideAllButtons();
+        GetScreen()->m_ExpectingInput = false;
+        return;
+    }
+    cFEng::Get()->QueueGameMessage(0x461a18ee, GetScreen()->GetPackageName(), 0xff);
+}
+
+// PC: 0x519010
+void MemcardCallbacks::SaveCheckDone(RealmcIface::TaskResult result, RealmcIface::CardStatus status) {
+    JLog(MJ_SaveCheckDone);
+}
+
+// PC: 0x526AC0
+void MemcardCallbacks::SaveDone(const char *filename) {
+    JLog(MJ_SaveDone);
+    JLog(filename);
+    if (GetMemcard()->IsTypeProfile()) {
+        bFree(GetMemcard()->m_pBuffer);
+    }
+    GetMemcard()->m_pImp->DestructSaveInfo();
+    GetMemcard()->m_pBuffer = nullptr;
+    GetMemcard()->m_MemOp = MemoryCard::MO_NONE;
+    FEDatabase->bProfileLoaded = true;
+    FEDatabase->SetOptionsDirty(false);
+    GetMemcard()->m_bCardRemoved = false;
+    if (GetMemcard()->m_bManualSave && gMemcardSetup.GetCommand() != MCO_AutoSave) {
+        if (FEDatabase->GetGameplaySettings()->AutoSaveOn) {
+            GetMemcard()->SetRetryAutoSave(false);
+            GetMemcard()->SetAutoSaveEnabled(true);
+            return;
+        }
+        cFEng::Get()->QueueGameMessage(0x461a18ee, nullptr, 0xff);
+        return;
+    }
+    if (!GetMemcard()->m_bInAutoSave && gMemcardSetup.GetCommand() != MCO_AutoSave) {
+        return;
+    }
+    GetMemcard()->m_bAutoSaveCardPulled = false;
+    if (GetMemcard()->IsRetryingAutoSave()) {
+        GetMemcard()->ShowMessages(false);
+        GetMemcard()->SetRetryAutoSave(false);
+        GetMemcard()->SetAutoSaveEnabled(true);
+    }
+    GetMemcard()->EndAutoSave();
+    if (gMemcardSetup.GetCommand() == MCO_AutoSave) {
+        cFEng::Get()->QueueGameMessage(0x461a18ee, nullptr, 0xff);
+    }
+}
+
+// PC: 0x519030
+RealmcIface::DataStatus MemcardCallbacks::CheckLoadedData(const char *data) {
+    JLog(MJ_CheckLoadedData);
+    return RealmcIface::DATA_OK;
+}
+
+// PC: 0x526C90
+void MemcardCallbacks::LoadDone(const char *filename) {
+    JLog(MJ_LoadDone);
+    JLog(filename);
+    char *header = GetMemcard()->GetHeader();
+    if (Joylog::IsReplaying()) {
+        Joylog::GetData(header, 8, JOYLOG_CHANNEL_MEMORY_CARD);
+    }
+    if (Joylog::IsCapturing()) {
+        JLog(header, 8);
+    }
+    char *data = GetMemcard()->GetData();
+    unsigned int size = GetMemcard()->GetSize();
+    if (Joylog::IsReplaying()) {
+        Joylog::GetData(data, size, JOYLOG_CHANNEL_MEMORY_CARD);
+    }
+    if (Joylog::IsCapturing()) {
+        JLog(data, size);
+    }
+    unsigned int *pHeader = reinterpret_cast<unsigned int *>(GetMemcard()->GetHeader());
+    GetMemcard()->m_MemOp = MemoryCard::MO_NONE;
+    if (pHeader[0] == 0x10d && pHeader[1] == GetMemcard()->GetSize() && GetMemcard()->IsTypeProfile()) {
+        if (FEDatabase->LoadUserProfileFromBuffer(GetMemcard()->GetData(), GetMemcard()->GetSize(), GetMemcard()->GetPlayerNum())) {
+            FEDatabase->DeallocBackupDB();
+            if (GetMemcard()->GetPlayerNum() != 0) {
+                if (GetMemcard()->m_pBuffer != nullptr) {
+                    bFree(GetMemcard()->m_pBuffer);
+                    GetMemcard()->m_pBuffer = nullptr;
+                }
+                cFEng::Get()->QueueGameMessage(0x461a18ee, nullptr, 0xff);
+                return;
+            }
+            FEDatabase->bProfileLoaded = true;
+            GetMemcard()->m_bCardRemoved = false;
+            if (FEDatabase->GetGameplaySettings()->AutoSaveOn) {
+                if (GetMemcard()->m_pBuffer != nullptr) {
+                    bFree(GetMemcard()->m_pBuffer);
+                    GetMemcard()->m_pBuffer = nullptr;
+                }
+                GetMemcard()->SetAutoSaveEnabled(true);
+            } else {
+                cFEng::Get()->QueueGameMessage(gMemcardSetup.GetCommand() == MCO_BootList ? 0xa4bb7ae1 : 0x461a18ee, nullptr, 0xff);
+            }
+        } else {
+            GetMemcard()->ShowMessages(false);
+            FEDatabase->RestoreFromBackupDB();
+            cFEng::Get()->QueueGameMessage(0xf35d144e, nullptr, 0xff);
+        }
+    } else {
+        FEDatabase->RestoreFromBackupDB();
+        cFEng::Get()->QueueGameMessage(0xf35d144e, nullptr, 0xff);
+    }
+    if (GetMemcard()->m_pBuffer != nullptr) {
+        bFree(GetMemcard()->m_pBuffer);
+        GetMemcard()->m_pBuffer = nullptr;
+    }
+    FEDatabase->DeallocBackupDB();
+}
+
+// PC: 0x519050
+void MemcardCallbacks::DeleteDone(const char *filename) {
+    JLog(MJ_DeleteDone);
+    JLog(filename);
+    int idx = GetMemcard()->GetPrefixLength();
+    if (bStrCmp(filename + idx, FEDatabase->GetUserProfile(0)->GetProfileName()) == 0) {
+        FEDatabase->DefaultProfile();
+        FEDatabase->bProfileLoaded = false;
+    }
+    GetMemcard()->m_MemOp = MemoryCard::MO_NONE;
+    cFEng::Get()->QueueGameMessage(0x461a18ee, GetScreen()->GetPackageName(), 0xff);
+}
+
+// PC: 0x519100
+void MemcardCallbacks::ClearEntries() {
+    JLog(MJ_ClearEntries);
+}
+
+// PC: 0x54F610
+void MemcardCallbacks::FoundEntry(const RealmcIface::EntryInfo *info) {
+    JLog(MJ_FoundEntry);
+    JLog(info);
+    if (GetMemcard()->m_bListingOldSaveFiles) {
+        GetMemcard()->m_bOldSaveFileExists = true;
+        return;
+    }
+    if (GetMemcard()->IsCheckingCardForOverwrite()) {
+        GetMemcard()->m_bFoundAutoSaveFile = true;
+        return;
+    }
+    if (GetMemcard()->IsTypeProfile()) {
+        GetScreen()->AddItem(info->mName, "", info->mUserDataSize, info->mStatus != RealmcIface::STATUS_OK ? MCFF_Corrupted : MCFF_OK);
+        GetMemcard()->m_EntryCount++;
+        return;
+    }
+    if (info->mStatus == RealmcIface::STATUS_OK) {
+        bStrNCpy(GetMemcard()->m_pBuffer + GetMemcard()->m_EntryCount * 0x10, info->mName, 0x10);
+        GetMemcard()->m_EntryCount++;
+    }
+}
+
+// PC: 0x54F6D0
+void MemcardCallbacks::FindEntriesDone(RealmcIface::CardStatus status) {
+    JLog(MJ_FindEntriesDone);
+    JLog(status);
+    GetMemcard()->m_MemOp = MemoryCard::MO_NONE;
+    GetMemcard()->SetListingForCreate(false);
+    if (GetMemcard()->m_bListingOldSaveFiles) {
+        GetMemcard()->EndListingOldSaveFiles();
+        return;
+    }
+    if (!GetMemcard()->IsCheckingCardForOverwrite()) {
+        cFEng::Get()->QueueGameMessage(0x5a051729, GetScreen()->GetPackageName(), 0xff);
+        return;
+    }
+    GetMemcard()->m_bCheckingCardForOverwrite = false;
+    if (GetMemcard()->m_bFoundAutoSaveFile) {
+        GetMemcard()->HandleAutoSaveOverwriteMessage();
+    } else {
+        GetMemcard()->DoAutoSave();
+    }
+}
+
+// PC: 0x519120
+void MemcardCallbacks::Retry(RealmcIface::CardStatus status) {
+    JLog(MJ_Retry);
+    JLog(status);
+}
+
+// PC: 0x526F60
+void MemcardCallbacks::Failed(RealmcIface::TaskResult result, RealmcIface::CardStatus status) {
+    JLog(MJ_Failed);
+    JLog(status);
+    JLog(result);
+    unsigned int msg = 0x8867412d;
+    if (GetMemcard()->m_pBuffer != nullptr) {
+        bFree(GetMemcard()->m_pBuffer);
+        GetMemcard()->m_pBuffer = nullptr;
+    }
+    if (GetMemcard()->m_pImp->GetSaveInfo() != nullptr) {
+        GetMemcard()->m_pImp->DestructSaveInfo();
+    }
+    if (GetMemcard()->IsAutoSaving() || GetMemcard()->IsCheckingCardForAutoSave()) {
+        GetMemcard()->m_MemOp = MemoryCard::MO_NONE;
+        GetMemcard()->EndAutoSave();
+        if (gMemcardSetup.GetCommand() == MCO_AutoSave) {
+            cFEng::Get()->QueueGameMessage(0x8867412d, nullptr, 0xff);
+        }
+        FEDatabase->GetGameplaySettings()->AutoSaveOn = false;
+        return;
+    }
+    if (GetMemcard()->IsListingOldSaveFiles()) {
+        GetMemcard()->m_MemOp = MemoryCard::MO_NONE;
+        GetMemcard()->EndListingOldSaveFiles();
+        return;
+    }
+    if (GetMemcard()->IsRetryingAutoSave()) {
+        GetMemcard()->SetRetryAutoSave(false);
+        FEDatabase->GetGameplaySettings()->AutoSaveOn = false;
+        if (result == RealmcIface::RESULT_CANCELLED || status == RealmcIface::STATUS_CARD_DAMAGED) {
+            msg = 0xfe202e3b;
+        }
+    }
+    if (gMemcardSetup.GetCommand() == MCO_CreateNew && GetMemcard()->GetOp() == MemoryCard::MO_List) {
+        GetMemcard()->SetListingForCreate(false);
+        GetMemcard()->m_MemOp = MemoryCard::MO_NONE;
+        cFEng::Get()->QueueGameMessage(0x5a051729, GetScreen()->GetPackageName(), 0xff);
+        return;
+    }
+    switch (GetMemcard()->GetOp()) {
+        case MemoryCard::MO_BootUp:
+            GetMemcard()->m_pImp->DestructSaveInfo();
+            break;
+        case MemoryCard::MO_Save:
+            if ((status == RealmcIface::STATUS_NO_CARD || (status > RealmcIface::STATUS_CARD_DAMAGED && status < RealmcIface::STATUS_ACCESS_DENIED)) &&
+                gMemcardSetup.GetCommand() == MCO_CreateNew) {
+                FEDatabase->GetGameplaySettings()->AutoSaveOn = false;
+            }
+            msg = 0xdc12af2e;
+            // fall through
+        case MemoryCard::MO_Load:
+            if (GetMemcard()->IsTypeProfile()) {
+                bFree(GetMemcard()->m_pBuffer);
+            }
+            GetMemcard()->m_pBuffer = nullptr;
+            GetMemcard()->m_SpecialError = static_cast<unsigned short>(status);
+            break;
+        case MemoryCard::MO_List:
+            if (status == RealmcIface::STATUS_CARD_DAMAGED) {
+                msg = 0x5a051729;
+            }
+            break;
+    }
+    GetMemcard()->m_LastError = static_cast<unsigned short>(status);
+    GetMemcard()->m_MemOp = MemoryCard::MO_NONE;
+    cFEng::Get()->QueueGameMessage(msg, GetScreen()->GetPackageName(), 0xff);
+}
+
+// PC: 0x519150
+void MemcardCallbacks::CardChanged(RealmcIface::TaskResult result, RealmcIface::CardStatus status) {
+    if (result == RealmcIface::RESULT_RETRY) {
+        if (status == RealmcIface::STATUS_CARD_CHANGED) {
+            cFEng::Get()->QueueGameMessage(0x3a2be557, nullptr, 0xff);
+        }
+        if (status == RealmcIface::STATUS_NO_CARD || status == RealmcIface::STATUS_CARD_DAMAGED || status == RealmcIface::STATUS_CARD_CHANGED) {
+            return;
+        }
+    }
+    if (status != RealmcIface::STATUS_OK) {
+        cFEng::Get()->QueueGameMessage(0x8867412d, nullptr, 0xff);
+    }
+}
+
+// PC: 0x560BD0
+void MemcardCallbacks::CardChecked(const RealmcIface::CardInfo *info) {
+    JLog(MJ_CardChecked);
+    JLog(info);
+    unsigned int msg = 0x8867412d;
+    if (!GetMemcard()->IsCheckingCardForAutoSave()) {
+        MemoryCard::SetMessageMode(RealmcIface::ID_CHECKINGFORCARD, true);
+        if (info->mStatus == RealmcIface::STATUS_OK) {
+            msg = 0x461a18ee;
+        }
+        GetMemcard()->m_MemOp = MemoryCard::MO_NONE;
+        GetMemcard()->m_LastError = static_cast<unsigned short>(info->mStatus);
+        if (GetScreen() != nullptr) {
+            cFEng::Get()->QueueGameMessage(msg, GetScreen()->GetPackageName(), 0xff);
+        }
+        return;
+    }
+    GetMemcard()->m_MemOp = MemoryCard::MO_NONE;
+    GetMemcard()->m_LastError = static_cast<unsigned short>(info->mStatus);
+    switch (info->mStatus) {
+        case RealmcIface::STATUS_OK:
+        case RealmcIface::STATUS_CARD_CHANGED:
+        case RealmcIface::STATUS_CARD_DAMAGED:
+        case RealmcIface::STATUS_WRONG_DEVICE:
+        case RealmcIface::STATUS_CARD_FULL:
+        case RealmcIface::STATUS_ACCESS_DENIED:
+            GetMemcard()->DoAutoSave();
+            return;
+        case RealmcIface::STATUS_NO_CARD:
+            GetMemcard()->HandleAutoSaveError();
+            return;
+        default:
+            return;
+    }
+}
+
+// PC: 0x560CE0
+void MemcardCallbacks::CardRemoved() {
+    JLog(MJ_CardRemoved);
+    GetMemcard()->m_bAutoSaveCardPulled = true;
+    if (GetMemcard()->GetOp() == MemoryCard::MO_Save) {
+        GetMemcard()->m_bAutoSaveCardPulledDuringSave = true;
+    }
+    if (GetMemcard()->IsCheckingCardForOverwrite()) {
+        GetMemcard()->HandleAutoSaveError();
+        return;
+    }
+    if (FEDatabase->GetGameplaySettings()->AutoSaveOn) {
+        GetMemcard()->m_bCardRemoved = true;
+    }
+    FEDatabase->GetGameplaySettings()->AutoSaveOn = false;
+    if (FEDatabase->IsOptionsMode()) {
+        cFEng::Get()->QueueGameMessage(0x7e998e5e, nullptr, 0xff);
+    }
+}
+
+// PC: 0x5271E0
+void MemcardCallbacks::SetAutosaveDone(RealmcIface::TaskResult res, RealmcIface::CardStatus status, RealmcIface::AutosaveState flag) {
+    JLog(MJ_SetAutosaveDone);
+    JLog(res);
+    JLog(status);
+    JLog(reinterpret_cast<unsigned int &>(flag));
+    GetMemcard()->m_MemOp = MemoryCard::MO_NONE;
+    GetMemcard()->m_bAutoSave = (flag == RealmcIface::AUTOSAVE_ENABLE);
+    GetMemcard()->m_bAutoSaveCardPulled = false;
+    GetMemcard()->m_bAutoSaveCardPulledDuringSave = false;
+    if (GetMemcard()->m_bDisablingAutoSaveForSave) {
+        GetMemcard()->m_bDisablingAutoSaveForSave = false;
+        GetMemcard()->ShowMessages(true);
+        cFEng::Get()->QueueGameMessage(0xc6c6b68f, GetMemcard()->IsMemcardScreenShowing() ? gMemcardSetup.mMemScreen : nullptr, 0xff);
+        return;
+    }
+    unsigned int msg = 0x461a18ee;
+    if (status != RealmcIface::STATUS_OK && flag != RealmcIface::AUTOSAVE_ENABLE) {
+        if (status == RealmcIface::STATUS_NO_CARD || status == RealmcIface::STATUS_CARD_UNFORMATTED) {
+            msg = 0xb57fdb17;
+        }
+        FEDatabase->GetGameplaySettings()->AutoSaveOn = false;
+    }
+    if (gMemcardSetup.mPreviousCommand == MCO_BootList) {
+        msg = 0xa4bb7ae1;
+    }
+    if (!GetMemcard()->IsAutoSaving()) {
+        cFEng::Get()->QueueGameMessage(msg, nullptr, 0xff);
+    } else {
+        if (flag != RealmcIface::AUTOSAVE_ENABLE && FEDatabase->GetGameplaySettings()->AutoSaveOn) {
+            FEDatabase->GetGameplaySettings()->AutoSaveOn = false;
+            GetMemcard()->m_bCardRemoved = true;
+        }
+        GetMemcard()->EndAutoSave();
+    }
+    if (flag == RealmcIface::AUTOSAVE_ENABLE) {
+        FEDatabase->GetGameplaySettings()->AutoSaveOn = true;
+        GetMemcard()->m_bCardRemoved = false;
+    }
+}
+
+// PC: 0x5191E0
+void MemcardCallbacks::SetMonitorDone(RealmcIface::CardStatus status, RealmcIface::MonitorState state) {
+    JLog(MJ_SetMonitorDone);
+    JLog(status);
+    JLog(state);
+    GetMemcard()->m_MemOp = MemoryCard::MO_NONE;
+    GetMemcard()->m_bMonitorOn = (state == RealmcIface::MONITOR_ON || state == RealmcIface::MONITOR_ON_USER_CANCELLED);
+    unsigned int msg;
+    if (state == RealmcIface::MONITOR_ON) {
+        msg = status != RealmcIface::STATUS_OK ? 0x8867412d : 0x54b3ac6c;
+    } else if (cFEng::Get()->IsPackagePushed("MC_List.fng")) {
+        msg = 0xeb29392a;
+    } else {
+        msg = MemoryCard::GetInstance()->IsMemcardScreenShowing() ? 0x8867412d : static_cast<unsigned int>(status);
+    }
+    cFEng::Get()->QueueGameMessage(msg, nullptr, 0xff);
+}
+
+// PC: 0x5192F0
+RealmcIface::TaskStatus MemcardCallbacks::LoadReady(const char *entryName, unsigned int headerSize, unsigned int bodySize, char *&headerData,
+                                                    char *&bodyData) {
+    JLog(MJ_LoadReady);
+    JLog(entryName);
+    RealmcIface::TaskStatus res = RealmcIface::TASK_CANCEL;
+    JLog(headerSize);
+    JLog(bodySize);
+    if (headerSize == 8 && bodySize == GetMemcard()->GetSize()) {
+        res = RealmcIface::TASK_CONTINUE;
+        bodyData = GetMemcard()->m_pBuffer;
+        headerData = GetMemcard()->GetHeader();
+    }
+    return res;
+}
+#else
 void MemcardCallbacks::ShowMessage(const wchar_t *msg, uint32_t nOptions, const wchar_t **options) {
     if (GetMemcard()->IsMemcardScreenExiting()) {
         return;
@@ -580,6 +1031,7 @@ RealmcIface::TaskStatus MemcardCallbacks::LoadReady(const char *entryName, unsig
     }
     return res;
 }
+#endif
 
 // UNSOLVED
 void IJoyHelper::EmulateMemoryCardLibrary(int aJoyOp) {

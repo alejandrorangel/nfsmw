@@ -215,6 +215,11 @@ class MemoryCard {
     UIMemcardBase *GetScreen() {
         return m_pFEScreen;
     }
+#if defined(EA_PORT_NATIVE)
+    RealmcIface::MemcardInterface *GetInterface() {
+        return m_pIMemcard;
+    }
+#endif
     char *GetHeader() {
         return reinterpret_cast<char *>(m_Header);
     }

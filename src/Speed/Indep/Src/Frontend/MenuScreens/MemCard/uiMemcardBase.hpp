@@ -164,6 +164,9 @@ class UIMemcardBase : public UIMemcardKeyboard {
     uint32 GetAutoSaveWarning2();
 
     friend class UIMemcardList;
+#ifdef EA_PLATFORM_WIN32
+    friend class MemcardCallbacks;
+#endif
 };
 
 #endif

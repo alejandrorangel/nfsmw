@@ -6,8 +6,10 @@
 class UIMemcardBoot : public UIMemcardBase {
   public:
     UIMemcardBoot(ScreenConstructorData *sd) : UIMemcardBase(sd) {
+#ifndef EA_PLATFORM_WIN32 // PC: 0x559C20 leaves the blurb alone
         FEString *mpBlurb = FEngFindString(GetPackageName(), 0x1e2640fa);
         mpBlurb->Flags &= ~0x200;
+#endif
     }
     ~UIMemcardBoot() override {}
 

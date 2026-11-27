@@ -102,6 +102,7 @@ add_library(nfsmw_platform OBJECT
     src/Platform/VisualTreatmentNative.cpp
     src/Platform/GraphicsOptionsNative.cpp
     src/Platform/TextInputNative.cpp
+    src/Platform/RealmcNative.cpp
     src/Game/SelectCarCameraMover.cpp
     src/Game/CameraDriveNative.cpp
     src/Game/RainNative.cpp
@@ -111,6 +112,7 @@ add_library(nfsmw_platform OBJECT
     src/Game/AttribDefaultsNative.cpp
     src/Game/UComNative.cpp
     src/Game/GInfractionManagerNative.cpp
+    src/Game/MemoryCardImpNative.cpp
     src/Audio/EAAudioFormat.cpp
     src/Audio/AudioMixer.cpp
     src/Audio/SpchNative.cpp

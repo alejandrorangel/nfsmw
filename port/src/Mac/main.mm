@@ -17,7 +17,7 @@ extern void bMemoryInit();
 // Game config switch (Misc/Config.cpp). Sound is still opt-in (NFSMW_SOUND=1):
 // frontend sound effects play natively, music and in-game audio don't yet.
 extern int IsSoundEnabled;
-extern int IsMemcardEnabled; // save system: the decomp's layer is GameCube-specific
+extern int IsMemcardEnabled; // profiles (the PC's file-based realmc store)
 // Keyboard events -> game input (InputMac.mm).
 #include "../Audio/AudioMixer.h"
 
@@ -31,8 +31,11 @@ static void *GameThread(void *) {
     if (getenv("NFSMW_SOUND") == nullptr) {
         IsSoundEnabled = 0; // the game also turns off streaming, speech and NIS audio
     }
-    if (getenv("NFSMW_MEMCARD") == nullptr) {
-        IsMemcardEnabled = 0; // no saves until the PC profile layer is ported
+    // Profiles are on, as on PC; NFSMW_MEMCARD=0 plays without them (no saves).
+    if (const char *memcard = getenv("NFSMW_MEMCARD")) {
+        if (strcmp(memcard, "0") == 0) {
+            IsMemcardEnabled = 0;
+        }
     }
     bMemoryInit();
     if (IsSoundEnabled != 0) {

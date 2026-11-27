@@ -18,6 +18,9 @@
 #include "Speed/Indep/bWare/Inc/bWare.hpp"
 #include "realmemcard/memcard_interface.h"
 #include "Speed/Indep/Src/Frontend/MemoryCard/MemoryCardImp.hpp"
+#if defined(EA_PORT_NATIVE)
+bool PortOldSaveFolderHasEntries(); // port/src/Game/MemoryCardImpNative.cpp
+#endif
 
 // TODO d:/packages/realcore/6.24.00/source/std/cmn/locale.cpp
 void LOCALE_create(void *data, int param);
@@ -62,13 +65,22 @@ RealmcIface::GameInfo::GameInfo(const wchar_t *gameTitle, unsigned int titleId, 
 // : RealmcIface::GameInfo::GameInfo(reinterpret_cast<const unsigned short *>(gameTitle), titleId, multipleSaveTypesUsed, multitapSupported)
 {}
 
+#if !defined(EA_PORT_NATIVE)
 void RealmcIface::MemcardInterface::Load(const char *entryName, char *header, char *body, const wchar_t *contentName, const TitleInfo *titleInfo) {}
+#endif
 
 void InitMemoryCard() {
     MemoryCard::s_pThis = new ("MemoryCard", 0) MemoryCard();
+#ifdef EA_PLATFORM_WIN32
+    // PC: 0x5435D0
+    bStrCpy(gSaveType0, "Profile");
+    bStrCpy(gSaveType1, "Thumbnail");
+    bStrCpy(gSaveType2, "Image");
+#else
     bStrCpy(gSaveType0, "");
     bStrCpy(gSaveType1, "");
     bStrCpy(gSaveType2, "");
+#endif
     bStrCpy(MemoryCardImp::gContentName, "NFSMWSD");
     MemoryCard::s_pThis->Init();
 }
@@ -265,7 +277,9 @@ void MemoryCard::LoadLocale(eLanguages eLang) {
     bClose(file);
     LOCALE_create(GetInstance()->m_pLocaleFileHandler, 1);
     LOCALE_setstate(GetInstance()->m_pLocaleFileHandler, LOCALE_LANGUAGEID, 0);
+#ifndef EA_PLATFORM_WIN32 // PC: 0x5182A0 keeps "Profile"
     bStrCpy(gSaveType0, GetLocalizedString(0xe6f55df0));
+#endif
 }
 
 int MemoryCard::GetPrefixLength() {
@@ -301,6 +315,32 @@ void MemoryCard::Tick(int TickCount) {
         if (Joylog::IsCapturing())
             CaptureJoyOp(MJ_None);
     }
+#ifdef EA_PLATFORM_WIN32
+    // PC: 0x563D10. While a memory card screen or the autosave icon is up in
+    // game, controller errors are held back.
+    if (FEDatabase == nullptr || FEDatabase->IsOptionsMode())
+        return;
+    if (cFEng::Get()->IsPackagePushed("MC_Main.fng") || cFEng::Get()->IsPackagePushed("InGame_MC_Main.fng") || IsAutoSaveIconVisible()) {
+        if (FEManager::Get()->IsAllowingControllerError() || TheGameFlowManager.IsInGame()) {
+            if (cFEng::Get()->IsPackagePushed("InGamePhotoMaster.fng") || cFEng::Get()->IsPackagePushed("PostRace_Pursuit.fng"))
+                m_bNonSilentAutoSave = true;
+            m_bNeedToAllowControllerErrors = true;
+            FEManager::Get()->AllowControllerError(false);
+            FEManager::Get()->SuppressControllerError(true);
+        }
+    } else if (m_bNeedToAllowControllerErrors) {
+        m_bNeedToAllowControllerErrors = false;
+        if (!FEManager::Get()->IsAllowingControllerError()) {
+            if (m_bNonSilentAutoSave) {
+                m_bNonSilentAutoSave = false;
+                return;
+            }
+            FEManager::Get()->AllowControllerError(true);
+            FEManager::Get()->SuppressControllerError(false);
+        }
+    }
+    return;
+#endif
     if (FEDatabase == nullptr)
         return;
     if (FEDatabase->IsOptionsMode())
@@ -336,9 +376,16 @@ void MemoryCard::MessageDone(RealmcIface::MessageChoices nInput) {
 }
 
 void MemoryCard::BootupCheck(const char *entry) {
+#ifdef EA_PLATFORM_WIN32
+    // PC: 0x518440
+    bStrCat(m_Filename, m_pImp->GetPrefix(), "*");
+    m_pImp->ConstructSaveInfo(ST_PROFILE, "", FEDatabase->GetUserProfileSaveSize(false));
+    m_BootupParams.mEntryNamePattern = m_Filename;
+#else
     bStrCpy(m_BootupFilename, "");
     m_pImp->ConstructSaveInfo(ST_PROFILE, "", FEDatabase->GetUserProfileSaveSize(false));
     m_BootupParams.mEntryNamePattern = m_BootupFilename;
+#endif
     m_BootupParams.mSaveReqs = reinterpret_cast<RealmcIface::SaveReq **>(m_pImp->GetSaveReqArray());
     m_BootupParams.mNumSaveTypes = 1;
     m_BootupParams.mValidCardIds = 1;
@@ -391,8 +438,13 @@ void MemoryCard::StartAutoSave(bool bForce) {
         m_bInAutoSave = true;
         m_bCheckingCardForAutoSave = true;
         FEManager::Get()->SuppressControllerError(true);
+#ifdef EA_PLATFORM_WIN32
+        // PC: 0x562AB0 saves without checking the card first.
+        DoAutoSave();
+#else
         ShowMessages(false);
         CheckCard(0);
+#endif
     }
 }
 
@@ -421,7 +473,11 @@ void MemoryCard::EndAutoSave() {
 
 void MemoryCard::StartListingOldSaveFiles() {
     m_bListingOldSaveFiles = true;
+#ifdef EA_PLATFORM_WIN32
+    ListOldSaveFilesPC();
+#else
     ListOldSaveFilesNGC();
+#endif
 }
 
 void MemoryCard::EndListingOldSaveFiles() {
@@ -447,12 +503,17 @@ void MemoryCard::SetAutoSaveEnabled(bool bEnabled) {
     SetExtraParam(ST_PROFILE, entryname, nullptr, FEDatabase->GetUserProfileSaveSize(false));
     bStrCat(m_Filename, m_pImp->GetPrefix(), entryname);
     bStrNCpy(MemoryCardImp::gContentName, entryname, 16);
+#ifdef EA_PLATFORM_WIN32
+    // PC: 0x5268B0 (no "checking card" text).
+    ShowMessages(GetScreen() != nullptr && gMemcardSetup.GetCommand() == MCO_EnableAutoSave);
+#else
     if ((GetScreen() != nullptr) && gMemcardSetup.GetCommand() == MCO_EnableAutoSave) {
         GetScreen()->SetStringCheckingCard();
         ShowMessages(true);
     } else {
         ShowMessages(false);
     }
+#endif
     m_pIMemcard->SetMessage(RealmcIface::MESSAGE_SHOW, RealmcIface::ID_CHECKINGFORCARD);
     if (bEnabled) {
         gMemcardSetup.ClearCommand();
@@ -539,6 +600,14 @@ void MemoryCard::Load(const char *filename) {
         bStrCat(m_Filename, m_pImp->GetPrefix(), filename);
     }
     InitCommand(MO_Load);
+#ifdef EA_PLATFORM_WIN32
+    // PC: 0x5189F0 (no boot-time autoload).
+    if (!Joylog::IsReplaying()) {
+        m_pIMemcard->Load(m_Filename, nullptr, nullptr, reinterpret_cast<const wchar_t *>(MemoryCardImp::gContentName),
+                          static_cast<const RealmcIface::TitleInfo *>(nullptr));
+    }
+    return;
+#endif
     if (!Joylog::IsReplaying()) {
         if (InBootSequence()) {
             m_bAutoLoading = true;
@@ -566,6 +635,20 @@ void MemoryCard::ListOldSaveFilesNGC() {
     GetInstance()->ShowMessages(false);
     List("NFSU2*", &titleInfo);
 }
+
+#ifdef EA_PLATFORM_WIN32
+// PC: 0x518B40. The one time cash bonus for having NFS Underground 2 saves
+// (<Local AppData>\NFS Underground 2 not empty). Natively the folder is
+// NFSMW_NFSU2_SAVE_DIR when set. TODO(port): no default location.
+void MemoryCard::ListOldSaveFilesPC() {
+#if defined(EA_PORT_NATIVE)
+    if (PortOldSaveFolderHasEntries()) {
+        s_pThis->m_bOldSaveFileExists = true;
+    }
+#endif
+    EndListingOldSaveFiles();
+}
+#endif
 
 void MemoryCard::ReleasePendingMessage() {
     if (m_PendingMessage != nullptr) {

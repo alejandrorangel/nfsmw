@@ -35,6 +35,10 @@
 #include "Speed/Indep/Src/Frontend/RaceStarter.hpp"
 #include "Speed/Indep/Src/Frontend/FEManager.hpp"
 #include "Speed/Indep/Src/Frontend/MemoryCard/MemoryCard.hpp"
+#if defined(EA_PORT_NATIVE)
+#include "Speed/Indep/Src/Generated/Messages/MControlPathfinder.h"
+#include "Speed/Indep/Src/Input/PCInputBindings.h"
+#endif
 
 extern int g_MaxSongs;
 
@@ -42,6 +46,12 @@ extern Attrib::Key HudConfigs[5][2];
 extern Attrib::Key DriveConfigs[5][2];
 
 cFrontendDatabase *FEDatabase;
+
+#if defined(EA_PORT_NATIVE)
+// The PC profile's cOnlineSettings block (0x57FFB0 / 0x580080); there are no
+// online settings natively, so the saved bytes are only kept.
+static uint8 gPortOnlineSettingsSave[0x36];
+#endif
 
 // UNSOLVED
 char *SaveSomeData(void *save_to, void *save_from, int bytes, void *maxptr) {
@@ -461,7 +471,14 @@ char *CareerSettings::LoadFromBuffer(void *buffer, void *maxbuf) {
     buf = LoadSomeData(&CurrentBin, buf, sizeof(CurrentBin), maxbuf);
     buf = LoadSomeData(&CurrentCash, buf, sizeof(CurrentCash), maxbuf);
     buf = LoadSomeData(&AdaptiveDifficulty, buf, sizeof(AdaptiveDifficulty), maxbuf);
+#ifdef EA_PLATFORM_WIN32
+    // PC: 0x5AC950 adds the saved flags to the current ones and drops 0x800.
+    uint32 savedFlags = 0;
+    buf = LoadSomeData(&savedFlags, buf, sizeof(savedFlags), maxbuf);
+    SpecialFlags = (SpecialFlags | savedFlags) & ~0x800u;
+#else
     buf = LoadSomeData(&SpecialFlags, buf, sizeof(SpecialFlags), maxbuf);
+#endif
     buf = LoadSomeData(SMSMessages, buf, sizeof(SMSMessages), maxbuf);
     buf = LoadSomeData(&SMSSortOrder, buf, sizeof(SMSSortOrder), maxbuf);
     buf = LoadSomeData(CaseFileName, buf, sizeof(CaseFileName), maxbuf);
@@ -723,6 +740,12 @@ void UserProfile::SaveToBuffer(void *buffer, int size) {
         uint32 h = FEDatabase->GetQuickRaceSettings(static_cast<GRace::Type>(i))->GetSelectedCar(0);
         buf = SaveSomeData(buf, &h, sizeof(h), maxbuf);
     }
+#if defined(EA_PORT_NATIVE)
+    // PC: 0x58FD10 then saves the online settings (cOnlineSettings::SaveToBuffer
+    // 0x57FFB0, kept as loaded natively) and the controller bindings (sub_56E180).
+    buf = SaveSomeData(buf, gPortOnlineSettingsSave, sizeof(gPortOnlineSettingsSave), maxbuf);
+    buf = PCInputSaveBindingsToBuffer(buf, maxbuf);
+#endif
     WriteProfileHash(static_cast<char *>(buffer) + 0x10, buf, size - 0x20, maxbuf);
 }
 
@@ -761,16 +784,44 @@ bool UserProfile::LoadFromBuffer(void *buffer, int size, bool commit_changes, in
         buf = LoadSomeData(&h, buf, sizeof(h), maxbuf);
         FEDatabase->GetQuickRaceSettings(static_cast<GRace::Type>(i))->SetSelectedCar(h, player_id);
     }
+#if defined(EA_PORT_NATIVE)
+    // PC: 0x5ACB70 (sub_580080, sub_56E200)
+    buf = LoadSomeData(gPortOnlineSettingsSave, buf, sizeof(gPortOnlineSettingsSave), maxbuf);
+    buf = PCInputLoadBindingsFromBuffer(buf, maxbuf);
+#endif
     if (!VerifyProfileHash(static_cast<char *>(buffer) + 0x10, buf, size - 0x20)) {
         return false;
     }
     m_bNamed = true;
+#if defined(EA_PORT_NATIVE)
+    // PC: 0x5ACB70
+    if (commit_changes) {
+        TheOptionsSettings.TheAudioSettings.AudioMode =
+            g_pEAXSound->SetAudioModeFromMemoryCard(static_cast<eSndAudioMode>(TheOptionsSettings.TheAudioSettings.AudioMode));
+        g_pEAXSound->UpdateVolumes(&TheOptionsSettings.TheAudioSettings, -1.0f);
+        MControlPathfinder(true, 0, 0, 0).Send("EATraxInit");
+    }
+#endif
     return true;
 }
 
 int32 UserProfile::GetSaveBufferSize(bool bExcludeGameplay) {
+#if defined(EA_PORT_NATIVE)
+    // PC (cFrontendDatabase::GetUserProfileSaveSize 0x57FD90):
+    // (bindings per action + 0x825) * 19 + the career's: the version, the
+    // career, the stable, the rest and the bindings, then 0x10 of MD5.
+    static_assert(sizeof(OptionsSettings) == 0x84, "PC profile layout");
+    static_assert(sizeof(FEPlayerCarDB) == 0x8CC8, "PC profile layout");
+    static_assert(sizeof(HighScoresDatabase) == 0xBD8, "PC profile layout");
+    static_assert(sizeof(Playlist) == 0xF0, "PC profile layout");
+    static_assert(sizeof(gPortOnlineSettingsSave) + PCINPUT_PROFILE_BINDINGS_SIZE + 0x10 + 4 + 0x20 + 0xF0 + 0x84 + 0x8CC8 + 1 + 0xBD8 + 0x2C + 0x10 ==
+                      (0x30 + 0x825) * 0x13,
+                  "PC profile size");
+    return (0x30 + 0x825) * 0x13 + TheCareerSettings.GetSaveBufferSize(bExcludeGameplay);
+#else
     int size = TheCareerSettings.GetSaveBufferSize(bExcludeGameplay) + 0x1e4;
     return size + PlayersCarStable.GetSaveBufferSize() + 0xc18;
+#endif
 }
 
 cFrontendDatabase::cFrontendDatabase()

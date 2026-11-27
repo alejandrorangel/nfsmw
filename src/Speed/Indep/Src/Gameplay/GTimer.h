@@ -65,6 +65,9 @@ class GEventTimer {
   protected:
     void Serialize(SavedTimerInfo *saveInfo);
     void Deserialize(SavedTimerInfo *saveInfo);
+#if defined(EA_PORT_NATIVE)
+    friend class GManager;
+#endif
 
   private:
     float mInterval;  // offset 0x0, size 0x4

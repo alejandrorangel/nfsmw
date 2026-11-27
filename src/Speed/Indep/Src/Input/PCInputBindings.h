@@ -74,8 +74,14 @@ const char *PCInputGetDeviceName(int device);
 
 #ifdef EA_PORT_NATIVE
 // The PC saves the bindings in the user profile (UserProfile::SaveToBuffer
-// 0x58FD10 -> sub_56E180, LoadFromBuffer -> sub_56E200); the port keeps them
-// in their own file.
+// 0x58FD10 -> sub_56E180, LoadFromBuffer -> sub_56E200): the joystick's
+// identity, then the rebindable actions' four bindings each.
+enum {
+    PCINPUT_PROFILE_BINDINGS_SIZE = 4 + PCINPUT_NUM_CONFIG_ACTIONS * 4 * 0xC,
+};
+char *PCInputSaveBindingsToBuffer(char *buf, char *maxbuf);
+char *PCInputLoadBindingsFromBuffer(char *buf, char *maxbuf);
+// Without profiles (NFSMW_MEMCARD=0) the port keeps them in their own file.
 void PCInputSaveBindings();
 #endif
 

@@ -16,12 +16,22 @@ void MemcardEnter(const char *from, const char *to, uint32 op, MemCardOpType pTe
     gMemcardSetup.mSuccessMsg = successMsg;
     gMemcardSetup.mFailedMsg = failedMsg;
     MemoryCard::GetInstance()->ShowMessages(true);
+#ifdef EA_PLATFORM_WIN32
+    // PC: 0x527940
+    MemoryCard::GetInstance()->SetPlayerNum((op & MCE_Player2) != 0 ? 1 : 0);
+    if (TheGameFlowManager.IsInFrontend()) {
+        gMemcardSetup.mMemScreen = "MC_Main.fng";
+    } else {
+        gMemcardSetup.mMemScreen = "InGame_MC_Main.fng";
+    }
+#else
     MemoryCard::GetInstance()->SetPlayerNum(op == MCE_Player2 ? 1 : 0);
     if (TheGameFlowManager.IsInFrontend()) {
         gMemcardSetup.mMemScreen = "MC_Main_GC.fng";
     } else {
         gMemcardSetup.mMemScreen = "InGame_MC_Main_GC.fng";
     }
+#endif
     switch (gMemcardSetup.GetMethod()) {
         case MCF_Switch:
             cFEng::Get()->QueuePackageSwitch(gMemcardSetup.mMemScreen, 0, 0, false);
