@@ -756,6 +756,8 @@ class GRaceCustom : public GRaceParameters {
     GActivity *GetRaceActivity() const;
 
   private:
+    friend class GRaceDatabase;
+
     GRaceCustom(const struct GRaceParameters &other);
 
     // Overrides: GRaceParameters

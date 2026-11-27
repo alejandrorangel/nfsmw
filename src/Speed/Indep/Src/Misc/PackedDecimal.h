@@ -15,17 +15,49 @@ template <int b> inline int RaiseToPower(int power) {
 template <typename N, int a, int b, int c, int d> class FloatingPoint {
   public:
     // Functions
-    FloatingPoint<N, a, b, c, d>(float val) {}
+    FloatingPoint() {}
 
-    operator float() {
-        int factor = mMan;
-        int exp = bAbs(mExp);
-
-        // UNSOLVED
+    // Normalises val to a mantissa in [a^(b-1), a^b) and a power-of-a exponent
+    // (PC: FixedPoint::___tbd, 0x5EA390).
+    FloatingPoint(float val) {
+        bool neg = false;
+        int exp = 0;
+        int man = 0;
+        if (val < 0.0f) {
+            neg = true;
+            val *= -1.0f;
+        }
+        if (val > 0.0f) {
+            while (static_cast<float>(GetNormalizedLower()) > val) {
+                exp--;
+                val *= static_cast<float>(a);
+            }
+            man = static_cast<int>(val);
+            while (man >= GetNormalizedUpper()) {
+                man /= a;
+                exp++;
+            }
+        }
+        if (neg) {
+            man = -man;
+        }
+        mExp = exp;
+        mMan = man;
     }
 
-    operator int() {
-        return static_cast<int>(float());
+    // PC: 0x5DE810.
+    operator float() const {
+        int exp = mExp;
+        int man = mMan;
+        int factor = RaiseToPower<a>(bAbs(exp));
+        if (exp < 0) {
+            return static_cast<float>(man) / static_cast<float>(factor);
+        }
+        return static_cast<float>(man) * static_cast<float>(factor);
+    }
+
+    operator int() const {
+        return static_cast<int>(static_cast<float>(*this));
     }
 
   private:
@@ -52,7 +84,7 @@ template <typename N, int a, int b> class FixedPoint {
         mWord = val * GetScale();
     }
 
-    operator float() {
+    operator float() const {
         return static_cast<float>(mWord) / GetScale();
     }
 

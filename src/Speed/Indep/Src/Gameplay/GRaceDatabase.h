@@ -179,7 +179,8 @@ class GRaceParameters {
 
     const char *GetSpeedTrapCamera() const;
 
-    inline void EnsureLoaded() const {}
+    // Streams the race's vaults in if they aren't loaded (PC: inlined everywhere).
+    void EnsureLoaded() const;
 
     void BlockUntilLoaded();
 
@@ -265,6 +266,8 @@ class GRaceParameters {
     bool GetBarrierIsFlipped(unsigned int index) const;
 
   protected:
+    friend class GRaceDatabase;
+
     GRaceIndexData *mIndex;             // offset 0x0, size 0x4
     Attrib::Gen::gameplay *mRaceRecord; // offset 0x4, size 0x4
     GVault *mParentVault;               // offset 0x8, size 0x4
@@ -352,6 +355,8 @@ class GRaceBin {
     void SetCompletedChallenges(int numChallenges);
 
     void SetRacesWon(int numRaces);
+
+    friend class GRaceDatabase;
 
     Attrib::Gen::gameplay mBinRecord; // offset 0x0, size 0x14
     GVault *mChildVault;              // offset 0x14, size 0x4
@@ -454,9 +459,28 @@ class GRaceDatabase {
     GRaceBin *GetBin(unsigned int index);
     GRaceBin *GetBinNumber(int number);
 
+    GRaceParameters *GetRaceFromKey(Attrib::Key key);
+    GRace::Context GetStartupRaceContext() const {
+        return mStartupRaceContext;
+    }
+    void NotifyVaultUnloading(GVault *vault);
+    void NotifyVaultLoaded(GVault *vault);
+    unsigned int SerializeBins(uint8 *dest);
+    unsigned int DeserializeBins(uint8 *src);
+    void RefreshBinProgress();
+    void ResetCareerCompleteFlag(unsigned int eventHash);
+
     static const char sDDayRaces[5][8];
 
   private:
+    GRaceDatabase();
+    unsigned int BuildBinList(GRaceBin *list);
+    void BuildRaceList();
+    unsigned int StoreRaceList(GRaceParameters *list);
+    void DestroyCustomRace(GRaceCustom *custom);
+    bool CollectionIsRaceActivity(Attrib::Gen::gameplay &instanceObj);
+    bool CollectionIsRaceBin(Attrib::Gen::gameplay &instanceObj);
+
     unsigned int mRaceCountStatic;      // offset 0x0, size 0x4
     unsigned int mRaceCountDynamic;     // offset 0x4, size 0x4
     GRaceIndexData *mRaceIndex;         // offset 0x8, size 0x4

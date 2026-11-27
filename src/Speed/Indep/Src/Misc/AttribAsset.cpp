@@ -61,7 +61,7 @@ class VaultGarbageCollector : public Attrib::IGarbageCollector {
 static FileGarbageCollector gFileCollector;
 static VaultGarbageCollector gVaultCollector;
 
-Attrib::Vault *AddVault(const char *filename, void *data, unsigned int bytes) {
+Attrib::Vault *AddVault(const char *filename, void *data, size_t bytes) {
     Attrib::AssetID headerID = Attrib::StringToAssetID(filename);
 
     VaultMap::const_iterator result = gVaults.find(headerID);
