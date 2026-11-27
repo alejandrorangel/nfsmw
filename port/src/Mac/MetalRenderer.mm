@@ -198,6 +198,9 @@ struct Frame3D {
     PortWorldFog fog = {};
     bool overbright = false;
     PortOverBright ob = {};
+    // IDI_SKYBOX_FX constants (PortMetal3DSetSky); textures held strongly.
+    PortSky sky = {};
+    id<MTLTexture> sky_misc[3];
     // PC shadow map pass (PortMetal3DBeginShadow).
     bool shadow_active = false;
     float shadow_view_proj[16];
@@ -231,10 +234,22 @@ void PortMetal3DBeginFrame(const float view_proj[16]) {
     g3DBuilding.gain_map = nil;
     g3DBuilding.fog = {};
     g3DBuilding.overbright = false;
+    g3DBuilding.sky = {};
+    for (int i = 0; i < 3; i++) {
+        g3DBuilding.sky_misc[i] = nil;
+    }
     g3DBuilding.shadow_active = false;
     g3DBuilding.shadow_draws.clear();
     g3DBuilding.shadow_transform_set = false;
     g3DBuilding.inv_shadow_strength = 0;
+}
+
+void PortMetal3DSetSky(const PortSky *sky) {
+    g3DBuilding.sky = *sky;
+    for (int i = 0; i < 3; i++) {
+        g3DBuilding.sky_misc[i] = (__bridge id<MTLTexture>)sky->misc[i];
+        g3DBuilding.sky.misc[i] = nullptr; // held by sky_misc
+    }
 }
 
 void PortMetal3DSetOverBright(const PortOverBright *overbright) {
@@ -441,7 +456,11 @@ fragment float4 fe_fs(FEOut in [[stage_in]], texture2d<float> tex [[texture(0)]]
 struct MeshConst { float4x4 mvp; float4x4 world; uint stride; uint shade; uint effect; uint pad; float4 eye; float4 view_x;
                    float4x4 shadow; float inv_shadow; uint shadow_level; uint shadow_map; float pad2; };
 struct MeshOut { float4 pos [[position]]; float2 uv; float4 color; float3 normal; float3 world_pos; float3 local_normal; float3 local_pos;
-                 float4 d0; float4 d1; float3 inscatter; float2 uv1; float spec; float3 tlight; float3 tview; float4 shadow_pos; };
+                 float4 d0; float4 d1; float3 inscatter; float2 uv1; float spec; float3 tlight; float3 tview; float4 shadow_pos;
+                 float2 uv2; };
+
+// PortSky (the float part): CloudScroll, CloudIntensity.
+struct SkyConst { float cloud_scroll; float pad[3]; float4 cloud_intensity; };
 
 // PortWorldFog (MetalBridge.h).
 struct WorldFog {
@@ -498,7 +517,7 @@ struct Material {
 };
 
 vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffer(0)]], constant MeshConst &c [[buffer(1)]],
-                       constant WorldFog &fog [[buffer(2)]]) {
+                       constant WorldFog &fog [[buffer(2)]], constant SkyConst &sky [[buffer(3)]]) {
     const device float *v = verts + vid * (c.stride / 4);
     float4 p = float4(v[0], v[1], v[2], 1);
     MeshOut o;
@@ -522,6 +541,30 @@ vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffe
     o.tview = 0;
     // The shadowed techniques' vertex shaders: oT = v0 * ShadowTransform.
     o.shadow_pos = c.shadow * p;
+    o.uv2 = 0;
+    if (c.effect == 19) {
+        // IDI_SKYBOX_FX (c.pad = pass). Second uv set (dcl_texcoord1) after
+        // the first in the longer vertex formats.
+        float2 second = c.stride >= 44 ? float2(v[9], v[10]) : o.uv;
+        o.uv1 = second;
+        if (c.pad == 0) {
+            // vs #5: oT0 = uv - (0.4 CloudScroll, 0), oT2 = uv - (0.2
+            // CloudScroll + 0.3, 0), oT1 = uv1, oT3 = in-scatter at the fixed
+            // distance 15000 (expp of -21640.43 (Br + Bm), no extinction).
+            o.uv = float2(o.uv.x - 0.4 * sky.cloud_scroll, o.uv.y);
+            o.uv2 = float2(o.uv.x + 0.4 * sky.cloud_scroll - (0.2 * sky.cloud_scroll + 0.3), o.uv.y);
+            float3 to_eye = normalize(c.eye.xyz - o.world_pos);
+            float cos_t = dot(normalize(fog.light_dir.xyz), to_eye);
+            float mie = fog.const3.x * pow(max(fog.const3.z * cos_t + fog.const3.y, 1e-6), -1.5);
+            float3 e = exp2(-21640.426 * fog.br_plus_bm.xyz);
+            float3 in = (fog.const1.xyz * (1 + cos_t * cos_t) + fog.const2.xyz * mie) * fog.one_over_brbm.xyz * (1 - e) * fog.const3.w;
+            o.inscatter = saturate(in);
+        } else {
+            // vs #3 / #1: oT0 = uv - (CloudScroll, 0), oT1 = uv1.
+            o.uv = float2(o.uv.x - sky.cloud_scroll, o.uv.y);
+        }
+        return o;
+    }
     if (NormalMapped(c)) {
         // IDI_WORLDNORMALMAP_FX vs #13 / IDI_WORLDREFLECT_FX vs #13 (technique
         // #0): tangent frame T (tangent), B = (N x T) T.w, N. oT2/oT3 =
@@ -751,6 +794,8 @@ float4 CarShade(MeshOut in, float4 t, constant MeshConst &c, constant Material &
 fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(0)]], texturecube<float> env_map [[texture(1)]],
                         texture2d<float> tex2 [[texture(2)]], texture2d<float> tex3 [[texture(3)]],
                         depth2d<float> shadow_map [[texture(4)]], texture2d<float> shadow_colour [[texture(5)]],
+                        texture2d<float> sky1 [[texture(6)]], texture2d<float> sky2 [[texture(7)]], texture2d<float> sky3 [[texture(8)]],
+                        constant SkyConst &sky [[buffer(5)]],
                         constant WorldFog &fog [[buffer(4)]],
                         constant MeshConst &c [[buffer(0)]], constant Material &m [[buffer(1)]], constant Lights &l [[buffer(2)]],
                         constant EnvMatrix &em [[buffer(3)]], sampler s [[sampler(0)]]) {
@@ -758,6 +803,26 @@ fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(
     float4 out;
     if (c.shade & 1) {
         out = t;
+    } else if (c.effect == 19) {
+        // IDI_SKYBOX_FX: p0 (ps #4) the sky colour: a = 2 t0.a t2.a
+        // CloudIntensity.x, (t1 + t0) / 2 a + in-scatter (1 - a), opaque;
+        // p1 (ps #2) SKY_TEXTURE_MISC_2 with alpha x CloudIntensity.y and p2
+        // (ps #0) SKY_TEXTURE_MISC_3 at uv1 with alpha x CloudIntensity.z,
+        // both blended over it with ZFUNC EQUAL. The misc samplers have LOD
+        // bias -1. Guess: ps_1_1's clamp of a to 0..1.
+        if (c.pad == 0) {
+            float4 t2 = tex.sample(s, in.uv2);
+            float4 t1 = sky1.sample(s, in.uv1, bias(-1.0));
+            float a = saturate(2.0 * t.a * t2.a * sky.cloud_intensity.x);
+            out = float4(saturate(0.5 * (t1.rgb + t.rgb) * a + in.inscatter * (1 - a)), 1);
+        } else if (c.pad == 1) {
+            float4 m = sky2.sample(s, in.uv, bias(-1.0));
+            out = float4(m.rgb, m.a * sky.cloud_intensity.y);
+        } else {
+            float4 m = sky3.sample(s, in.uv1, bias(-1.0));
+            out = float4(m.rgb, m.a * sky.cloud_intensity.z);
+        }
+        return out;
     } else if (c.effect == 4) {
         out = CarShade(in, t, c, m, l, (c.shade & 4) != 0, env_map, em, CarShadow(c, in.shadow_pos, shadow_map, shadow_colour));
     } else if (NormalMapped(c)) {
@@ -925,6 +990,9 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     id<MTLDepthStencilState> _depthWrite;
     id<MTLDepthStencilState> _depthTest;
     id<MTLDepthStencilState> _depthOff;
+    id<MTLDepthStencilState> _depthEqual; // test EQUAL, no writes
+    PortSky _sky;                         // this frame's IDI_SKYBOX_FX constants
+    id<MTLTexture> _skyMisc[3];
     id<MTLTexture> _white;
     id<MTLTexture> _black; // bound for a missing second texture
     // Visual treatment (see PortVisualTreatment).
@@ -1078,6 +1146,8 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         _depthTest = [_device newDepthStencilStateWithDescriptor:dd];
         dd.depthCompareFunction = MTLCompareFunctionAlways;
         _depthOff = [_device newDepthStencilStateWithDescriptor:dd];
+        dd.depthCompareFunction = MTLCompareFunctionEqual;
+        _depthEqual = [_device newDepthStencilStateWithDescriptor:dd];
 
         // Bound in place of a texture for untextured frontend quads.
         MTLTextureDescriptor *wd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:1 height:1 mipmapped:NO];
@@ -1301,6 +1371,9 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         for (int blended = 0; blended < 2; blended++) {
             for (const Draw3D &d : draws) {
                 int mode = (d.flags & PORT_3D_ADDITIVE) ? 2 : (d.flags & PORT_3D_ALPHA_BLEND) ? 1 : 0;
+                if (d.effect == 19) {
+                    mode = 0; // IDI_SKYBOX_FX p0: ALPHABLENDENABLE 0
+                }
                 if ((mode != 0) != (blended != 0)) {
                     continue;
                 }
@@ -1404,11 +1477,40 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
                 [enc setFragmentBytes:d.material length:sizeof(d.material) atIndex:1];
                 [enc setFragmentBytes:d.lights length:sizeof(d.lights) atIndex:2];
+                struct {
+                    float scroll;
+                    float pad[3];
+                    float intensity[4];
+                } sky = {_sky.cloud_scroll, {0, 0, 0},
+                         {_sky.cloud_intensity[0], _sky.cloud_intensity[1], _sky.cloud_intensity[2], _sky.cloud_intensity[3]}};
+                [enc setVertexBytes:&sky length:sizeof(sky) atIndex:3];
+                if (c.effect == 19) {
+                    [enc setFragmentBytes:&sky length:sizeof(sky) atIndex:5];
+                    for (int i = 0; i < 3; i++) {
+                        [enc setFragmentTexture:(_skyMisc[i] ? _skyMisc[i] : _black) atIndex:6 + i];
+                    }
+                }
                 [enc drawIndexedPrimitives:MTLPrimitiveTypeTriangle
                                 indexCount:d.num_indices
                                  indexType:MTLIndexTypeUInt16
                                indexBuffer:d.index_buffer
                          indexBufferOffset:d.first_index * 2];
+                if (c.effect == 19 && !(c.shade & 1)) {
+                    // IDI_SKYBOX_FX passes p1 and p2: SRCALPHA / INVSRCALPHA,
+                    // ZFUNC EQUAL, no depth writes.
+                    [enc setRenderPipelineState:_meshPipelines[1]];
+                    [enc setDepthStencilState:_depthEqual];
+                    for (uint32_t pass = 1; pass <= 2; pass++) {
+                        c.pad = pass;
+                        [enc setVertexBytes:&c length:sizeof(c) atIndex:1];
+                        [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
+                        [enc drawIndexedPrimitives:MTLPrimitiveTypeTriangle
+                                        indexCount:d.num_indices
+                                         indexType:MTLIndexTypeUInt16
+                                       indexBuffer:d.index_buffer
+                                 indexBufferOffset:d.first_index * 2];
+                    }
+                }
             }
         }
     }
@@ -1586,6 +1688,10 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     pass.depthAttachment.loadAction = MTLLoadActionClear;
 
     id<MTLCommandBuffer> cmd = [_queue commandBuffer];
+    _sky = scene.sky;
+    for (int i = 0; i < 3; i++) {
+        _skyMisc[i] = scene.sky_misc[i];
+    }
     [self drawEnvFaces:scene commandBuffer:cmd];
     [self drawShadowMap:scene commandBuffer:cmd];
     if (scene.shadow_transform_set) {

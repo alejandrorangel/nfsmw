@@ -148,6 +148,18 @@ struct PortWorldFog {
 // Scattering and lighting for this 3D frame (call after PortMetal3DBeginFrame; null = off).
 void PortMetal3DSetFog(const PortWorldFog *fog);
 
+// IDI_SKYBOX_FX (effect 19) constants, set per effect begin by speed.exe 1.3
+// sub_6C60F0: SKY_TEXTURE_MISC_1..3 (SKY_NEXGEN_CAP_A, SKY_NEXGEN_CLOUDS_B,
+// SKY_NEXGEN_CAP_B, looked up by NotifySkyLoader 0x6D1CF0), CloudScroll and
+// CloudIntensity (SKY_DIFFUSESCALE).
+struct PortSky {
+    void *misc[3]; // id<MTLTexture> or null
+    float cloud_scroll;
+    float pad[3];
+    float cloud_intensity[4];
+};
+void PortMetal3DSetSky(const PortSky *sky);
+
 // The car effect's EnvMapTex (IDI_CAR_FX envmap_sampler), a cube with faces
 // 0..5 = +X, -X, +Y, -Y, +Z, -Z (D3D order and orientation). speed.exe 1.3
 // (sub_6BD4B0) keeps two: a 256x256 render-target cube drawn every frame in

@@ -511,6 +511,34 @@ void SetTimeOfDayLighting(V3 sun, float cloud, PortWorldFog &f) {
 bool gHaveSun = false;
 V3 gSunDirection;
 
+// sub_6C60F0, the IDI_SKYBOX_FX begin: the three SKY_TEXTURE_MISC textures,
+// CloudScroll (0x988548: once per world frame += TimeOfDay sun speed (+0x0)
+// x 0.5 x WorldTimeElapsed x 0.04 (0x8ADFDC)) and CloudIntensity from the
+// view's Rain cloud intensity c (+0x290; 0 counts as 0.1):
+// (min(3.333 c, 1), min(2 c^2, 0.8), min(c^2, 0.8)), each at least 0.
+float gCloudScroll;
+
+void SetSky(float cloud) {
+    static const char *const kNames[3] = {"SKY_NEXGEN_CAP_A", "SKY_NEXGEN_CLOUDS_B", "SKY_NEXGEN_CAP_B"};
+    static unsigned int hashes[3];
+    PortSky sky = {};
+    for (int i = 0; i < 3; i++) {
+        if (hashes[i] == 0) {
+            hashes[i] = bStringHash(kNames[i]);
+        }
+        sky.misc[i] = MetalTextureOf(GetTextureInfo(hashes[i], 0, 0));
+    }
+    gCloudScroll += gSun.speed * 0.5f * WorldTimeElapsed * 0.04f;
+    sky.cloud_scroll = gCloudScroll;
+    float c = cloud == 0.0f ? 0.1f : cloud;
+    auto clamp = [](float v, float hi) { return v > 0.0f ? (v < hi ? v : hi) : 0.0f; };
+    sky.cloud_intensity[0] = clamp(3.3333333f * c, 1.0f);
+    sky.cloud_intensity[1] = clamp(2.0f * c * c, 0.8f);
+    sky.cloud_intensity[2] = clamp(c * c, 0.8f);
+    sky.cloud_intensity[3] = 0.0f;
+    PortMetal3DSetSky(&sky);
+}
+
 void SetupFrameLighting(eView *view) {
     V3 sun = TickSunDirection();
     gSunDirection = sun;
@@ -520,6 +548,7 @@ void SetupFrameLighting(eView *view) {
     float cloud = view && view->Precipitation ? view->Precipitation->GetCloudIntensity() : 0.0f;
     SetTimeOfDayLighting(sun, cloud, f);
     PortMetal3DSetFog(&f);
+    SetSky(cloud);
 }
 
 } // namespace
