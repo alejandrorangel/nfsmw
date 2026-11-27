@@ -7,6 +7,10 @@
 
 namespace Physics {
 
+namespace Info {
+struct Performance;
+}; // namespace Info
+
 namespace Upgrades {
 
 enum Type {
@@ -36,20 +40,25 @@ struct Package {
     }
 };
 
+const char *GetPartName(Type t);
 int GetMaxLevel(const Attrib::Gen::pvehicle &vehicle, Type type);
 int GetLevel(const Attrib::Gen::pvehicle &vehicle, Type type);
-void SetLevel(Attrib::Gen::pvehicle &vehicle, Type type, int level);
+float GetPercent(const Attrib::Gen::pvehicle &vehicle, Type type);
+bool SetLevel(Attrib::Gen::pvehicle &vehicle, Type type, int level);
+void RemovePart(Attrib::Gen::pvehicle &vehicle, Type type);
 
 bool ApplyPreset(Attrib::Gen::pvehicle &vehicle, const Attrib::Gen::presetride &preset);
 void Clear(Attrib::Gen::pvehicle &vehicle);
 void Flush();
 bool SetPackage(Attrib::Gen::pvehicle &vehicle, const Package &package);
 void GetPackage(const Attrib::Gen::pvehicle &vehicle, Package &package);
+bool SetMaximum(Attrib::Gen::pvehicle &pvehicle);
+bool MatchPerformance(Attrib::Gen::pvehicle &vehicle, const Physics::Info::Performance &matched_performance);
 
+bool GetJunkman(const Attrib::Gen::pvehicle &vehicle, Type type);
 bool CanInstallJunkman(const Attrib::Gen::pvehicle &pvehicle, Type type);
 bool SetJunkman(Attrib::Gen::pvehicle &vehicle, Type type);
-
-void SetLevel(Attrib::Gen::pvehicle &pvehicle, Type type, int level);
+void RemoveJunkman(Attrib::Gen::pvehicle &vehicle, Type type);
 
 float GetHeat(Attrib::Gen::pvehicle pvehicle, Type type, int level);
 

@@ -75,6 +75,9 @@ bool ShiftPoints(const Attrib::Gen::transmission &transmission, const Attrib::Ge
                  float *shift_up, float *shift_down, unsigned int numpts);
 Mps Speedometer(const Attrib::Gen::transmission &transmission, const Attrib::Gen::engine &engine, const Attrib::Gen::tires &tires, Rpm rpm,
                 GearID gear, const Tunings *tunings);
+bool HasPerformanceRatings(const Attrib::Gen::pvehicle &pvehicle);
+bool GetStockPerformance(const Attrib::Gen::pvehicle &pvehicle, Performance &perf);
+bool GetMaximumPerformance(const Attrib::Gen::pvehicle &pvehicle, Performance &perf);
 bool EstimatePerformance(const Attrib::Gen::pvehicle &pvehicle, Performance &perf);
 bool EstimatePerformance(Performance &perf);
 bool ComputeAccelerationTable(const Attrib::Gen::pvehicle &pvehicle, float &top_speed, float *table, int num_entries);
