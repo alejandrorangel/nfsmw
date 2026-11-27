@@ -123,10 +123,21 @@ void PlatGetViewVectors(eView *view, UMath::Vector3 &rightVec, UMath::Vector3 &u
 // ZWRITEENABLE 0, World identity, the texture's state (sub_6C6CC0, which
 // turns depth writes back on for unblended textures), the vertex buffer
 // locked for num_particles quads.
+//
+// The effect's technique is the one sub_6D7500 picks (the highest shadow
+// level up to 0x982C3C that the effect has: #1, shadowLevel 1, on the NVIDIA
+// path; the table built at 0x6D5EDE drops #2's level 4, the 0x982C08 == 2
+// path's), and sub_6C8000 sets ShadowTransform = identity x the shadow
+// texture matrix ([0x919C70] + 0x40) here, after the effect's Begin
+// (sub_6D6AA0, ShadowMap and ShadowMapScale with Shadow Detail on in the
+// player view). PORT_PRELIT_SHADOWED; MetalRenderer gives the player view's
+// shadow map. Port deviation: with no shadow map drawn (Shadow Detail off)
+// the batches draw with technique #0; PC keeps #1 with its ShadowMap unset.
 bool PlatStartParticleRender(eView *view, TextureInfo *texture_info, uint32 num_particles) {
     gParticles.active = DrawsPrelit(view);
     gParticles.texture = MetalTextureOf(texture_info);
     gParticles.blend = BlendFor(texture_info, &gParticles.flags);
+    gParticles.flags |= PORT_PRELIT_SHADOWED;
     gParticles.vertices.clear();
     return true;
 }

@@ -29,7 +29,9 @@ enum PortPrelitBlend {
     PORT_PRELIT_ALPHA_ONLY,
     PORT_PRELIT_NUM_BLENDS,
 };
-enum { PORT_PRELIT_ALPHA_TEST = 1, PORT_PRELIT_DEPTH_WRITE = 2 };
+// PORT_PRELIT_SHADOWED: an IDI_PARTICLES_FX batch, drawn with its shadowed
+// technique (#1) when PortMetalPrelitDraw is given the shadow map.
+enum { PORT_PRELIT_ALPHA_TEST = 1, PORT_PRELIT_DEPTH_WRITE = 2, PORT_PRELIT_SHADOWED = 4 };
 
 // Clears the building frame (PortMetal3DBeginFrame calls it).
 void PortMetalPrelitBeginFrame();
@@ -49,6 +51,9 @@ void PortMetalPrelitPublish();
 // Render thread: draws the published frame into encoder (an
 // id<MTLRenderCommandEncoder> of the main scene pass, samples per pixel)
 // with view_proj (world -> clip, row vectors). part: 0, 1 or 2 (see
-// PortMetalPrelitSetPart), -1 parts 0 and 1.
+// PortMetalPrelitSetPart), -1 parts 0 and 1. shadow_map (the frame's
+// depth shadow map, an id<MTLTexture>) and shadow_transform (world ->
+// shadow texture, row vectors): the player view's, for the
+// PORT_PRELIT_SHADOWED batches; null draws them unshadowed.
 void PortMetalPrelitDraw(void *encoder, void *device, const float view_proj[16], int samples, int colour_format, int depth_format,
-                         int part = -1);
+                         int part = -1, void *shadow_map = nullptr, const float shadow_transform[16] = nullptr);

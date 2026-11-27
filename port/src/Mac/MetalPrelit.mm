@@ -36,13 +36,21 @@ std::mutex gLock;
 // IDI_WORLDPRELIT_FX technique #0 (vs #1, ps #0, the same): position times
 // WorldViewProj, colour and uv passed through; 2 x texture x colour
 // (alpha too), saturated. FOGENABLE 0.
+//
+// PORT_PRELIT_SHADOWED batches: IDI_PARTICLES_FX technique #1 (shadowLevel
+// 1, the NVIDIA path's only particle level; vs #3, ps_2_0 #2): oT1 =
+// position x ShadowTransform, then 'texldp r1, t1, s1' (the hardware depth
+// compare, as ShadowCompare in MetalRenderer.mm), 'add_sat r1.w, r1.x, 0.5'
+// and the rgb of 2 x texture x colour times it (one saturate at the
+// output). The D24S8 map clamps the reference depth to 0..1; the
+// Depth32Float one doesn't, hence the saturate.
 NSString *const kShader = @R"(
 #include <metal_stdlib>
 using namespace metal;
 
 struct PrelitVertex { packed_float3 pos; uint colour; packed_float2 uv; };
-struct PrelitOut { float4 pos [[position]]; float4 colour; float2 uv; };
-struct PrelitConst { float4x4 view_proj; uint alpha_test; uint pad[3]; };
+struct PrelitOut { float4 pos [[position]]; float4 colour; float2 uv; float4 shadow_pos; };
+struct PrelitConst { float4x4 view_proj; float4x4 shadow; uint alpha_test; uint shadowed; uint pad[2]; };
 
 vertex PrelitOut prelit_vs(uint vid [[vertex_id]], const device PrelitVertex *v [[buffer(0)]], constant PrelitConst &c [[buffer(1)]]) {
     PrelitVertex in = v[vid];
@@ -51,12 +59,20 @@ vertex PrelitOut prelit_vs(uint vid [[vertex_id]], const device PrelitVertex *v 
     uint d = in.colour; // D3DCOLOR
     o.colour = float4(float((d >> 16) & 0xFF), float((d >> 8) & 0xFF), float(d & 0xFF), float(d >> 24)) / 255.0;
     o.uv = float2(in.uv);
+    o.shadow_pos = c.shadowed ? c.shadow * float4(float3(in.pos), 1) : float4(0, 0, 0, 1);
     return o;
 }
 
 fragment float4 prelit_fs(PrelitOut in [[stage_in]], texture2d<float> t [[texture(0)]], sampler s [[sampler(0)]],
-                          constant PrelitConst &c [[buffer(0)]]) {
-    float4 out = saturate(2.0 * t.sample(s, in.uv) * in.colour);
+                          depth2d<float> sm [[texture(1)]], constant PrelitConst &c [[buffer(0)]]) {
+    float4 out = 2.0 * t.sample(s, in.uv) * in.colour;
+    if (c.shadowed) {
+        constexpr sampler ss(compare_func::less_equal, filter::linear, address::clamp_to_edge);
+        float4 p = in.shadow_pos;
+        float lit = sm.sample_compare(ss, p.xy / p.w, saturate(p.z / p.w));
+        out.rgb *= saturate(lit + 0.5);
+    }
+    out = saturate(out);
     if (c.alpha_test && out.a < (95.0 / 255.0)) { // ALPHAREF 0x5F (sub_6C68B0)
         discard_fragment();
     }
@@ -72,6 +88,7 @@ struct Pipelines {
     id<MTLDepthStencilState> depth_write, depth_test;
     id<MTLSamplerState> sampler;
     id<MTLTexture> white;
+    id<MTLTexture> lit_depth; // 1x1 depth 1: the unshadowed batches' (unread) shadow map
     bool failed = false;
 };
 Pipelines gP;
@@ -108,6 +125,12 @@ bool Setup(id<MTLDevice> device, MTLPixelFormat colour, MTLPixelFormat depth) {
         gP.white = [device newTextureWithDescriptor:wd];
         uint32_t white = 0xFFFFFFFF;
         [gP.white replaceRegion:MTLRegionMake2D(0, 0, 1, 1) mipmapLevel:0 withBytes:&white bytesPerRow:4];
+        MTLTextureDescriptor *ld = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float width:1 height:1 mipmapped:NO];
+        ld.usage = MTLTextureUsageShaderRead;
+        ld.storageMode = MTLStorageModeShared;
+        gP.lit_depth = [device newTextureWithDescriptor:ld];
+        float one = 1.0f;
+        [gP.lit_depth replaceRegion:MTLRegionMake2D(0, 0, 1, 1) mipmapLevel:0 withBytes:&one bytesPerRow:4];
     }
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < PORT_PRELIT_NUM_BLENDS; j++) {
@@ -219,7 +242,7 @@ void PortMetalPrelitPublish() {
 }
 
 void PortMetalPrelitDraw(void *encoder, void *device, const float view_proj[16], int samples, int colour_format, int depth_format,
-                         int part) {
+                         int part, void *shadow_map, const float shadow_transform[16]) {
     std::vector<PortPrelitVertex> vertices;
     std::vector<Batch> batches;
     {
@@ -242,10 +265,18 @@ void PortMetalPrelitDraw(void *encoder, void *device, const float view_proj[16],
     id<MTLBuffer> vb = [dev newBufferWithBytes:vertices.data() length:vertices.size() * sizeof(PortPrelitVertex) options:MTLResourceStorageModeShared];
     struct {
         float view_proj[16];
+        float shadow[16];
         uint32_t alpha_test;
-        uint32_t pad[3];
+        uint32_t shadowed;
+        uint32_t pad[2];
     } c = {};
     std::memcpy(c.view_proj, view_proj, sizeof(c.view_proj));
+    id<MTLTexture> sm = (__bridge id<MTLTexture>)shadow_map;
+    if (sm != nil && shadow_transform != nullptr) {
+        std::memcpy(c.shadow, shadow_transform, sizeof(c.shadow)); // world identity (PlatStartParticleRender)
+    } else {
+        sm = nil;
+    }
     [enc setCullMode:MTLCullModeNone];
     [enc setVertexBuffer:vb offset:0 atIndex:0];
     [enc setFragmentSamplerState:gP.sampler atIndex:0];
@@ -255,11 +286,13 @@ void PortMetalPrelitDraw(void *encoder, void *device, const float view_proj[16],
             continue;
         }
         c.alpha_test = (b.flags & PORT_PRELIT_ALPHA_TEST) ? 1 : 0;
+        c.shadowed = (sm != nil && (b.flags & PORT_PRELIT_SHADOWED)) ? 1 : 0;
         [enc setRenderPipelineState:pso];
         [enc setDepthStencilState:(b.flags & PORT_PRELIT_DEPTH_WRITE) ? gP.depth_write : gP.depth_test];
         [enc setVertexBytes:&c length:sizeof(c) atIndex:1];
         [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
         [enc setFragmentTexture:(b.texture ? b.texture : gP.white) atIndex:0];
+        [enc setFragmentTexture:(c.shadowed ? sm : gP.lit_depth) atIndex:1];
         [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:b.first vertexCount:b.count];
     }
 }

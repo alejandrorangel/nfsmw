@@ -1193,10 +1193,13 @@ fragment float4 flare_fade_fs(QuadOut in [[stage_in]], texture2d<float> src [[te
 }
 
 // IDI_PARTICLES_FX technique 0 (vs #5; ps_1_1 #4: mul_x2 r0, t0, v0) with
-// the texture's alpha test (ALPHAREF 0x5F, sub_6C68B0).
+// the texture's alpha test (ALPHAREF 0x5F, sub_6C68B0); with a shadow map
+// technique #1 (vs #3, ps #2: saturate(depth compare + 0.5) on the rgb; see
+// MetalPrelit.mm), ShadowTransform = local2world x the shadow texture
+// matrix (sub_6C1120 -> sub_6C8000).
 struct ParticleVertex { packed_float3 pos; uint color; packed_float2 uv; };
-struct ParticleConst { float4x4 mvp; uint alpha_test; uint pad[3]; };
-struct ParticleOut { float4 pos [[position]]; float2 uv; float4 color; };
+struct ParticleConst { float4x4 mvp; float4x4 shadow; uint alpha_test; uint shadowed; uint pad[2]; };
+struct ParticleOut { float4 pos [[position]]; float2 uv; float4 color; float4 shadow_pos; };
 
 vertex ParticleOut particle_vs(uint vid [[vertex_id]], const device ParticleVertex *verts [[buffer(0)]],
                                constant ParticleConst &c [[buffer(1)]]) {
@@ -1206,12 +1209,18 @@ vertex ParticleOut particle_vs(uint vid [[vertex_id]], const device ParticleVert
     uint argb = v.color;
     o.color = float4((argb >> 16) & 0xff, (argb >> 8) & 0xff, argb & 0xff, argb >> 24) / 255.0;
     o.uv = float2(v.uv);
+    o.shadow_pos = c.shadowed ? c.shadow * float4(float3(v.pos), 1) : float4(0, 0, 0, 1);
     return o;
 }
 
 fragment float4 particle_fs(ParticleOut in [[stage_in]], texture2d<float> tex [[texture(0)]], sampler s [[sampler(0)]],
-                            constant ParticleConst &c [[buffer(0)]]) {
-    float4 out = saturate(2.0 * tex.sample(s, in.uv) * in.color);
+                            depth2d<float> sm [[texture(1)]], constant ParticleConst &c [[buffer(0)]]) {
+    float4 out = 2.0 * tex.sample(s, in.uv) * in.color;
+    if (c.shadowed) {
+        float4 p = in.shadow_pos;
+        out.rgb *= saturate(ShadowCompare(sm, float4(p.xy, saturate(p.z / p.w) * p.w, p.w)) + 0.5);
+    }
+    out = saturate(out);
     if (c.alpha_test && out.a < (95.0 / 255.0)) {
         discard_fragment();
     }
@@ -1609,24 +1618,30 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         }
         struct {
             float mvp[16];
+            float shadow[16];
             uint32_t alpha_test;
-            uint32_t pad[3];
+            uint32_t shadowed;
+            uint32_t pad[2];
         } c = {};
         for (int i = 0; i < 4; i++) {
             for (int j = 0; j < 4; j++) {
-                float sum = 0;
+                float sum = 0, shadow = 0;
                 for (int k = 0; k < 4; k++) {
                     sum += p.world[i * 4 + k] * scene.view_proj[k * 4 + j];
+                    shadow += p.world[i * 4 + k] * _shadowTransform[k * 4 + j];
                 }
                 c.mvp[i * 4 + j] = sum;
+                c.shadow[i * 4 + j] = shadow;
             }
         }
         c.alpha_test = (p.flags & PORT_3D_ALPHA_TEST) ? 1 : 0;
+        c.shadowed = _shadowValid ? 1 : 0;
         [enc setRenderPipelineState:pso];
         [enc setVertexBytes:&c length:sizeof(c) atIndex:1];
         [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
         [enc setFragmentTexture:(p.texture ? p.texture : _white) atIndex:0];
         [enc setFragmentSamplerState:_meshSamplers[gTextureFiltering.load() % 3] atIndex:0];
+        [enc setFragmentTexture:(_shadowValid ? _shadowDepth : _shadowDepthLit) atIndex:1];
         [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:p.first vertexCount:p.count];
     }
 }
@@ -2452,8 +2467,10 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
     [self drawScene:scene encoder:enc view:view];
     _skipSkyAlpha = false;
     // Particles, skid marks, light flares (MetalPrelit.mm).
+    // The particles' technique #1 reads the player view's shadow map.
+    void *particle_shadow = _shadowValid ? (__bridge void *)_shadowDepth : nullptr;
     PortMetalPrelitDraw((__bridge void *)enc, (__bridge void *)_device, scene.view_proj, samples, (int)_colorFormat, (int)_depthFormat,
-                        split ? 0 : -1);
+                        split ? 0 : -1, particle_shadow, _shadowTransform);
     if (split) {
         [enc endEncoding];
         // sub_6DBB20: StretchRect the frame to 0x93DE60, sub_6D2840 into
@@ -2475,7 +2492,8 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
         _onlySkyAlpha = true;
         [self drawScene:scene encoder:enc view:view];
         _onlySkyAlpha = false;
-        PortMetalPrelitDraw((__bridge void *)enc, (__bridge void *)_device, scene.view_proj, samples, (int)_colorFormat, (int)_depthFormat, 1);
+        PortMetalPrelitDraw((__bridge void *)enc, (__bridge void *)_device, scene.view_proj, samples, (int)_colorFormat, (int)_depthFormat, 1,
+                            particle_shadow, _shadowTransform);
     }
     if (x360) {
         [enc endEncoding];
