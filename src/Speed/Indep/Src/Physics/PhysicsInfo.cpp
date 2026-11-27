@@ -730,3 +730,108 @@ bool Physics::Info::EstimatePerformance(const Attrib::Gen::pvehicle &pvehicle, P
     perf.TopSpeed = (upgraded.TopSpeed - stock.TopSpeed) * perf.TopSpeed + stock.TopSpeed;
     return true;
 }
+
+#if defined(EA_PORT_NATIVE)
+#include "Speed/Indep/Src/Misc/Table.hpp"
+
+// PC: 0x673120
+FtLbs Physics::Info::AvgInductedTorque(const Attrib::Gen::engine &engine, const Attrib::Gen::induction &induction,
+                                       const Attrib::Gen::transmission &transmission, bool from_peak, const Tunings *tunings) {
+    if (engine.Num_TORQUE() <= 1) {
+        return 0.0f;
+    }
+    float peak_rpm;
+    if (!(MaxInductedTorque(engine, induction, peak_rpm, tunings) > 0.0f)) {
+        return 0.0f;
+    }
+    float converter = transmission.TORQUE_CONVERTER();
+    float rpm = engine.IDLE();
+    float delta_rpm = (engine.MAX_RPM() - engine.IDLE()) / static_cast<float>(engine.Num_TORQUE() - 1);
+    float total = 0.0f;
+    float count = 0.0f;
+    for (unsigned int i = 0; i < engine.Num_TORQUE(); ++i) {
+        if (!from_peak || peak_rpm <= rpm) {
+            // the torque converter multiplies torque below the peak
+            float multiplier = (1.0f - UMath::Ramp(rpm, engine.IDLE(), peak_rpm)) * converter + 1.0f;
+            total += (InductionBoost(engine, induction, rpm, 1.0f, tunings, nullptr) + 1.0f) * engine.TORQUE(i) * multiplier;
+            count += 1.0f;
+        }
+        rpm += delta_rpm;
+        if (engine.RED_LINE() <= rpm) {
+            break;
+        }
+    }
+    if (count > 0.0f) {
+        return total / count;
+    }
+    return 0.0f;
+}
+
+// PC: 0x673810
+// Acceleration (m/s^2) against speed, from the redline speed of each forward
+// gear, sampled evenly up to the top speed.
+bool Physics::Info::ComputeAccelerationTable(const Attrib::Gen::pvehicle &pvehicle, float &top_speed, float *table, int num_entries) {
+    Attrib::Gen::transmission transmission(pvehicle.transmission(0), 0, nullptr);
+    Attrib::Gen::tires tires(pvehicle.tires(0), 0, nullptr);
+    Attrib::Gen::chassis chassis(pvehicle.chassis(0), 0, nullptr);
+    Attrib::Gen::engine engine(pvehicle.engine(0), 0, nullptr);
+    Attrib::Gen::induction induction(pvehicle.induction(0), 0, nullptr);
+
+    float torque = AvgInductedTorque(engine, induction, transmission, true, nullptr) * 1.3558f; // ft-lb -> N-m
+    if (!(torque > 0.0f) || num_entries < 2 || table == nullptr) {
+        return false;
+    }
+    bVector2 points[10];
+    unsigned int num_gears = transmission.Num_GEAR_RATIO();
+    if (num_gears <= 2) {
+        return false;
+    }
+    float final_gear = transmission.FINAL_GEAR();
+    float mass = pvehicle.MASS();
+    float wheel_radius = (tires.RIM_SIZE().At(1) * 0.0254f + tires.SECTION_WIDTH().At(1) * 0.01f * tires.ASPECT_RATIO().At(1) * 0.001f) * 0.5f;
+    if (!(wheel_radius > 1e-6f)) {
+        return false;
+    }
+    unsigned int num_points = 0;
+    top_speed = 0.0f;
+    float last_accel = 0.0f;
+    float last_speed = 0.0f;
+    float inv_radius = 1.0f / wheel_radius;
+    // gears 0 and 1 are reverse and neutral
+    for (unsigned int gear = 2; num_points < num_gears - 2; ++gear) {
+        float ratio = final_gear * transmission.GEAR_RATIO(gear);
+        float force = inv_radius * ratio * transmission.GEAR_EFFICIENCY(gear) * torque;
+        if (ratio <= 0.0f) {
+            return false;
+        }
+        float speed = (engine.RED_LINE() / ratio) * wheel_radius * 0.10471976f; // rpm -> rad/s
+        float accel = (force - speed * chassis.DRAG_COEFFICIENT() * speed) / mass;
+        if (accel <= 0.0f) {
+            if (last_accel <= 0.0f) {
+                break;
+            }
+            // where this gear's acceleration runs out
+            speed = (speed - last_speed) * (1.0f - last_accel / (last_accel - accel)) + last_speed;
+            accel = 0.0f;
+        }
+        last_accel = accel;
+        last_speed = speed;
+        top_speed = UMath::Max(top_speed, last_speed);
+        points[num_points].x = last_speed;
+        points[num_points].y = last_accel;
+        num_points++;
+    }
+    if (num_points == 0) {
+        return false;
+    }
+    Graph graph(points, num_points);
+    if (!(top_speed > 0.0f)) {
+        return false;
+    }
+    float max_speed = top_speed;
+    for (int i = 0; i < num_entries; ++i) {
+        table[i] = graph.GetValue(static_cast<float>(i) * (max_speed / static_cast<float>(num_entries - 1)));
+    }
+    return true;
+}
+#endif
