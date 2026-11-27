@@ -211,7 +211,9 @@ class GRacerInfo {
     void NotifyTrafficCollision() {
         mNumTrafficCarsHit++;
     };
+    // PC: 0x5DB3C0.
     void NotifyTollboothCrossed(float RaceClock) {
+        mTimeRemainingToBooth[mTollboothsCrossed] = RaceClock;
         mTollboothsCrossed++;
     };
     void NotifySpeedTrapTriggered(float mps) {
@@ -221,12 +223,14 @@ class GRacerInfo {
     bool IsBehind(const struct GRacerInfo &rhs);
     IVehicle *CreateVehicle(unsigned int default_key);
     void FinalizeRaceStats();
-    void ClearRaceStats() {};
+    void ClearRaceStats();
 
   private:
+    friend class GRaceStatus;
+
     // GRacerInfo();
     void Kill();
-    void ClearAll() {};
+    void ClearAll();
     void ChooseRandomName();
     bool ChooseBossName();
     bool ChooseRacerName();
@@ -404,7 +408,9 @@ class GRaceStatus : public UTL::COM::Object, public IVehicleCache {
         return fRaceLength;
     }
 
-    float GetFirstLapLength() {}
+    float GetFirstLapLength() {
+        return fFirstLapLength;
+    }
 
     float GetSegmentLength(int n) {
         return mSegmentLengths[n];
@@ -414,7 +420,10 @@ class GRaceStatus : public UTL::COM::Object, public IVehicleCache {
         return fSubsequentLapLength;
     }
 
-    float GetLapLength(int lap) {}
+    // PC: 0x5DB420.
+    float GetLapLength(int lap) {
+        return lap == 0 ? fFirstLapLength : fSubsequentLapLength;
+    }
 
     float GetSegmentLength(int segment, int lap);
 
@@ -614,6 +623,36 @@ class GRaceStatus : public UTL::COM::Object, public IVehicleCache {
     void EndStopAll();
 
     void FinalizeRaceStats();
+
+#ifndef EA_BUILD_A124
+    // Overrides: IVehicleCache
+    const char *GetCacheName() const override;
+
+    // PC: 0x5DB440.
+    void RefreshBinAfterRace() {
+        mRefreshBinAfterRace = true;
+    }
+
+    // PC: 0x5DB450.
+    void SetPlayerPursuitInCooldown(bool cooldown) {
+        mPlayerPursuitInCooldown = cooldown;
+    }
+
+    // PC: 0x604060.
+    void SetWarpWhenInFreeRoam(unsigned int markerKey) {
+        mWarpWhenInFreeRoam = markerKey;
+    }
+#endif
+
+    // PC: 0x604080.
+    void SetHasBeenWon(bool won) {
+        mHasBeenWon = won;
+    }
+
+    // PC: 0x604070.
+    bool GetHasBeenWon() const {
+        return mHasBeenWon;
+    }
 
     // Overrides: IVehicleCache
     enum eVehicleCacheResult OnQueryVehicleCache(const IVehicle *removethis, const IVehicleCache *whosasking) const override;

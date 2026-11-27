@@ -416,13 +416,13 @@ class CareerSettings {
     void SetAwardedCastrolGT() {
         SpecialFlags |= CS_CASTROL_GT;
     }
+    // PC: 0x5DB470. Stored as a signed fraction of 32767.
     void SetAdaptiveDifficulty(float difficulty) {
-        // TODO
-        AdaptiveDifficulty = static_cast<int16>(bClamp(difficulty, 0.0f, 1.0f));
+        AdaptiveDifficulty = static_cast<int16>(bClamp(difficulty, -1.0f, 1.0f) * 32767.0f);
     }
+    // PC: 0x5DB4D0.
     float GetAdaptiveDifficulty() {
-        // TODO
-        return bClamp(static_cast<float>(AdaptiveDifficulty), 0.0f, 1.0f);
+        return bClamp(static_cast<float>(AdaptiveDifficulty) * (1.0f / 32767.0f), -1.0f, 1.0f);
     }
     uint8 GetCurrentBin() {
         return CurrentBin;

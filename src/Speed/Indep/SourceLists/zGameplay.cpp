@@ -5,5 +5,6 @@
 
 #include "Speed/Indep/Src/Gameplay/GManager.cpp"
 #include "Speed/Indep/Src/Gameplay/GRaceDatabase.cpp"
+#include "Speed/Indep/Src/Gameplay/GRaceStatus.cpp"
 #include "Speed/Indep/Src/Gameplay/GTimer.cpp"
 #include "Speed/Indep/Src/Gameplay/GVault.cpp"

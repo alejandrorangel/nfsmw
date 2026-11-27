@@ -69,7 +69,10 @@ class WRoadNetwork : public Debugable {
     void BuildSegmentSpline(const WRoadSegment &segment, USpline &spline);
     bool SegmentCrossesBarrier(WRoadSegment *segment, TrackPathBarrier *barrier);
 
-    // void SetRaceFilterValid(bool b) {}
+    // PC: 0x5DBC90.
+    void SetRaceFilterValid(bool b) {
+        fValidRaceFilter = b;
+    }
 
     bool IsRaceFilterValid() {
         return fValidRaceFilter;
