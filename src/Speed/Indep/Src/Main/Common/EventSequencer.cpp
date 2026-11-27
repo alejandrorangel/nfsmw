@@ -587,7 +587,7 @@ int LoaderEventSequence(bChunk *chunk) {
         return 1;
     }
 
-    if (chunk->GetID() != 0x8003B72C) { // not defined? also is the same as a function pointer?
+    if (chunk->GetID() != BCHUNK_CARP_EVENT_SEQUENCES) {
         return 0;
     }
 
@@ -615,7 +615,7 @@ int UnloaderEventSequence(bChunk *chunk) {
         return 1;
     }
 
-    if (chunk->GetID() != 0x8003B72C) { // not defined? also is the same as a function pointer?
+    if (chunk->GetID() != BCHUNK_CARP_EVENT_SEQUENCES) {
         return 0;
     }
 
@@ -628,3 +628,7 @@ int UnloaderEventSequence(bChunk *chunk) {
 
     return 1;
 }
+
+// PC: 0x886B00, 0x886B20
+bChunkLoader bChunkLoaderEventSequences(BCHUNK_CARP_EVENT_SEQUENCES, LoaderEventSequence, UnloaderEventSequence);
+bChunkLoader bChunkLoaderEventSequence(BCHUNK_CARP_EVENT_SEQUENCE, LoaderEventSequence, UnloaderEventSequence);
