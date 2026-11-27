@@ -143,7 +143,11 @@ struct PortWorldFog {
     // SpecularPower (0x8FADC0 = 11).
     float specular[4];
     float specular_power;
-    float pad3[3];
+    // IDI_WORLDREFLECT_FX's SpecularColour.rgb is the above times (1 - the
+    // view's Rain cloud intensity) (its effect begin, sub_6D71F0); w (above)
+    // is Rain +0x36A0, the road reflection strength, for both.
+    float reflect_specular_scale;
+    float pad3[2];
 };
 // Scattering and lighting for this 3D frame (call after PortMetal3DBeginFrame; null = off).
 void PortMetal3DSetFog(const PortWorldFog *fog);
@@ -187,6 +191,32 @@ void PortMetal3DEndShadow();
 // The effects' ShadowTransform (world -> shadow texture, projective) and
 // InvShadowStrength for the shadowed techniques this frame.
 void PortMetal3DSetShadowTransform(const float shadow_transform[16], float inv_shadow_strength);
+
+// PC road reflection (speed.exe 1.3 ___eDisplayFrame 0x6DE3FA, Road
+// Reflection Detail 0x9017D4 > 0): draws added between
+// PortMetal3DBeginReflection and PortMetal3DEndReflection go to the 320x240
+// reflection target (render target 1, 0x982A6C / surface 0x982A68, depth
+// 0x982A78; cleared black, depth 1) with the player's view_proj, rendered
+// before this frame's scene. Effects as in the other non-main views (WORLD
+// -> WORLDNOFOG, WORLDREFLECT / WORLDNORMALMAP -> WORLDNORMALMAPNOFOG).
+void PortMetal3DBeginReflection(const float view_proj[16]);
+void PortMetal3DEndReflection();
+// IDI_WORLDREFLECT_FX's ReflectedTex this frame: mode 0 the 1x1 white
+// texture sub_6BCDC0 makes at Road Reflection Detail 0, 1 the reflection
+// target (whatever it last held). blur: sub_6D4960 (detail 3, racing, wet)
+// blurs the target this frame (kernels 0x8F9530 then 0x8F9500 via the
+// second 320x240 target 0x982A74).
+void PortMetal3DSetReflection(int mode, bool blur);
+
+// PC Full Screen Anti-Aliasing (g_FSAALevel): 0 off, else the 3D scene is
+// rendered multisampled and resolved before the post chain. The PC slider's
+// levels are D3DMULTISAMPLE_NONMASKABLE quality levels (sub_6BFAB0: type 1,
+// quality g_FSAALevel; maximum = CheckDeviceMultiSampleType's count - 1,
+// sub_6C1510); natively level n uses the n-th supported sample count of
+// 2, 4, 8.
+void PortSetFSAALevel(int level);
+int PortMetalMaxFSAALevel(); // how many of 2x/4x/8x the GPU supports (0..3)
+int PortMetalFSAASamples(int level); // the sample count a level maps to
 
 // A cube texture from six 2D textures of one size and format (level 0 is
 // copied; PC EnvMapTextureLoadedCallback copies each face's pixels).

@@ -208,6 +208,12 @@ struct Frame3D {
     bool shadow_transform_set = false;
     float shadow_transform[16];
     float inv_shadow_strength = 0;
+    // PC road reflection (PortMetal3DBeginReflection).
+    bool reflection_active = false;
+    float reflection_view_proj[16];
+    std::vector<Draw3D> reflection_draws;
+    int reflection_mode = 0; // PortMetal3DSetReflection
+    bool reflection_blur = false;
 };
 static Frame3D g3DBuilding;
 static Frame3D g3DPublished;
@@ -242,6 +248,61 @@ void PortMetal3DBeginFrame(const float view_proj[16]) {
     g3DBuilding.shadow_draws.clear();
     g3DBuilding.shadow_transform_set = false;
     g3DBuilding.inv_shadow_strength = 0;
+    g3DBuilding.reflection_active = false;
+    g3DBuilding.reflection_draws.clear();
+    g3DBuilding.reflection_mode = 0;
+    g3DBuilding.reflection_blur = false;
+}
+
+void PortMetal3DBeginReflection(const float view_proj[16]) {
+    g3DBuilding.reflection_active = true;
+    g3DBuilding.reflection_draws.clear();
+    memcpy(g3DBuilding.reflection_view_proj, view_proj, sizeof(g3DBuilding.reflection_view_proj));
+    g3DTarget = &g3DBuilding.reflection_draws;
+}
+
+void PortMetal3DEndReflection() {
+    g3DTarget = &g3DBuilding.draws;
+}
+
+void PortMetal3DSetReflection(int mode, bool blur) {
+    g3DBuilding.reflection_mode = mode;
+    g3DBuilding.reflection_blur = blur;
+}
+
+// MSAA sample counts the GPU supports beyond 1 (2, 4, 8 in order).
+static int gMSAACounts[3];
+static int gNumMSAACounts = -1;
+static std::atomic<int> gFSAALevel{0};
+
+static void FindMSAACounts() {
+    if (gNumMSAACounts >= 0) {
+        return;
+    }
+    id<MTLDevice> device = gDevice ? gDevice : MTLCreateSystemDefaultDevice();
+    gNumMSAACounts = 0;
+    for (int c : {2, 4, 8}) {
+        if ([device supportsTextureSampleCount:c]) {
+            gMSAACounts[gNumMSAACounts++] = c;
+        }
+    }
+}
+
+int PortMetalMaxFSAALevel() {
+    FindMSAACounts();
+    return gNumMSAACounts;
+}
+
+int PortMetalFSAASamples(int level) {
+    FindMSAACounts();
+    if (level <= 0 || gNumMSAACounts == 0) {
+        return 1;
+    }
+    return gMSAACounts[(level > gNumMSAACounts ? gNumMSAACounts : level) - 1];
+}
+
+void PortSetFSAALevel(int level) {
+    gFSAALevel = level < 0 ? 0 : level;
 }
 
 void PortMetal3DSetSky(const PortSky *sky) {
@@ -457,7 +518,7 @@ struct MeshConst { float4x4 mvp; float4x4 world; uint stride; uint shade; uint e
                    float4x4 shadow; float inv_shadow; uint shadow_level; uint shadow_map; float pad2; };
 struct MeshOut { float4 pos [[position]]; float2 uv; float4 color; float3 normal; float3 world_pos; float3 local_normal; float3 local_pos;
                  float4 d0; float4 d1; float3 inscatter; float2 uv1; float spec; float3 tlight; float3 tview; float4 shadow_pos;
-                 float2 uv2; };
+                 float2 uv2; float4 clip; };
 
 // PortSky (the float part): CloudScroll, CloudIntensity.
 struct SkyConst { float cloud_scroll; float pad[3]; float4 cloud_intensity; };
@@ -471,6 +532,7 @@ struct WorldFog {
     uint lit;
     float4 specular;
     float specular_power;
+    float reflect_specular_scale;
 };
 
 // shade bit 7: the draw has the normal and specular maps and 60-byte
@@ -542,6 +604,10 @@ vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffe
     // The shadowed techniques' vertex shaders: oT = v0 * ShadowTransform.
     o.shadow_pos = c.shadow * p;
     o.uv2 = 0;
+    // IDI_WORLDREFLECT_FX vs #13: oT1 = ((x + w) / 2, (w - y) / 2, z, w) of
+    // the clip position, sampled projectively (texldp): the screen position
+    // in the reflection target.
+    o.clip = o.pos;
     if (c.effect == 19) {
         // IDI_SKYBOX_FX (c.pad = pass). Second uv set (dcl_texcoord1) after
         // the first in the longer vertex formats.
@@ -795,6 +861,7 @@ fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(
                         texture2d<float> tex2 [[texture(2)]], texture2d<float> tex3 [[texture(3)]],
                         depth2d<float> shadow_map [[texture(4)]], texture2d<float> shadow_colour [[texture(5)]],
                         texture2d<float> sky1 [[texture(6)]], texture2d<float> sky2 [[texture(7)]], texture2d<float> sky3 [[texture(8)]],
+                        texture2d<float> reflected [[texture(9)]],
                         constant SkyConst &sky [[buffer(5)]],
                         constant WorldFog &fog [[buffer(4)]],
                         constant MeshConst &c [[buffer(0)]], constant Material &m [[buffer(1)]], constant Lights &l [[buffer(2)]],
@@ -831,20 +898,27 @@ fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(
         // spec = (R.V)^SpecularPower SpecularColour x specular map (x2 for
         // WORLDREFLECT); c = (t (sat(N.L) DiffuseColour) + spec + t oD0) oT5,
         // out 2c + oT4. WORLDNORMALMAP alpha t.a oD0.a; WORLDREFLECT alpha 1
-        // and + reflection x t.a oD0.a spec.r 2 SpecularColour.w (no reflection
-        // pass yet: SpecularColour.w = 0).
+        // and c also + ReflectedTex (texldp oT1, clamp, no mips) x t.a oD0.a
+        // 2 spec.r SpecularColour.w, with SpecularColour.rgb x (1 - cloud).
+        // Guess: the shadowed techniques (ps #10 / #8) add it the same way.
         float3 nm = normalize((tex2.sample(s, in.uv).rgb - 0.5) * 2.0);
         float3 sm = tex3.sample(s, in.uv).rgb;
         float3 lt = normalize(in.tlight);
         float ndl = dot(nm, lt);
         float rv = saturate(dot(2.0 * ndl * nm - lt, normalize(in.tview)));
         bool world_reflect = c.effect == 1;
-        float3 spec = pow(rv, fog.specular_power) * fog.specular.rgb * sm * (world_reflect ? 2.0 : 1.0);
+        float3 spec = pow(rv, fog.specular_power) * fog.specular.rgb * sm * (world_reflect ? 2.0 * fog.reflect_specular_scale : 1.0);
         float3 diffuse = fog.lit ? fog.diffuse.rgb : float3(0);
         // Shadowed techniques (#1/#2: ps #10 / #8): the diffuse + specular sum
         // times the shadow factor.
         float sh = WorldShadow(c, in.shadow_pos, shadow_map);
-        float3 col = ((t.rgb * (saturate(ndl) * diffuse) + spec) * sh + t.rgb * in.d0.rgb) * in.d1.rgb;
+        float3 col = (t.rgb * (saturate(ndl) * diffuse) + spec) * sh + t.rgb * in.d0.rgb;
+        if (world_reflect && fog.specular.w > 0) {
+            constexpr sampler rs(filter::linear, address::clamp_to_edge);
+            float2 ruv = float2(0.5 + 0.5 * in.clip.x / in.clip.w, 0.5 - 0.5 * in.clip.y / in.clip.w);
+            col += reflected.sample(rs, ruv).rgb * (t.a * in.d0.a * 2.0 * sm.r * fog.specular.w);
+        }
+        col *= in.d1.rgb;
         out = float4(saturate(2.0 * col + in.inscatter), world_reflect ? 1.0 : t.a * in.d0.a);
     } else if (c.effect == 6) {
         // IDI_TREE_FX ps #0: 2 (t oD1 + t oD0) + oT2, alpha t.a.
@@ -914,8 +988,9 @@ vertex QuadOut quad_vs(uint vid [[vertex_id]]) {
 
 constant float3 kLuminance = float3(0.6125, 0.5154, 0.0721); // LUMINANCE_VECTOR (IDI_FILTER_FX / IDI_VISUALTREATMENT_FX)
 
-// IDI_FILTER_FX: weighted taps of one texture (sub_6D2CD0). lum_alpha: pass
-// p4, alpha = luminance of the weighted rgb; otherwise pass p0..p3, rgba.
+// IDI_FILTER_FX: weighted taps of one texture (sub_6D2CD0). lum_alpha 1:
+// pass p4, alpha = luminance of the weighted rgb; 2: pass p5, rgb times the
+// weighted alpha; 0: pass p0..p3, rgba.
 struct FilterConst { float4 weights[4]; float4 offsets[4]; uint taps; uint lum_alpha; };
 
 fragment float4 filter_fs(QuadOut in [[stage_in]], texture2d<float> src [[texture(0)]], constant FilterConst &c [[buffer(0)]]) {
@@ -924,10 +999,19 @@ fragment float4 filter_fs(QuadOut in [[stage_in]], texture2d<float> src [[textur
     for (uint i = 0; i < c.taps; i++) {
         sum += src.sample(s, in.uv + c.offsets[i].xy) * c.weights[i];
     }
-    if (c.lum_alpha) {
+    if (c.lum_alpha == 1) {
         sum.a = dot(saturate(sum.rgb), kLuminance);
+    } else if (c.lum_alpha == 2) {
+        sum = saturate(sum);
+        sum.rgb *= sum.a;
     }
     return saturate(sum);
+}
+
+// The offscreen frame into the drawable when the visual treatment is off.
+fragment float4 copy_fs(QuadOut in [[stage_in]], texture2d<float> src [[texture(0)]]) {
+    constexpr sampler s(filter::nearest, address::clamp_to_edge);
+    return float4(src.sample(s, in.uv).rgb, 1);
 }
 
 // IDI_VISUALTREATMENT_FX technique 0 (ps_2_0, shader #4).
@@ -985,7 +1069,26 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     id<MTLCommandQueue> _queue;
     id<MTLRenderPipelineState> _debugPipeline;
     id<MTLRenderPipelineState> _fePipelines[3]; // indexed by PortBlendMode
-    id<MTLRenderPipelineState> _meshPipelines[3]; // opaque, alpha blend, additive
+    id<MTLRenderPipelineState> _meshPipelines[3]; // opaque, alpha blend, additive (1 sample, all channels)
+    // The same for other sample counts / colour write masks, made on first
+    // use: [sample count 1, 2, 4, 8][mode][mask: all, rgb, alpha].
+    id<MTLRenderPipelineState> _meshPSO[4][3][3];
+    id<MTLLibrary> _lib;
+    MTLPixelFormat _colorFormat, _depthFormat;
+    // The pass drawDraws is drawing: its sample count, colour write mask
+    // (0 all, 1 rgb, 2 alpha) and whether it is the player view's frame
+    // (ColorWriteMode 7, then the sky's alpha-only pass).
+    int _passSamples, _passMask;
+    bool _passMainScene;
+    id<MTLRenderPipelineState> _copyPipeline;
+    // Multisampled frame (memoryless), resolved into _sceneColor.
+    id<MTLTexture> _sceneColorMS;
+    int _sceneSamples;
+    // PC road reflection target (0x982A6C) and its blur partner (0x982A74),
+    // 320x240, depth 0x982A78 (memoryless here).
+    id<MTLTexture> _reflColor, _reflBlur, _reflDepth;
+    bool _reflValid;           // _reflColor has been drawn
+    id<MTLTexture> _reflBound; // this frame's ReflectedTex
     id<MTLSamplerState> _meshSamplers[3];         // by PC texture filtering (PortSetTextureFiltering)
     id<MTLDepthStencilState> _depthWrite;
     id<MTLDepthStencilState> _depthTest;
@@ -1070,6 +1173,10 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
             md.colorAttachments[0].pixelFormat = view.colorPixelFormat;
             md.depthAttachmentPixelFormat = view.depthStencilPixelFormat;
             md.stencilAttachmentPixelFormat = view.depthStencilPixelFormat;
+            _lib = lib;
+            _colorFormat = view.colorPixelFormat;
+            _depthFormat = view.depthStencilPixelFormat;
+            _passSamples = 1;
             for (int mode = 0; mode < 3; mode++) {
                 MTLRenderPipelineColorAttachmentDescriptor *c = md.colorAttachments[0];
                 c.blendingEnabled = mode != 0;
@@ -1118,6 +1225,11 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
             _treatmentPipeline = [_device newRenderPipelineStateWithDescriptor:pd error:&error];
             if (!_treatmentPipeline) {
                 NSLog(@"NFSMW: treatment pipeline failed: %@", error);
+            }
+            pd.fragmentFunction = [lib newFunctionWithName:@"copy_fs"];
+            _copyPipeline = [_device newRenderPipelineStateWithDescriptor:pd error:&error];
+            if (!_copyPipeline) {
+                NSLog(@"NFSMW: copy pipeline failed: %@", error);
             }
             pd.fragmentFunction = [lib newFunctionWithName:@"overbright_add_fs"];
             pd.colorAttachments[0].blendingEnabled = YES;
@@ -1176,6 +1288,39 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
 }
 
 - (void)mtkView:(MTKView *)view drawableSizeWillChange:(CGSize)size {
+}
+
+// The mesh pipeline for a blend mode in the current pass (_passSamples,
+// _passMask).
+- (id<MTLRenderPipelineState>)meshPipeline:(int)mode {
+    int si = _passSamples >= 8 ? 3 : _passSamples >= 4 ? 2 : _passSamples >= 2 ? 1 : 0;
+    int mask = _passMask;
+    if (si == 0 && mask == 0) {
+        return _meshPipelines[mode];
+    }
+    if (_meshPSO[si][mode][mask] == nil && _lib) {
+        MTLRenderPipelineDescriptor *md = [MTLRenderPipelineDescriptor new];
+        md.vertexFunction = [_lib newFunctionWithName:@"mesh_vs"];
+        md.fragmentFunction = [_lib newFunctionWithName:@"mesh_fs"];
+        md.colorAttachments[0].pixelFormat = _colorFormat;
+        md.depthAttachmentPixelFormat = _depthFormat;
+        md.stencilAttachmentPixelFormat = _depthFormat;
+        md.rasterSampleCount = (NSUInteger)(1 << si);
+        MTLRenderPipelineColorAttachmentDescriptor *c = md.colorAttachments[0];
+        c.blendingEnabled = mode != 0;
+        c.sourceRGBBlendFactor = c.sourceAlphaBlendFactor = MTLBlendFactorSourceAlpha;
+        c.destinationRGBBlendFactor = c.destinationAlphaBlendFactor = mode == 1 ? MTLBlendFactorOneMinusSourceAlpha : MTLBlendFactorOne;
+        c.writeMask = mask == 1 ? (MTLColorWriteMaskRed | MTLColorWriteMaskGreen | MTLColorWriteMaskBlue)
+                    : mask == 2 ? MTLColorWriteMaskAlpha
+                                : MTLColorWriteMaskAll;
+        NSError *error = nil;
+        _meshPSO[si][mode][mask] = [_device newRenderPipelineStateWithDescriptor:md error:&error];
+        if (_meshPSO[si][mode][mask] == nil) {
+            NSLog(@"NFSMW: mesh pipeline %d/%d/%d failed: %@", si, mode, mask, error);
+            return _meshPipelines[mode];
+        }
+    }
+    return _meshPSO[si][mode][mask];
 }
 
 // This frame's EnvMapTex, or nil (shader fallback).
@@ -1368,13 +1513,26 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         // Opaque first, then blended in submission order.
         [enc setViewport:(MTLViewport){0, 0, width, height, 0, 1}];
         [enc setCullMode:MTLCullModeNone];
-        for (int blended = 0; blended < 2; blended++) {
+        // Pass 2 (the player view's frame only): ___eDisplayFrame 0x6DF3C3
+        // draws the sky again with ColorWriteMode 8 (alpha only) and ZFUNC
+        // LESSEQUAL after the world, so the frame's alpha (cleared to 0, the
+        // world drawn with ColorWriteMode 7) holds the sky's: what over
+        // bright's downsample (IDI_FILTER_FX p5) scales by.
+        const int saved_mask = _passMask;
+        for (int blended = 0; blended < (_passMainScene ? 3 : 2); blended++) {
+            if (blended == 2) {
+                _passMask = 2;
+            }
             for (const Draw3D &d : draws) {
                 int mode = (d.flags & PORT_3D_ADDITIVE) ? 2 : (d.flags & PORT_3D_ALPHA_BLEND) ? 1 : 0;
                 if (d.effect == 19) {
                     mode = 0; // IDI_SKYBOX_FX p0: ALPHABLENDENABLE 0
                 }
-                if ((mode != 0) != (blended != 0)) {
+                if (blended == 2) {
+                    if (d.effect != 19) {
+                        continue;
+                    }
+                } else if ((mode != 0) != (blended != 0)) {
                     continue;
                 }
                 struct {
@@ -1460,8 +1618,8 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                     }
                 }
                 memcpy(c.world, d.world, sizeof(c.world));
-                [enc setRenderPipelineState:_meshPipelines[mode]];
-                [enc setDepthStencilState:(mode == 0 ? _depthWrite : _depthTest)];
+                [enc setRenderPipelineState:[self meshPipeline:mode]];
+                [enc setDepthStencilState:(mode == 0 && blended != 2 ? _depthWrite : _depthTest)];
                 [enc setVertexBuffer:d.vertex_buffer offset:0 atIndex:0];
                 [enc setVertexBytes:&c length:sizeof(c) atIndex:1];
                 [enc setVertexBytes:&fog length:sizeof(fog) atIndex:2];
@@ -1472,6 +1630,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 [enc setFragmentTexture:(d.texture3 ? d.texture3 : _black) atIndex:3];
                 [enc setFragmentTexture:(_shadowValid ? _shadowDepth : _shadowDepthLit) atIndex:4];
                 [enc setFragmentTexture:(_shadowValid ? _shadowColour : _black) atIndex:5];
+                [enc setFragmentTexture:(_reflBound ? _reflBound : _white) atIndex:9];
                 [enc setFragmentBytes:&fog length:sizeof(fog) atIndex:4];
                 [enc setFragmentBytes:d.envmap length:sizeof(d.envmap) atIndex:3];
                 [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
@@ -1498,7 +1657,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 if (c.effect == 19 && !(c.shade & 1)) {
                     // IDI_SKYBOX_FX passes p1 and p2: SRCALPHA / INVSRCALPHA,
                     // ZFUNC EQUAL, no depth writes.
-                    [enc setRenderPipelineState:_meshPipelines[1]];
+                    [enc setRenderPipelineState:[self meshPipeline:1]];
                     [enc setDepthStencilState:_depthEqual];
                     for (uint32_t pass = 1; pass <= 2; pass++) {
                         c.pad = pass;
@@ -1513,15 +1672,19 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 }
             }
         }
+        _passMask = saved_mask;
     }
 }
 
-// Offscreen targets for the visual treatment, sized like the drawable.
-- (void)ensureTreatmentTargets:(CGSize)size {
+// Offscreen targets for the 3D frame, sized like the drawable: the frame
+// (multisampled and memoryless when FSAA is on, resolved into _sceneColor)
+// and the quarter-size bloom / over bright targets.
+- (void)ensureSceneTargets:(CGSize)size samples:(int)samples {
     NSUInteger w = (NSUInteger)size.width, h = (NSUInteger)size.height;
-    if (_sceneColor && _sceneColor.width == w && _sceneColor.height == h) {
+    if (_sceneColor && _sceneColor.width == w && _sceneColor.height == h && _sceneSamples == samples) {
         return;
     }
+    _sceneSamples = samples;
     MTLTextureDescriptor *cd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
                                                                                   width:w
                                                                                  height:h
@@ -1535,6 +1698,21 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                                                                               mipmapped:NO];
     dd.usage = MTLTextureUsageRenderTarget;
     dd.storageMode = MTLStorageModeMemoryless;
+    if (samples > 1) {
+        dd.textureType = MTLTextureType2DMultisample;
+        dd.sampleCount = samples;
+        MTLTextureDescriptor *md = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                                                                      width:w
+                                                                                     height:h
+                                                                                  mipmapped:NO];
+        md.textureType = MTLTextureType2DMultisample;
+        md.sampleCount = samples;
+        md.usage = MTLTextureUsageRenderTarget;
+        md.storageMode = MTLStorageModeMemoryless;
+        _sceneColorMS = [_device newTextureWithDescriptor:md];
+    } else {
+        _sceneColorMS = nil;
+    }
     _sceneDepth = [_device newTextureWithDescriptor:dd];
     // PC 0x6C311D: the bloom targets are a quarter of the back buffer.
     cd.width = w / 4 > 0 ? w / 4 : 1;
@@ -1547,9 +1725,9 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
 }
 
 // One IDI_FILTER_FX pass (sub_6D2CD0): taps of (weight, dx, dy) in source
-// texels, drawn over the whole target.
+// texels, drawn over the whole target. mode: see filter_fs.
 - (void)filter:(id<MTLTexture>)src into:(id<MTLTexture>)dst taps:(const float (*)[3])taps count:(int)count
-     lumAlpha:(bool)lumAlpha commandBuffer:(id<MTLCommandBuffer>)cmd {
+          mode:(int)mode commandBuffer:(id<MTLCommandBuffer>)cmd {
     MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
     rp.colorAttachments[0].texture = dst;
     rp.colorAttachments[0].loadAction = MTLLoadActionDontCare;
@@ -1569,7 +1747,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         c.offsets[i][1] = taps[i][2] / (float)src.height;
     }
     c.taps = count;
-    c.lum_alpha = lumAlpha ? 1 : 0;
+    c.lum_alpha = mode;
     id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rp];
     [enc setRenderPipelineState:_filterPipeline];
     [enc setFragmentTexture:src atIndex:0];
@@ -1578,17 +1756,97 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     [enc endEncoding];
 }
 
-// The 3D scene into an offscreen frame, then the bloom source: PC
-// sub_6DBEC0 (2x2 taps down to a quarter, alpha = luminance; kernel 0x8F9560)
-// and sub_6DBFE0 (0x8F9474 = 2 rounds of a 4-tap horizontal then vertical
-// blur; kernels 0x8F9530 / 0x8F9500).
-- (void)drawTreatedScene:(const Frame3D &)scene commandBuffer:(id<MTLCommandBuffer>)cmd view:(MTKView *)view {
-    [self ensureTreatmentTargets:view.drawableSize];
+// Kernels: 0x8F9560 (2x2 down), 0x8F9530 / 0x8F9500 (4-tap horizontal /
+// vertical blur).
+static const float kDown[4][3] = {{0.25f, -0.5f, -0.5f}, {0.25f, 0.5f, -0.5f}, {0.25f, -0.5f, 0.5f}, {0.25f, 0.5f, 0.5f}};
+static const float kBlurH[4][3] = {{1 / 3.0f, 1.5f, 0}, {1 / 6.0f, 3.0f, 0}, {1 / 3.0f, -1.5f, 0}, {1 / 6.0f, -3.0f, 0}};
+static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 / 3.0f, 0, -1.5f}, {1 / 6.0f, 0, -3.0f}};
+
+// PC ___eDisplayFrame 0x6DE3FA: the road reflection view (view 4) into its
+// 320x240 target before the player view, and sub_6D4960's blur. Binds this
+// frame's ReflectedTex (_reflBound).
+- (void)drawReflection:(const Frame3D &)scene commandBuffer:(id<MTLCommandBuffer>)cmd {
+    _reflBound = _white; // sub_6BCDC0 at Road Reflection Detail 0: 1x1 0xFFFFFFFF
+    if (scene.reflection_mode == 0 || !_meshPipelines[0]) {
+        return;
+    }
+    const NSUInteger w = 320, h = 240; // sub_6BCDC0, sub_6BD0D0 render target 1
+    if (_reflColor == nil) {
+        MTLTextureDescriptor *cd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                                                                      width:w
+                                                                                     height:h
+                                                                                  mipmapped:NO];
+        cd.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+        cd.storageMode = MTLStorageModePrivate;
+        _reflColor = [_device newTextureWithDescriptor:cd];
+        _reflColor.label = @"Road reflection";
+        _reflBlur = [_device newTextureWithDescriptor:cd];
+        MTLTextureDescriptor *dd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float_Stencil8
+                                                                                      width:w
+                                                                                     height:h
+                                                                                  mipmapped:NO];
+        dd.usage = MTLTextureUsageRenderTarget;
+        dd.storageMode = MTLStorageModeMemoryless;
+        _reflDepth = [_device newTextureWithDescriptor:dd];
+        _reflValid = false;
+    }
+    if (scene.reflection_active) {
+        // sub_6BD3B0 for render target 1: clear target and z (black, 1).
+        MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+        rp.colorAttachments[0].texture = _reflColor;
+        rp.colorAttachments[0].loadAction = MTLLoadActionClear;
+        rp.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
+        rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+        rp.depthAttachment.texture = _reflDepth;
+        rp.depthAttachment.loadAction = MTLLoadActionClear;
+        rp.depthAttachment.clearDepth = 1.0;
+        rp.depthAttachment.storeAction = MTLStoreActionDontCare;
+        rp.stencilAttachment.texture = _reflDepth;
+        rp.stencilAttachment.loadAction = MTLLoadActionClear;
+        rp.stencilAttachment.storeAction = MTLStoreActionDontCare;
+        id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rp];
+        enc.label = @"Road reflection";
+        _drawingEnvFace = true; // a non-main render target: the NOFOG effects
+        [self drawDraws:scene.reflection_draws viewProj:scene.reflection_view_proj eye:scene.eye fog:scene.fog
+                 envMap:[self envMapFor:scene] width:w height:h encoder:enc];
+        _drawingEnvFace = false;
+        [enc endEncoding];
+        _reflValid = true;
+    }
+    if (!_reflValid) {
+        _reflBound = _black;
+        return;
+    }
+    if (scene.reflection_blur && _filterPipeline) {
+        [self filter:_reflColor into:_reflBlur taps:kBlurH count:4 mode:0 commandBuffer:cmd];
+        [self filter:_reflBlur into:_reflColor taps:kBlurV count:4 mode:0 commandBuffer:cmd];
+    }
+    _reflBound = _reflColor;
+}
+
+// The 3D scene into the offscreen frame (multisampled with FSAA, then
+// resolved; PC renders into the multisampled back buffer or the FSAA
+// surface 0x93E7B8 and StretchRects it, 0x6DAEB5 / sub_6D40E0), then the
+// bloom source for the treatment: PC sub_6DBEC0 (2x2 taps down to a
+// quarter, alpha = luminance; kernel 0x8F9560) and sub_6DBFE0 (0x8F9474 = 2
+// rounds of a 4-tap horizontal then vertical blur; kernels 0x8F9530 /
+// 0x8F9500), and over bright's.
+- (void)drawOffscreenScene:(const Frame3D &)scene commandBuffer:(id<MTLCommandBuffer>)cmd view:(MTKView *)view {
+    const int samples = PortMetalFSAASamples(gFSAALevel.load());
+    [self ensureSceneTargets:view.drawableSize samples:samples];
     MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
-    rp.colorAttachments[0].texture = _sceneColor;
+    // The PC back buffer is cleared to 0 (alpha 0 too) after each present
+    // (eDisplayFrame 0x6E75F0, D3DCLEAR target | z | stencil, colour 0).
     rp.colorAttachments[0].loadAction = MTLLoadActionClear;
-    rp.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
-    rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+    rp.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0);
+    if (samples > 1) {
+        rp.colorAttachments[0].texture = _sceneColorMS;
+        rp.colorAttachments[0].resolveTexture = _sceneColor;
+        rp.colorAttachments[0].storeAction = MTLStoreActionMultisampleResolve;
+    } else {
+        rp.colorAttachments[0].texture = _sceneColor;
+        rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+    }
     rp.depthAttachment.texture = _sceneDepth;
     rp.depthAttachment.loadAction = MTLLoadActionClear;
     rp.depthAttachment.clearDepth = 1.0;
@@ -1597,25 +1855,32 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     rp.stencilAttachment.loadAction = MTLLoadActionClear;
     rp.stencilAttachment.storeAction = MTLStoreActionDontCare;
     id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rp];
+    enc.label = @"Scene";
+    // The world effects write ColorWriteMode 7 (rgb; sub_6CFCE0) in the
+    // player view.
+    _passSamples = samples;
+    _passMask = 1;
+    _passMainScene = true;
     [self drawScene:scene encoder:enc view:view];
+    _passSamples = 1;
+    _passMask = 0;
+    _passMainScene = false;
     [enc endEncoding];
 
-    static const float down[4][3] = {{0.25f, -0.5f, -0.5f}, {0.25f, 0.5f, -0.5f}, {0.25f, -0.5f, 0.5f}, {0.25f, 0.5f, 0.5f}};
-    static const float blur_h[4][3] = {{1 / 3.0f, 1.5f, 0}, {1 / 6.0f, 3.0f, 0}, {1 / 3.0f, -1.5f, 0}, {1 / 6.0f, -3.0f, 0}};
-    static const float blur_v[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 / 3.0f, 0, -1.5f}, {1 / 6.0f, 0, -3.0f}};
-    [self filter:_sceneColor into:_bloom[0] taps:down count:4 lumAlpha:true commandBuffer:cmd];
-    for (int i = 0; i < 2; i++) {
-        [self filter:_bloom[0] into:_bloom[1] taps:blur_h count:4 lumAlpha:false commandBuffer:cmd];
-        [self filter:_bloom[1] into:_bloom[0] taps:blur_v count:4 lumAlpha:false commandBuffer:cmd];
+    if (scene.treatment) {
+        [self filter:_sceneColor into:_bloom[0] taps:kDown count:4 mode:1 commandBuffer:cmd];
+        for (int i = 0; i < 2; i++) {
+            [self filter:_bloom[0] into:_bloom[1] taps:kBlurH count:4 mode:0 commandBuffer:cmd];
+            [self filter:_bloom[1] into:_bloom[0] taps:kBlurV count:4 mode:0 commandBuffer:cmd];
+        }
     }
     if (scene.overbright && _overbrightPipeline && _overbrightAddPipeline) {
         // sub_6DBEC0 with Over Bright on: the frame down to 0x98296C with the
-        // 2x2 kernel 0x8F9560 (IDI_FILTER_FX p5, rgb times the weighted alpha;
-        // guess: the frame's alpha is 1, as the PC back buffer is cleared to
-        // and drawn with ColorWriteMode 7, except the sky's alpha-only pass,
-        // which isn't ported). Then sub_6DC040: pContrast into 0x982964 and
-        // the 0x8F9474 rounds of the 0x8F9530 / 0x8F9500 blur.
-        [self filter:_sceneColor into:_obSource taps:down count:4 lumAlpha:false commandBuffer:cmd];
+        // 2x2 kernel 0x8F9560 (IDI_FILTER_FX p5: rgb times the weighted
+        // alpha, the sky's from its alpha-only pass). Then sub_6DC040:
+        // pContrast into 0x982964 and the 0x8F9474 rounds of the 0x8F9530 /
+        // 0x8F9500 blur.
+        [self filter:_sceneColor into:_obSource taps:kDown count:4 mode:2 commandBuffer:cmd];
         MTLRenderPassDescriptor *op = [MTLRenderPassDescriptor renderPassDescriptor];
         op.colorAttachments[0].texture = _ob[0];
         op.colorAttachments[0].loadAction = MTLLoadActionDontCare;
@@ -1628,8 +1893,8 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         [oe drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
         [oe endEncoding];
         for (int i = 0; i < 2; i++) {
-            [self filter:_ob[0] into:_ob[1] taps:blur_h count:4 lumAlpha:false commandBuffer:cmd];
-            [self filter:_ob[1] into:_ob[0] taps:blur_v count:4 lumAlpha:false commandBuffer:cmd];
+            [self filter:_ob[0] into:_ob[1] taps:kBlurH count:4 mode:0 commandBuffer:cmd];
+            [self filter:_ob[1] into:_ob[0] taps:kBlurV count:4 mode:0 commandBuffer:cmd];
         }
     }
 }
@@ -1657,14 +1922,29 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     [enc setFragmentBytes:vt.spline length:sizeof(vt.spline) atIndex:1];
     [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
     [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
-    if (scene.overbright && _overbrightPipeline && _overbrightAddPipeline) {
-        // sub_6DC040's composite over the treated frame (0x93DE60[0x982C60]).
-        [enc setRenderPipelineState:_overbrightAddPipeline];
-        [enc setFragmentTexture:_ob[0] atIndex:0];
-        float intensity = scene.ob.intensity;
-        [enc setFragmentBytes:&intensity length:sizeof(intensity) atIndex:0];
-        [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+}
+
+// Without the treatment the PC frame stays in the back buffer: here the
+// offscreen frame is copied into the drawable.
+- (void)copyScene:(id<MTLRenderCommandEncoder>)enc {
+    [enc setRenderPipelineState:_copyPipeline];
+    [enc setDepthStencilState:_depthOff];
+    [enc setFragmentTexture:_sceneColor atIndex:0];
+    [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+}
+
+// sub_6DC040's composite over the (treated) frame (0x93DE60[0x982C60]), or
+// over the back buffer with the treatment off (the 0.8 blend factor case).
+- (void)applyOverBright:(const Frame3D &)scene encoder:(id<MTLRenderCommandEncoder>)enc {
+    if (!scene.overbright || !_overbrightPipeline || !_overbrightAddPipeline) {
+        return;
     }
+    [enc setRenderPipelineState:_overbrightAddPipeline];
+    [enc setDepthStencilState:_depthOff];
+    [enc setFragmentTexture:_ob[0] atIndex:0];
+    float intensity = scene.ob.intensity;
+    [enc setFragmentBytes:&intensity length:sizeof(intensity) atIndex:0];
+    [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 }
 
 - (void)drawInMTKView:(MTKView *)view {
@@ -1698,15 +1978,22 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         memcpy(_shadowTransform, scene.shadow_transform, sizeof(_shadowTransform));
     }
     _invShadowStrength = scene.inv_shadow_strength;
-    bool treated = !scene.overlay && scene.treatment && !scene.draws.empty() && _filterPipeline && _treatmentPipeline;
-    if (treated) {
-        [self drawTreatedScene:scene commandBuffer:cmd view:view];
+    [self drawReflection:scene commandBuffer:cmd];
+    // The 3D frame goes through the offscreen target (FSAA resolve, the
+    // treatment's and over bright's sources) unless it's the debug overlay.
+    bool offscreen = !scene.overlay && !scene.draws.empty() && _filterPipeline && _copyPipeline;
+    bool treated = offscreen && scene.treatment && _treatmentPipeline;
+    if (offscreen) {
+        [self drawOffscreenScene:scene commandBuffer:cmd view:view];
     }
     id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:pass];
-    if (treated) {
-        [self applyTreatment:scene encoder:enc];
-    } else if (!scene.overlay) {
-        [self drawScene:scene encoder:enc view:view];
+    if (offscreen) {
+        if (treated) {
+            [self applyTreatment:scene encoder:enc];
+        } else {
+            [self copyScene:enc];
+        }
+        [self applyOverBright:scene encoder:enc];
     }
     [enc setDepthStencilState:_depthOff];
     if (!fe.vertices.empty()) {

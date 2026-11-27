@@ -1360,7 +1360,13 @@ void CarRenderConn::OnRender(eView *view, int reflection) {
 
     EVIEWMODE view_mode = eGetCurrentViewMode();
 
+#if defined(EA_PORT_NATIVE)
+    // speed.exe 1.3 (0x750E20): the road reflection view (4) also draws the
+    // cars, mirrored, outside split screen.
+    if (reflection == 0 || (view->GetID() == EVIEW_PLAYER1_GLOW && view_mode < EVIEWMODE_TWOH)) {
+#else
     if (reflection == 0) {
+#endif
         bMatrix4 render_matrix(this->mRenderMatrix);
 
         if (this->IsViewAnchor(view)) {

@@ -115,6 +115,11 @@ void ApplyPreset() {
         // high-detail scenery set instead of the low-detail stand-ins).
         o.TextureFiltering = 2;
         o.WorldLodLevel = 3;
+        // And anti-aliasing: PC's top preset picks FSAA level 1 (the first
+        // non-maskable quality, 2x on most cards); the top preset here
+        // takes the slider's maximum (the GPU's highest MSAA sample count,
+        // 8x or 4x), which Apple GPUs resolve on tile memory at little cost.
+        o.FSAALevel = PortMetalMaxFSAALevel();
     }
     if (gPCGraphicsOptionsMax.VisualTreatment != 0) {
         o.VisualTreatment = 1;
@@ -154,8 +159,11 @@ void ClampToMaxima() {
 
 // sub_6D2100: the maxima from the D3D caps. The port reports what a capable
 // D3D9 card gives (all effects available, depth-texture shadows, anisotropic
-// filtering). TODO(port): FSAA quality levels are a guess (Metal has 2/4/8 x
-// MSAA; the slider's levels are D3DMULTISAMPLE_NONMASKABLE qualities - 1).
+// filtering). FSAA: sub_6C1510 sets the maximum to the adapter's
+// D3DMULTISAMPLE_NONMASKABLE quality count - 1 (CheckDeviceMultiSampleType,
+// A8R8G8B8, fullscreen); the qualities are vendor-defined and grow with
+// the sample count. Natively the levels are the GPU's MSAA sample counts
+// beyond 1 (2x, 4x, 8x), so the maximum is how many it has.
 void SetDeviceMaxima() {
     PCGraphicsOptions &m = gPCGraphicsOptionsMax;
     m.CarEnvironmentMapEnable = 3;     // 0x901840 (0 on Matrox)
@@ -184,7 +192,7 @@ void SetDeviceMaxima() {
     m.VisualTreatment = 1;             // 0x9018B0: the visual treatment effect loaded
     m.Unknown7C = 0;                   // 0x9018B4
     m.ShadowDetail = 2;                // 0x9018B8: depth-texture shadows
-    m.FSAALevel = 3;                   // 0x901890, sub_6C1510
+    m.FSAALevel = PortMetalMaxFSAALevel(); // 0x901890, sub_6C1510
 }
 
 std::string ConfigPath() {
@@ -294,6 +302,9 @@ void PCGraphicsOptionsResetDisplay() {
     PortSetDisplayMode(keep_window ? 0 : w, keep_window ? 0 : h, gPCGraphicsOptions.VSyncOn != 0);
     // (The PC sets the filtering on each effect as it begins, 0x6C5EE9.)
     PortSetTextureFiltering(gPCGraphicsOptions.TextureFiltering);
+    // The FSAA level is part of the PC device's present parameters
+    // (sub_6BFAB0 0x6BFB81: MultiSampleType NONMASKABLE, quality g_FSAALevel).
+    PortSetFSAALevel(gPCGraphicsOptions.FSAALevel);
 }
 
 // The graphics-options part of eInitEnginePlat (0x6E69F0) and sub_6DF9C0:
@@ -320,11 +331,11 @@ int eInitEnginePlat() {
     ClampToMaxima();
     PCGraphicsOptionsResetDisplay();
     if (std::getenv("NFSMW_TRACE_OPTIONS")) {
-        std::fprintf(stderr, "[options] %s: level %d res %d envmap %d/%d world %d shadow %d vt %d vsync %d\n",
+        std::fprintf(stderr, "[options] %s: level %d res %d envmap %d/%d world %d shadow %d vt %d vsync %d fsaa %d (%dx)\n",
                      gFirstTime ? "defaults" : "loaded", gPCPerformanceLevel, gPCGraphicsOptions.RacingResolution,
                      gPCGraphicsOptions.CarEnvironmentMapEnable, gPCGraphicsOptions.CarEnvironmentMapUpdateData,
                      gPCGraphicsOptions.WorldLodLevel, gPCGraphicsOptions.ShadowDetail, gPCGraphicsOptions.VisualTreatment,
-                     gPCGraphicsOptions.VSyncOn);
+                     gPCGraphicsOptions.VSyncOn, gPCGraphicsOptions.FSAALevel, PortMetalFSAASamples(gPCGraphicsOptions.FSAALevel));
     }
     return 0;
 }

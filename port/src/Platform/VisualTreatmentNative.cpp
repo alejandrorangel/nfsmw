@@ -140,9 +140,8 @@ void PortVisualTreatmentFrame(int frame) {
         std::fprintf(stderr, "[vt]   gain map UVESVIGNETTE %p (%dx%d)\n", (void *)gain, gain ? gain->Width : 0, gain ? gain->Height : 0);
     }
     // ___eDisplayFrame 0x6DF5A4: over bright (sub_6DC040) with the Over Bright
-    // option (0x9017FC, byte 0x982B26). Natively it rides on the treatment's
-    // offscreen frame. TODO(port): with Visual Treatment off the PC adds it
-    // to the back buffer directly; not done here.
+    // option (0x9017FC, byte 0x982B26), with or without the treatment (the
+    // renderer adds it over the treated or the copied frame).
     if (!off && gPCGraphicsOptions.OverBrightEnable != 0) {
         PortOverBright ob;
         ScreenEffectDB *se = view->ScreenEffects;

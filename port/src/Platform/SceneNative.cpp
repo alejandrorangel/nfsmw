@@ -483,8 +483,8 @@ void SetTimeOfDayLighting(V3 sun, float cloud, PortWorldFog &f) {
     f.diffuse[3] = 1.0f;
     f.ambient[3] = 4.0f;
     {
-        // SpecularColour (TimeOfDay +0x40, not clamped); w (eView +0x36A0,
-        // the reflection strength) stays 0 until a reflection pass exists.
+        // SpecularColour (TimeOfDay +0x40, not clamped); w is set by
+        // SetupFrameLighting (Rain +0x36A0, the road reflection strength).
         const UMath::Vector4 &a0 = la.SpecularColour(), &a1 = lb.SpecularColour(), &b0 = ha.SpecularColour(), &b1 = hb.SpecularColour();
         const float lo[3] = {a0.x + (a1.x - a0.x) * cloud, a0.y + (a1.y - a0.y) * cloud, a0.z + (a1.z - a0.z) * cloud};
         const float hi[3] = {b0.x + (b1.x - b0.x) * cloud, b0.y + (b1.y - b0.y) * cloud, b0.z + (b1.z - b0.z) * cloud};
@@ -539,6 +539,45 @@ void SetSky(float cloud) {
     PortMetal3DSetSky(&sky);
 }
 
+// Rain +0x36A0, the road reflection strength (SpecularColour.w of the world
+// effects, sub_6D6AA0 / sub_6D71F0), as Rain::UpdateAndRender (0x758100)
+// moves it each unpaused race frame: towards RoadReflection (0x904B38, 1)
+// while it rains (intensity +0x28C non-zero; else towards 0) by 0.005
+// (0x8B2F60) of the difference, dropping to 0 below 0.05 (0x8B2E60) on the
+// way down; with AlwaysRain (0x9B0A30, a debug switch) it is put at
+// RoadReflection first. TODO(port): the weather that sets the intensity
+// (sub_7539D0: the scripted override, chance of rain and the "Rain"
+// parameter map) isn't ported, so races are dry; NFSMW_RAIN=1 stands for
+// AlwaysRain.
+float gRoadReflection;        // +0x36A0
+float gRoadReflectionDesired; // +0x369C
+
+bool ForcedRain() {
+    static const bool on = [] {
+        const char *e = std::getenv("NFSMW_RAIN");
+        return e != nullptr && *e != '\0' && *e != '0';
+    }();
+    return on;
+}
+
+void TickRoadReflection(eView *view) {
+    if (TheGameFlowManager.GetState() != GAMEFLOW_STATE_RACING || TheGameFlowManager.IsPaused() || view->Precipitation == nullptr) {
+        return;
+    }
+    const float road_reflection = 1.0f; // RoadReflection 0x904B38
+    if (ForcedRain()) {
+        gRoadReflection = road_reflection;
+    } else {
+        gRoadReflectionDesired = view->Precipitation->GetRainIntensity() == 0.0f ? 0.0f : road_reflection;
+    }
+    float next = (gRoadReflectionDesired - gRoadReflection) * 0.005f + gRoadReflection;
+    if (gRoadReflectionDesired <= gRoadReflection) {
+        gRoadReflection = next < 0.05f ? 0.0f : next;
+    } else {
+        gRoadReflection = next;
+    }
+}
+
 void SetupFrameLighting(eView *view) {
     V3 sun = TickSunDirection();
     gSunDirection = sun;
@@ -547,6 +586,14 @@ void SetupFrameLighting(eView *view) {
     SetWorldFog(sun, f);
     float cloud = view && view->Precipitation ? view->Precipitation->GetCloudIntensity() : 0.0f;
     SetTimeOfDayLighting(sun, cloud, f);
+    if (view) {
+        TickRoadReflection(view);
+    }
+    // The effect begins read the current view's Rain +0x36A0 (view 1's in
+    // the player and reflection views); WORLDREFLECT's specular rgb is also
+    // scaled by 1 - its +0x290 cloud intensity (sub_6D71F0).
+    f.specular[3] = gRoadReflection;
+    f.reflect_specular_scale = 1.0f - cloud;
     PortMetal3DSetFog(&f);
     SetSky(cloud);
 }
@@ -1165,9 +1212,45 @@ bool RenderWorldScene(int frame) {
             }
         }
     }
+    // The road reflection view (PC view 4, sub_6BFDD0): culled with exclude
+    // 0x800 (scenery mirrored about each instance's pivot, Scenery.cpp) when
+    // Road Reflection Detail is on and the road is wet (Rain +0x36A0 > 0.01).
+    const int road_reflection = gPCGraphicsOptions.RoadReflectionEnable;
+    const bool wet = gRoadReflection > 0.01f; // 0x890DC4
+    eView *reflection_view = road_reflection != 0 ? eGetView(EVIEW_PLAYER1_GLOW, false) : nullptr;
+    if (reflection_view && !reflection_view->IsActive()) {
+        reflection_view = nullptr;
+    }
+    if (reflection_view && wet) {
+        SetViewClip(reflection_view, view_proj);
+        SetupCullInfo(reflection_view, &gWorldCullInfo.SceneryCullInfos[gWorldCullInfo.NumCullInfos++], 0x800);
+    }
     gWorldCullInfo.DoCulling();
     gSceneDraws = 0;
     gSceneCalls = gSceneNoSolid = 0;
+    int reflection_draws = 0;
+    if (reflection_view) {
+        // ___eDisplayFrame 0x6DE3FA, in its render target 1 (sub_6BD3B0):
+        // the reflected sky layer (StuffSkyLayer(view 4, 4, ...)) at every
+        // level; above Road Reflection Detail 1, when wet, the scenery
+        // (stuff flags 8: not the 0x80 instances) and the cars mirrored
+        // (sub_750B10(view 4, 1)); at detail 3 in a race the target is
+        // blurred (sub_6D4960). TODO(port): the light flares PC also draws
+        // there (eRenderWorldLightFlares type 2, RenderVehicleFlares,
+        // eRenderLightFlarePool) aren't ported.
+        PortMetal3DBeginReflection(view_proj);
+        StuffSkyLayer(reflection_view, SKY_LAYER_REFLECTION);
+        if (road_reflection > 1 && wet) {
+            gWorldCullInfo.StuffScenery(reflection_view, 8);
+            VehicleRenderConn::RenderAll(reflection_view, 1);
+        }
+        PortMetal3DEndReflection();
+        PortMetal3DSetReflection(1, road_reflection == 3 && wet);
+        reflection_draws = gSceneDraws;
+        gSceneDraws = 0;
+    } else {
+        PortMetal3DSetReflection(road_reflection != 0 ? 1 : 0, false);
+    }
     int envmap_draws = 0;
     if (envmap) {
         // ___eDisplayFrame 0x6DE675: each active face gets the sky and the
@@ -1220,7 +1303,8 @@ bool RenderWorldScene(int frame) {
     DrawTestCars(view, 0); // ___eDisplayFrame 0x6DEE44: sub_750B10 → VehicleRenderConn::RenderAll
     gShadowLevelClip = nullptr;
     if (log) {
-        std::fprintf(stderr, "[world] cars %d, env map faces %d draws, shadow map %d\n", gSceneDraws - scenery - models, envmap_draws, shadow_draws);
+        std::fprintf(stderr, "[world] cars %d, env map faces %d draws, shadow map %d, reflection %d (strength %.2f)\n", gSceneDraws - scenery - models,
+                     envmap_draws, shadow_draws, reflection_draws, gRoadReflection);
         std::fprintf(stderr, "[world] camera (%.1f %.1f %.1f) dir (%.2f %.2f %.2f) draws: scenery %d, models %d (calls %d, no solid %d)\n",
                      eye->x, eye->y, eye->z, view->GetCamera()->GetDirection()->x, view->GetCamera()->GetDirection()->y,
                      view->GetCamera()->GetDirection()->z, scenery, gSceneDraws - scenery, gSceneCalls, gSceneNoSolid);

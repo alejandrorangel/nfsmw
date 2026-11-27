@@ -33,7 +33,12 @@ float MainSkyScale = 1.0f;
 
 static const float EnvSkyScale = 0.0065f;
 
+#if defined(EA_PORT_NATIVE)
+// speed.exe 1.3 StuffSkyLayer (0x6DB310): the reflection layer at 0.06.
+static const float RefSkyScale = 0.06f;
+#else
 static const float RefSkyScale = 0.035f;
+#endif
 
 static const float RVMSkyScale = 0.0095f;
 
