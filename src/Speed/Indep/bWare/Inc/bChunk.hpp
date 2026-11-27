@@ -248,7 +248,7 @@ class bChunkCarpHeader {
     int mCrpSize;                   // offset 0x0, size 0x4
     int mSectionNumber;             // offset 0x4, size 0x4
     int mFlags;                     // offset 0x8, size 0x4
-    bChunkCarpHeader *mLastAddress; // offset 0xC, size 0x4
+    PORT_PTR32(bChunkCarpHeader) mLastAddress; // offset 0xC, size 0x4
 
   public:
     void PlatformEndianSwap();

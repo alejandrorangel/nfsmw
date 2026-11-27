@@ -147,11 +147,16 @@ struct WGridNode {
         WGridNodeElemList::iterator fIter; // offset 0x18, size 0x4
     };
 
-    WGridNodeElemList *fDynElems;   // offset 0x0, size 0x4
+    // Track data is loaded in place, so the runtime list pointer is 4 bytes.
+    PORT_PTR32(WGridNodeElemList) fDynElems; // offset 0x0, size 0x4
     unsigned short fNodeInd;        // offset 0x4, size 0x2
     unsigned short fPad;            // offset 0x6, size 0x2
     unsigned char fElemCounts[4];   // offset 0x8, size 0x4
     unsigned short fElemOffsets[4]; // offset 0xC, size 0x8
 };
+
+#if defined(EA_PORT_NATIVE)
+static_assert(sizeof(WGridNode) == 0x14, "WGridNode header is loaded in place");
+#endif
 
 #endif
