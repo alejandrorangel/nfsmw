@@ -68,6 +68,11 @@ void Reference::Lock() {
 
 void Reference::Unlock() {
     if ((this->mMatrix != nullptr) && this->mWorldID != 0) {
+#if defined(EA_PORT_NATIVE)
+        // The native drive camera's anchor can outlive the server when a race
+        // is quit (see Sim::Collision::RemoveListener).
+        if (_Server != nullptr)
+#endif
         _Server->UnlockID(this->mWorldID);
         this->mMatrix = nullptr;
         this->mVelocity = nullptr;

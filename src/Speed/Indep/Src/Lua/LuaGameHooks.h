@@ -134,7 +134,9 @@ void Game_SetHasRapSheet();
 void Game_SetWorldHeat(float heat);
 void FE_ShowWinningPostRaceScreen();
 void FE_ShowLosingPostRaceScreen();
+void FE_ShowPostRaceScreen(bool winner);
+void FE_ShowSpeedTrapScreen(float speedKmh, float bounty);
 void Game_PreventPlayerBeingBusted();
-void Game_CalculateRanking(ISimable *racer, int rank);
+int Game_CalculateRanking(ISimable *racer, int rank);
 
 #endif

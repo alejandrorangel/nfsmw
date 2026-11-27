@@ -69,6 +69,10 @@
 #include <cstdio>
 
 extern bool bIsRestartingRace;
+#if defined(EA_PORT_NATIVE)
+// PC: 0x91CF28. Set by ERestartRace, cleared by Game_StartRace.
+bool FEngHud::bIsRestartingRace = false;
+#endif
 extern int SkipFE;
 extern const char *SkipFEPlayerCar;
 

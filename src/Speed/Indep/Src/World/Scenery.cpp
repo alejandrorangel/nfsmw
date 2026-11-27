@@ -223,6 +223,36 @@ void LoadPrecullerBooBooScripts() {
 }
 
 int LoaderSceneryGroup(bChunk *chunk) {
+#if defined(EA_PORT_NATIVE)
+    // The disk records start with a 32-bit list node (8 bytes), so the native
+    // SceneryGroup (16-byte node) can't be linked in place: each group is
+    // copied into a native one (freed by UnloaderSceneryGroup).
+    if (chunk->GetID() == BCHUNK_SCENERY_BARRIER_GROUPS) {
+        const char *table = chunk->GetData();
+        int size = chunk->GetSize();
+        int pos = 0;
+        while (pos + 0x14 <= size) {
+            const char *disk = &table[pos];
+            int16 num_objects = *reinterpret_cast<const int16 *>(disk + 0xE);
+            if (num_objects < 0) {
+                break;
+            }
+            size_t native_size = offsetof(SceneryGroup, OverrideInfoNumbers) + num_objects * sizeof(uint16);
+            SceneryGroup *group = static_cast<SceneryGroup *>(bMalloc(static_cast<int>(native_size), "SceneryGroup (native)", 0, 0));
+            bMemSet(group, 0, static_cast<int>(native_size));
+            bMemCpy(&group->NameHash, disk + 0x8, 4);
+            bMemCpy(&group->GroupNumber, disk + 0xC, 2);
+            group->NumObjects = num_objects;
+            group->BarrierFlag = disk[0x10];
+            group->DriveThroughBarrierFlag = disk[0x11];
+            bMemCpy(group->OverrideInfoNumbers, disk + 0x14, num_objects * static_cast<int>(sizeof(uint16)));
+            SceneryGroupList.AddTail(group);
+            pos += (num_objects * sizeof(uint16) + 0x17U) & ~3;
+        }
+        return 1;
+    }
+    return 0;
+#else
     if (chunk->GetID() == BCHUNK_SCENERY_BARRIER_GROUPS) {
         char *table = chunk->GetData();
         int size = chunk->GetSize();
@@ -240,12 +270,18 @@ int LoaderSceneryGroup(bChunk *chunk) {
     }
 
     return 0;
+#endif
 }
 
 int UnloaderSceneryGroup(bChunk *chunk) {
     if (chunk->GetID() == BCHUNK_SCENERY_BARRIER_GROUPS) {
         bMemSet(SceneryGroupEnabledTable, 0, sizeof(SceneryGroupEnabledTable));
         SceneryGroupEnabledTable[0] = 1;
+#if defined(EA_PORT_NATIVE)
+        while (!SceneryGroupList.IsEmpty()) {
+            bFree(SceneryGroupList.RemoveHead());
+        }
+#endif
         SceneryGroupList.InitList();
         return 1;
     }

@@ -6,6 +6,10 @@
 #include "Speed/Indep/Src/Lua/LuaGameHooks.h"
 
 #include <new>
+#if defined(EA_PORT_NATIVE)
+#include <cstdio>
+#include <cstdlib>
+#endif
 
 LuaBindery *LuaBindery::fObj = nullptr;
 
@@ -182,10 +186,53 @@ template <typename... Args> struct Caller<void, Args...> {
 };
 
 // Free function: the function pointer is the closure's light userdata upvalue.
+#if defined(EA_PORT_NATIVE)
+// NFSMW_TRACE_LUA=2 logs every game function a script calls (the closure's
+// second upvalue is its "Table.Name") with its first result.
+bool TraceHookCalls() {
+    static int sTrace = -1;
+    if (sTrace < 0) {
+        const char *env = std::getenv("NFSMW_TRACE_LUA");
+        sTrace = env != nullptr && std::atoi(env) >= 2 ? 1 : 0;
+    }
+    return sTrace != 0;
+}
+
+void TraceHookCall(lua_State *L, int results) {
+    const char *name = lua_tostring(L, lua_upvalueindex(2));
+    char args[128] = "";
+    int argCount = lua_gettop(L) - results;
+    for (int i = 1, used = 0; i <= argCount && used < static_cast<int>(sizeof(args)) - 16; i++) {
+        if (lua_type(L, i) == LUA_TNUMBER) {
+            used += std::snprintf(args + used, sizeof(args) - used, "%s%g", i > 1 ? ", " : "", lua_tonumber(L, i));
+        } else if (lua_type(L, i) == LUA_TSTRING) {
+            used += std::snprintf(args + used, sizeof(args) - used, "%s\"%.24s\"", i > 1 ? ", " : "", lua_tostring(L, i));
+        } else {
+            used += std::snprintf(args + used, sizeof(args) - used, "%s%s", i > 1 ? ", " : "", lua_typename(L, lua_type(L, i)));
+        }
+    }
+    if (results > 0 && lua_isnumber(L, -1)) {
+        std::fprintf(stderr, "[lua] call %s(%s) -> %g\n", name, args, lua_tonumber(L, -1));
+    } else if (results > 0 && lua_isboolean(L, -1)) {
+        std::fprintf(stderr, "[lua] call %s(%s) -> %s\n", name, args, lua_toboolean(L, -1) ? "true" : "false");
+    } else {
+        std::fprintf(stderr, "[lua] call %s(%s)\n", name, args);
+    }
+}
+#endif
+
 template <typename R, typename... Args> int FunctionThunk(lua_State *L) {
     typedef R (*Fn)(Args...);
     Fn fn = reinterpret_cast<Fn>(lua_touserdata(L, lua_upvalueindex(1)));
+#if defined(EA_PORT_NATIVE)
+    int results = Caller<R, Args...>::Call(L, fn, 1, std::index_sequence_for<Args...>());
+    if (TraceHookCalls()) {
+        TraceHookCall(L, results);
+    }
+    return results;
+#else
     return Caller<R, Args...>::Call(L, fn, 1, std::index_sequence_for<Args...>());
+#endif
 }
 
 // Method: the member function pointer is in the closure's userdata upvalue and
@@ -223,7 +270,15 @@ template <typename R, typename... Args> void BindFunction(lua_State *L, const ch
     LuaBindery::GetGlobalTable(L, tableName);
     lua_pushstring(L, name);
     lua_pushlightuserdata(L, reinterpret_cast<void *>(fn));
+#if defined(EA_PORT_NATIVE)
+    lua_pushstring(L, tableName);
+    lua_pushstring(L, ".");
+    lua_pushstring(L, name);
+    lua_concat(L, 3);
+    lua_pushcclosure(L, FunctionThunk<R, Args...>, 2);
+#else
     lua_pushcclosure(L, FunctionThunk<R, Args...>, 1);
+#endif
     lua_settable(L, -3);
     lua_settop(L, -2);
 }

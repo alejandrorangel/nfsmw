@@ -50,6 +50,7 @@ void (*RegisterEvent::ResolveEvent(unsigned int tag))(void *, const struct UGrou
 struct lua_State;
 int EShowRaceCountdown_MakeEvent_LuaBinding(lua_State *luaState);
 int EResetProps_MakeEvent_LuaBinding(lua_State *luaState);
+int ETerminateMusic_MakeEvent_LuaBinding(lua_State *luaState);
 
 namespace {
 
@@ -61,6 +62,7 @@ struct LuaBindingEntry {
 const LuaBindingEntry kLuaBindings[] = {
     {"EShowRaceCountdown", EShowRaceCountdown_MakeEvent_LuaBinding},
     {"EResetProps", EResetProps_MakeEvent_LuaBinding},
+    {"ETerminateMusic", ETerminateMusic_MakeEvent_LuaBinding},
 };
 
 } // namespace

@@ -219,6 +219,17 @@ class GRacerInfo {
     void NotifySpeedTrapTriggered(float mps) {
         mSpeedTrapsCrossed++;
     };
+#if defined(EA_PORT_NATIVE)
+    // PC: 0x5DC790. Records the racer's speed at the race's index'th speed
+    // trap (and its ranking when crossing it).
+    void NotifySpeedTrapTriggered(int index, float mps) {
+        if (mSpeedTrapSpeed[mSpeedTrapsCrossed] == 0.0f) {
+            mSpeedTrapsCrossed++;
+        }
+        mSpeedTrapSpeed[index] = mps;
+        mSpeedTrapPosition[index] = mRanking;
+    }
+#endif
     bool IsAheadOf(const struct GRacerInfo &rhs) {};
     bool IsBehind(const struct GRacerInfo &rhs);
     IVehicle *CreateVehicle(unsigned int default_key);

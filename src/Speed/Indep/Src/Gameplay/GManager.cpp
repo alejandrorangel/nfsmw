@@ -18,6 +18,7 @@
 #include "Speed/Indep/Src/Sim/Simulation.h"
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #endif
 
 // Only the vault side of GManager is implemented here so far: loading the
@@ -646,8 +647,26 @@ void GManager::Update(float dT) {
     // UpdatePursuit (characters and the pursuit bookkeeping aren't ported).
     UpdateTimers(dT);
 #if defined(EA_PORT_NATIVE)
-    void PortUpdateRaceCountdownFallback(); // EShowRaceCountdown.cpp
-    PortUpdateRaceCountdownFallback();
+    // NFSMW_DEBUG_SKIP_RACE=<place>[:<seconds>]: once the race clock passes
+    // <seconds> (default 5), finish the race with the player in <place>
+    // (GRaceStatus::SkipToEndOfRaceInPlace, a PC debug path).
+    if (const char *skip = std::getenv("NFSMW_DEBUG_SKIP_RACE")) {
+        static bool sSkipped = false;
+        GRaceStatus &raceStatus = GRaceStatus::Get();
+        if (raceStatus.GetPlayMode() != GRaceStatus::kPlayMode_Racing || raceStatus.GetRaceParameters() == nullptr) {
+            sSkipped = false;
+        } else if (!sSkipped) {
+            int place = std::atoi(skip);
+            const char *colon = std::strchr(skip, ':');
+            float delay = colon != nullptr ? static_cast<float>(std::atof(colon + 1)) : 5.0f;
+            float elapsed = raceStatus.GetRaceTimeElapsed();
+            if (elapsed > delay) {
+                sSkipped = true;
+                std::fprintf(stderr, "[race] NFSMW_DEBUG_SKIP_RACE: finishing in place %d\n", place);
+                raceStatus.SkipToEndOfRaceInPlace(place < 1 ? 1 : place, elapsed + 60.0f);
+            }
+        }
+    }
     // NFSMW_TRACE_LUA: the race status every 5 s of sim time.
     static float sNextTrace = 0.0f;
     if (std::getenv("NFSMW_TRACE_LUA") != nullptr && Sim::GetTime() >= sNextTrace) {

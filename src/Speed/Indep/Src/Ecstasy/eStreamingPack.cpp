@@ -589,6 +589,66 @@ int eStreamPackLoader::TestLoadStreamingEntry(unsigned int *name_hash_table, int
 
     load_info_list.Sort(eStreamPackLoaderSortLoadEntries);
 
+#if defined(EA_PORT_NATIVE)
+    // PC: speed.exe 1.3 @ 0x5087A0. Only entries that aren't loaded or loading
+    // take part (the test allocations go through ChunkData, so a loaded
+    // entry's data would be lost): pass 0 allocates each one's (compressed)
+    // chunk, pass 1 swaps compressed ones for their uncompressed size, pass 2
+    // frees the test allocations again.
+    for (int pass = 0; pass <= 2; pass++) {
+        uint32 prev_name_hash = 0;
+        for (eStreamPackLoadEntryInfo *load_info = load_info_list.GetHead(); load_info != load_info_list.EndOfList();
+             load_info = load_info->GetNext()) {
+            eStreamingEntry *streaming_entry = load_info->StreamingEntry;
+            if (streaming_entry->RefCount != 0 || (streaming_entry->Flags & 0x10) != 0 || streaming_entry->NameHash == prev_name_hash) {
+                continue;
+            }
+            prev_name_hash = streaming_entry->NameHash;
+            if (pass == 0) {
+                int malloc_size = streaming_entry->ChunkByteSize + this->RequiredChunkAlignment;
+                int allocation_params = 0x2000;
+                if (streaming_entry->Flags & 1) {
+                    allocation_params = 0x2040;
+                } else if (memory_pool_num != 0) {
+                    allocation_params = (memory_pool_num & 0xF) | 0x2000;
+                }
+                if (bLargestMalloc(allocation_params) > malloc_size) {
+                    streaming_entry->ChunkData = (unsigned char *)bMalloc(malloc_size, "TestLoadStreamingEntry", __LINE__, allocation_params);
+                } else {
+                    if ((allocation_params & 0xF) == 0) {
+                        amount_not_alloc_main_mem += malloc_size;
+                    }
+                    amount_not_alloc += malloc_size;
+                }
+            } else if (pass == 1) {
+                if ((streaming_entry->Flags & 1) == 0) {
+                    continue;
+                }
+                int malloc_size = streaming_entry->UncompressedSize + this->RequiredChunkAlignment;
+                int allocation_params = 0x2000;
+                if (memory_pool_num != 0) {
+                    allocation_params = (memory_pool_num & 0xF) | 0x2000;
+                }
+                unsigned char *compressed_data = streaming_entry->ChunkData;
+                streaming_entry->ChunkData = nullptr;
+                if (bLargestMalloc(allocation_params) > malloc_size) {
+                    streaming_entry->ChunkData = (unsigned char *)bMalloc(malloc_size, "TestLoadStreamingEntry", __LINE__, allocation_params);
+                } else {
+                    amount_not_alloc += malloc_size;
+                    if ((allocation_params & 0xF) == 0) {
+                        amount_not_alloc_main_mem += malloc_size;
+                    }
+                }
+                if (compressed_data) {
+                    bFree(compressed_data);
+                }
+            } else if (streaming_entry->ChunkData != nullptr) {
+                bFree(streaming_entry->ChunkData);
+                streaming_entry->ChunkData = nullptr;
+            }
+        }
+    }
+#else
     for (int pass = 0; pass <= 2; pass++) {
         unsigned int prev_name_hash = 0x10;
         for (eStreamPackLoadEntryInfo *load_info = load_info_list.GetHead(); load_info != load_info_list.EndOfList();
@@ -665,6 +725,8 @@ int eStreamPackLoader::TestLoadStreamingEntry(unsigned int *name_hash_table, int
             }
         }
     }
+
+#endif
 
     // PC (speed.exe 1.3 @ 0x5087A0): returns the bytes that didn't fit.
     if (error_if_out_in_main_pool && amount_not_alloc_main_mem != 0) {

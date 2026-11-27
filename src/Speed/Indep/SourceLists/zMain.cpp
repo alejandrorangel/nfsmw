@@ -23,6 +23,22 @@
 #include "Speed/Indep/Src/Generated/Events/EReloadHud.cpp"
 
 #include "Speed/Indep/Src/Generated/Events/EGTriggerInternal.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/ETerminateMusic.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EShowRaceOverMessage.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EShowResults.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EShowMilestones.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EPause.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EUnPause.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/ERestartRace.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EQuitToFE.cpp"
 #endif
 
 #include "Speed/Indep/Src/Input/Common/action.cpp"

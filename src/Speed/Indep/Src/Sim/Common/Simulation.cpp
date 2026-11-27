@@ -780,6 +780,14 @@ void RemoveListener(IListener *listener, const UTL::COM::IUnknown *participant) 
 }
 
 void RemoveListener(IListener *listener) {
+#if defined(EA_PORT_NATIVE)
+    // The native camera director (CameraDriveNative) is torn down by
+    // CameraAI::Update once the player is gone, which after quitting a race
+    // is after the simulation (and its dispatcher) has shut down.
+    if (Internal::CDispatcher::Get() == nullptr) {
+        return;
+    }
+#endif
     Internal::CDispatcher::Get()->RemoveListener(listener, nullptr);
 }
 

@@ -12,6 +12,21 @@
 #include "Speed/Indep/Src/Gameplay/GRaceStatus.h"
 #include "Speed/Indep/Src/Gameplay/GTrigger.h"
 #include "Speed/Indep/Src/Generated/Events/EFadeScreenOn.hpp"
+#include "Speed/Indep/Src/Generated/Events/EPause.hpp"
+#include "Speed/Indep/Src/Generated/Events/EShowMilestones.hpp"
+#include "Speed/Indep/Src/Generated/Events/EShowRaceOverMessage.hpp"
+#include "Speed/Indep/Src/Generated/Events/EShowResults.hpp"
+#include "Speed/Indep/Src/Generated/Messages/MControlPathfinder.h"
+#include "Speed/Indep/Src/Generated/Messages/MFlowReadyForOutro.h"
+#include "Speed/Indep/Src/Generated/Messages/MNotifyChallengePassed.h"
+#include "Speed/Indep/Src/Generated/Messages/MNotifySpeedTrap.h"
+#include "Speed/Indep/Src/Frontend/FEngFrontend.hpp"
+#include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterface.hpp"
+#include "Speed/Indep/Src/Frontend/HUD/FEPkg_Hud.hpp"
+#include "Speed/Indep/Src/Frontend/MenuScreens/InGame/PhotoFinish.hpp"
+#include "Speed/Indep/Src/Generated/AttribSys/Classes/gameplay.h"
+#include "Speed/Indep/Src/Interfaces/IFengHud.h"
+#include "Speed/Indep/Src/Speech/SoundAI.h"
 #include "Speed/Indep/Src/Generated/Events/EResetProps.hpp"
 #include "Speed/Indep/Src/Generated/Hash.hpp"
 #include "Speed/Indep/Src/Generated/Messages/MNISComplete.h"
@@ -602,9 +617,51 @@ void Game_NotifyRacePlacement(GRuntimeInstance *activity, ISimable *racer, int p
     MNotifyRacePlacement(key, racer != nullptr ? racer->GetInstanceHandle() : 0, place).Post(UCrc32(UCRC32_Gameplay));
 }
 
-// PC: 0x60A7B0. TODO(port): speed trap results (GManager speed traps).
-void Game_NotifySpeedTrapTriggered(GRuntimeInstance *activity, GRuntimeInstance *trap, ISimable *racer, float speed) {
-    LUA_HOOK_TODO("Game.NotifySpeedTrapTriggered");
+// PC: 0x60A7B0. A racer went through a speed trap at speedKmh: tells the
+// game (MNotifySpeedTrap), records it on the world's speed trap, and either
+// shows the free roam speed trap screen or, in a speed trap race, stores the
+// racer's speed and flashes it on the racer's HUD.
+void Game_NotifySpeedTrapTriggered(GRuntimeInstance *activity, GRuntimeInstance *trap, ISimable *racer, float speedKmh) {
+    GCollectionKey key;
+    key.mCollectionKey = activity != nullptr ? activity->GetCollection() : 0;
+    MNotifySpeedTrap(key, racer != nullptr ? racer->GetInstanceHandle() : 0, speedKmh).Post(UCrc32(UCRC32_Gameplay));
+    GManager::Get().TrackValue("speedtrap_speed", speedKmh);
+    float mps = speedKmh * 0.27778f;
+    unsigned int trapKey = trap != nullptr ? trap->GetCollection() : 0;
+    // TODO(port): the PC finds the world's GSpeedTrap with this key
+    // (GManager::GetFirstSpeedTrap/GetNextSpeedTrap 0x5E9D40/0x5E4770), calls
+    // its NotifyTriggered(mps) (0x601730: completes it, refreshes the bin's
+    // progress and the map icons) and shows its bounty (GetBounty 0x5E56C0)
+    // on the free roam screen. GManager's speed traps aren't ported.
+    if (!GRaceStatus::Exists()) {
+        return;
+    }
+    GRaceStatus &raceStatus = RaceStatus();
+    if (raceStatus.GetPlayMode() == GRaceStatus::kPlayMode_Roaming) {
+        FE_ShowSpeedTrapScreen(speedKmh, 0.0f);
+        Game_ChallengeCompleted();
+        return;
+    }
+    GRaceParameters *parms = raceStatus.GetRaceParameters();
+    if (parms != nullptr && parms->GetRaceType() == GRace::kRaceType_SpeedTrap && racer != nullptr) {
+        const Attrib::Gen::gameplay *gameplay = parms->GetGameplayObj();
+        for (unsigned int i = 0; i < gameplay->Num_SpeedTrapList(); i++) {
+            GRacerInfo *info;
+            if (gameplay->SpeedTrapList(i).mCollectionKey == trapKey && (info = raceStatus.GetRacerInfo(racer)) != nullptr) {
+                info->NotifySpeedTrapTriggered(static_cast<int>(i), mps);
+            }
+        }
+    }
+    IPlayer *player = racer != nullptr ? racer->GetPlayer() : nullptr;
+    IHud *hud = player != nullptr ? player->GetHud() : nullptr;
+    IGenericMessage *message;
+    if (hud != nullptr && hud->QueryInterface(&message)) {
+        bool metric = FEDatabase->GetGameplaySettings()->SpeedoUnits != 0;
+        char text[64];
+        bSPrintf(text, "+%0.0f %s", mps * (metric ? 3.6f : 2.23699f), GetLocalizedString(metric ? 0x8569A25F : 0x8569AB44));
+        message->RequestGenericMessage(text, false, 0x8AB83EDB, bStringHash("SPEEDTRAP_FLASHER_ICON"), 0x609F6B15,
+                                       static_cast<GenericMessage_Priority>(3));
+    }
 }
 
 // PC: 0x6117F0.
@@ -691,6 +748,7 @@ void Game_SetRaceActivity(GRuntimeInstance *activity) {
 // PC: 0x60DBD0. Racing begins: traffic, barriers, the race's length and
 // catch-up, each racer's IRacer and heat.
 void Game_StartRace(GRuntimeInstance *activity) {
+    FEngHud::bIsRestartingRace = false;
     GRaceStatus &raceStatus = RaceStatus();
     raceStatus.SetRacing();
     GManager::Get().UnspawnAllCharacters();
@@ -765,11 +823,68 @@ void Game_RestoreStartPositions() {
     }
 }
 
-// PC: 0x611F20. TODO(port): the post race screens (FE) aren't driven yet.
+// PC: 0x60AC20. Pursuit races get the milestone screen (winning) or the
+// pause menu (losing); otherwise a winner (not in split screen) gets the
+// photo finish screen, which goes on to the results, and a loser goes
+// straight to the results.
+void FE_ShowPostRaceScreen(bool winner) {
+    if (GRaceStatus::Exists()) {
+        RaceStatus().FinalizeRaceStats();
+    }
+    if (FE_ShowOnlinePostRaceScreen() || !GRaceStatus::Exists()) {
+        return;
+    }
+    GRaceStatus &raceStatus = RaceStatus();
+    if (raceStatus.GetRaceParameters()->GetIsPursuitRace()) {
+        SoundAI *soundAI = SoundAI::Get();
+        bool musicActive = soundAI != nullptr && soundAI->IsMusicActive();
+        if (musicActive) {
+            MControlPathfinder msg(false, winner ? 0xE : 0xF, 0, 0);
+            msg.Send(UCrc32("Event"));
+        }
+        if (winner) {
+            new EShowMilestones(0);
+        } else {
+            new EPause(0, 1, 0);
+        }
+        return;
+    }
+    if (raceStatus.GetPlayMode() != GRaceStatus::kPlayMode_Racing) {
+        return;
+    }
+    if (winner && Sim::GetUserMode() != Sim::USER_SPLIT_SCREEN) {
+        PhotoFinishScreen::mActive = true;
+        cFEng::Get()->QueuePackagePush("InGamePhotoMaster.fng", 0, FEngMapJoyportToJoyParam(FEDatabase->GetPlayersJoystickPort(0)), true);
+        return;
+    }
+    new EShowResults(FERESULTTYPE_RACE, false);
+}
+
+// PC: 0x605730. The free roam speed trap result (the photo finish screen in
+// speed trap mode).
+void FE_ShowSpeedTrapScreen(float speedKmh, float bounty) {
+    PhotoFinishScreen::mSpeedtrapSpeed = speedKmh * 0.6213861f;
+    PhotoFinishScreen::mSpeedtrapBounty = bounty;
+    PhotoFinishScreen::mActive = true;
+    cFEng::Get()->QueuePackagePush("InGamePhotoMaster.fng", 2, FEngMapJoyportToJoyParam(FEDatabase->GetPlayersJoystickPort(0)), true);
+}
+
+// PC: 0x611F20. Career races flagged with no post race screen go straight to
+// their outro; everything else shows the post race screens.
 void Game_EnterPostRaceFlow() {
-    RaceStatus().FinalizeRaceStats();
+    GRaceStatus &raceStatus = RaceStatus();
+    raceStatus.FinalizeRaceStats();
     Game_AbandonRace();
-    LUA_HOOK_TODO("Game.EnterPostRaceFlow (post race screen)");
+    if (raceStatus.GetRaceContext() == GRace::kRaceContext_Career) {
+        GRaceParameters *parms = raceStatus.GetRaceParameters();
+        raceStatus.GetWinningPlayerInfo();
+        if (parms != nullptr && parms->GetNoPostRaceScreen()) {
+            MFlowReadyForOutro().Post(UCrc32(UCRC32_Gameplay));
+            GRaceDatabase::Get().GetScoreInfo(parms->GetEventHash())->mFlags |= GRaceDatabase::kCompleted_ContextCareer;
+            return;
+        }
+    }
+    FE_ShowPostRaceScreen(true);
 }
 
 // PC: 0x605690.
@@ -807,9 +922,13 @@ void Game_EnterGateZone(GRuntimeInstance *trigger, const char *zone) {}
 
 void Game_ExitGateZone(GRuntimeInstance *trigger, const char *zone) {}
 
-// PC: 0x6120C0 / 0x605020. TODO(port): the race over summary HUD.
+// PC: 0x6120C0 / 0x605020. The "race over" HUD message for the first player
+// (not in split screen); hiding it does nothing on PC.
 void Game_ShowRaceOverSummary() {
-    LUA_HOOK_TODO("Game.ShowRaceOverSummary");
+    IPlayer *player = FirstPlayer();
+    if (Sim::GetUserMode() != Sim::USER_SPLIT_SCREEN && player != nullptr) {
+        new EShowRaceOverMessage(player);
+    }
 }
 
 void Game_HideRaceOverSummary() {}
@@ -874,7 +993,9 @@ void Game_AwardPoints(ISimable *racer, float points) {
 }
 
 // PC: 0x605140.
-void Game_ChallengeCompleted() {}
+void Game_ChallengeCompleted() {
+    MNotifyChallengePassed("").Post(UCrc32(UCRC32_Gameplay));
+}
 
 // PC: 0x612140. TODO(port): career unlocks.
 void Game_UnlockRace(GRuntimeInstance *activity) {}
@@ -1206,13 +1327,13 @@ void Game_SetHasRapSheet() {}
 
 void Game_SetWorldHeat(float heat) {}
 
-// PC: 0x60E240 / 0x60E230. TODO(port): the post race screens.
+// PC: 0x60E240 / 0x60E230.
 void FE_ShowWinningPostRaceScreen() {
-    LUA_HOOK_TODO("Game.ShowWinningPostRaceScreen");
+    FE_ShowPostRaceScreen(true);
 }
 
 void FE_ShowLosingPostRaceScreen() {
-    LUA_HOOK_TODO("Game.ShowLosingPostRaceScreen");
+    FE_ShowPostRaceScreen(false);
 }
 
 // PC: 0x60AE00.
@@ -1222,14 +1343,21 @@ void Game_PreventPlayerBeingBusted() {
     }
 }
 
-// PC: 0x6058B0. Returns its rank argument (speed trap races recompute it for
-// the player). The PC returns the rank; the binder discards it.
-void Game_CalculateRanking(ISimable *racer, int rank) {
+// PC: 0x6058B0. Returns the racer's rank: its rank argument, except that a
+// speed trap race recomputes it for the player. The race scripts pass the
+// result on to Game.NotifyRacePlacement (and from there pick the winning or
+// losing post race screen).
+int Game_CalculateRanking(ISimable *racer, int rank) {
     if (Sim::GetUserMode() == Sim::USER_SPLIT_SCREEN || !GRaceStatus::Exists() || RaceStatus().GetRaceContext() == GRace::kRaceContext_Online) {
-        return;
+        return rank;
     }
     if (racer != nullptr && racer->IsPlayer() && RaceStatus().GetRaceType() == GRace::kRaceType_SpeedTrap) {
         RaceStatus().FinalizeRaceStats();
         RaceStatus().CalculateRankings();
+        GRacerInfo *info = RaceStatus().GetRacerInfo(racer);
+        if (info != nullptr) {
+            return info->GetRanking();
+        }
     }
+    return rank;
 }

@@ -335,6 +335,18 @@ void PhotoFinishScreen::Setup() {
         FEPrintf(GetPackageName(), bStringHash("SPEEDTRAP_SPEED"), "%$0.0f %s", converted_speed, GetTranslatedString(speedUnits));
         FEPrintf(GetPackageName(), bStringHash("BOUNTY_TEXT"), GetTranslatedString(0x060C058A), static_cast<int>(mSpeedtrapBounty));
     } else {
+#if defined(EA_PORT_NATIVE)
+        // The player's racer info (the copy below overwrites racer 0 with
+        // each racer in turn when the player isn't first).
+        GRacerInfo *playerInfo = &GRaceStatus::Get().GetRacerInfo(0);
+        for (int i = 0; i < GRaceStatus::Get().GetRacerCount(); i++) {
+            playerInfo = &GRaceStatus::Get().GetRacerInfo(i);
+            if (playerInfo->GetSimable() != nullptr && playerInfo->GetSimable()->IsPlayer()) {
+                break;
+            }
+        }
+        GRacerInfo &racerInfo = *playerInfo;
+#else
         GRacerInfo &racerInfo = GRaceStatus::Get().GetRacerInfo(0);
 
         for (int i = 0; i < GRaceStatus::Get().GetRacerCount(); i++) {
@@ -345,6 +357,7 @@ void PhotoFinishScreen::Setup() {
                 break;
             }
         }
+#endif
 
         float cashEarned = GRaceStatus::Get().GetRaceParameters()->GetCashValue();
         float pointsEarned = racerInfo.GetPointTotal();

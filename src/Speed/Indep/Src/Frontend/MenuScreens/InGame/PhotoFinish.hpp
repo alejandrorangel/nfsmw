@@ -46,13 +46,14 @@ class PhotoFinishScreen : public MenuScreen {
     void NotificationMessage(u32 msg, FEObject *pObj, u32 param1, u32 param2) override;
     static MenuScreen *Create(ScreenConstructorData *sd);
     static bool mRestartSelected;
-
-  private:
-    void Setup();
-
+    // Set by FE_ShowPostRaceScreen / FE_ShowSpeedTrapScreen (PC 0x60AC20,
+    // 0x605730) before pushing the screen.
     static float mSpeedtrapSpeed;
     static float mSpeedtrapBounty;
     static bool mActive;
+
+  private:
+    void Setup();
 
     Timer mIceCamTimer;
     Timer mSlowdownTimer;
