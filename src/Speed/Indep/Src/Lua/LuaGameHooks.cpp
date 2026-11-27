@@ -406,9 +406,6 @@ void Game_InitRacers(GRuntimeInstance *startMarker) {
     Game_FindPerformanceCandidates(candidates, 3, playerPerformance);
     CandidateList::iterator nextCandidate = candidates.begin();
     float sideOffset = 1.5f;
-#if defined(EA_PORT_NATIVE)
-    int gridSlot = 0;
-#endif
     for (int i = 0; i < raceStatus.GetRacerCount(); i++) {
         GRacerInfo &info = raceStatus.GetRacerInfo(i);
         GCharacter *character = info.GetGameCharacter();
@@ -429,19 +426,6 @@ void Game_InitRacers(GRuntimeInstance *startMarker) {
 #endif
             UMath::Vector3 navPos = nav.GetPosition();
             UMath::Vector3 navFwd = nav.GetForwardVector();
-#if defined(EA_PORT_NATIVE)
-            // TODO(port): WRoadNav::IncNavPosition sometimes walks off into
-            // garbage natively (a valid nav at ~1e28); line the car up
-            // straight behind the start instead of dropping it there.
-            gridSlot++;
-            UMath::Vector3 fromStart = {navPos.x - startPos.x, navPos.y - startPos.y, navPos.z - startPos.z};
-            if (!nav.IsValid() || !(UMath::Length(fromStart) < 500.0f)) {
-                navPos.x = startPos.x + backDir.x * 7.0f * gridSlot;
-                navPos.y = startPos.y + backDir.y * 7.0f * gridSlot;
-                navPos.z = startPos.z + backDir.z * 7.0f * gridSlot;
-                navFwd = backDir;
-            }
-#endif
             dir.x = -navFwd.x;
             dir.y = -navFwd.y;
             dir.z = -navFwd.z;
