@@ -1063,6 +1063,8 @@ inline bMatrix4 *bCopy(bMatrix4 *dest, const bMatrix4 *v) {
         : "o"(v->v0), "o"(v->v1), "o"(v->v2), "o"(v->v3)
         : "memory");
 #elif defined(EA_PLATFORM_WIN32)
+    // bMatrix4's copy constructor and operator= come here.
+    __builtin_memcpy(dest, v, sizeof(bMatrix4));
 #else
 #error Choose a platform
 #endif

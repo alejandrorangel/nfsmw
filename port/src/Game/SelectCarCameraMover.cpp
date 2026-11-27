@@ -16,6 +16,8 @@
 #include "Speed/Indep/Src/Ecstasy/eMath.hpp"
 
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 namespace {
 
@@ -146,6 +148,14 @@ void SelectCarCameraMover::Update(float dT) {
 
     bMatrix4 camera_matrix;
     CreateCameraMatrix(&camera_matrix, &CurrentCameraData);
+    static const bool trace = std::getenv("NFSMW_TRACE_SCENE") != nullptr;
+    static int n;
+    if (trace && n++ % 120 == 0) {
+        const SelectCarCameraData &d = CurrentCameraData;
+        std::fprintf(stderr, "[camera] mode %d V %.1f H %.1f R %.2f roll %.1f fov %.1f look (%.2f %.2f %.2f) row3 (%.2f %.2f %.2f) row0 (%.2f %.2f %.2f)\n",
+                     ControlMode, d.OrbitVAngle, d.OrbitHAngle, d.Radius, d.RollAngle, d.FOV, d.LookAt.x, d.LookAt.y, d.LookAt.z,
+                     camera_matrix.v3.x, camera_matrix.v3.y, camera_matrix.v3.z, camera_matrix.v0.x, camera_matrix.v0.y, camera_matrix.v0.z);
+    }
     if (!Camera::StopUpdating) {
         GetCamera()->SetFieldOfView(DegreesToAngle(CurrentCameraData.FOV));
         GetCamera()->SetTargetDistance(CurrentCameraData.Radius);

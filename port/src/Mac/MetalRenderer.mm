@@ -246,7 +246,7 @@ fragment float4 fe_fs(FEOut in [[stage_in]], texture2d<float> tex [[texture(0)]]
 }
 
 // 3D meshes. Vertices are pulled from the raw 36-byte PC layout.
-struct MeshConst { float4x4 mvp; float4x4 world; uint stride; };
+struct MeshConst { float4x4 mvp; float4x4 world; uint stride; uint shade; };
 struct MeshOut { float4 pos [[position]]; float2 uv; float4 color; float3 normal; };
 
 vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffer(0)]], constant MeshConst &c [[buffer(1)]]) {
@@ -262,9 +262,10 @@ vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffe
     return o;
 }
 
-fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(0)]]) {
+fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(0)]], constant uint &shade [[buffer(0)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear, address::repeat);
-    float4 c = tex.sample(s, in.uv) * in.color;
+    float4 t = tex.sample(s, in.uv);
+    float4 c = shade == 1 ? t : t * in.color;
     if (c.a < 0.25) {
         discard_fragment();
     }
@@ -397,9 +398,12 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                     float mvp[16];
                     float world[16];
                     uint32_t stride;
-                    uint32_t pad[3];
+                    uint32_t shade;
+                    uint32_t pad[2];
                 } c = {};
                 c.stride = d.vertex_stride;
+                static const char *shade_env = getenv("NFSMW_SHADE");
+                c.shade = (shade_env && strcmp(shade_env, "texture") == 0) ? 1 : 0;
                 // mvp = world * view_proj (row vectors).
                 for (int i = 0; i < 4; i++) {
                     for (int j = 0; j < 4; j++) {
@@ -416,6 +420,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 [enc setVertexBuffer:d.vertex_buffer offset:0 atIndex:0];
                 [enc setVertexBytes:&c length:sizeof(c) atIndex:1];
                 [enc setFragmentTexture:(d.texture ? d.texture : _white) atIndex:0];
+                [enc setFragmentBytes:&c.shade length:sizeof(c.shade) atIndex:0];
                 [enc drawIndexedPrimitives:MTLPrimitiveTypeTriangle
                                 indexCount:d.num_indices
                                  indexType:MTLIndexTypeUInt16

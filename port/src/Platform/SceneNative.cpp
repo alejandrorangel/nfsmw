@@ -223,19 +223,46 @@ bool ViewProjectionFor(eView *view, M44 out) {
 
 // Frontend: the garage backdrop and the player's car (PC ___eDisplayFrame,
 // game flow state 3: GarageMainScreen::HandleRender(1), RenderFrontEndCars).
+int gSceneDraws; // NFSMW_TRACE_SCENE
+bool gSceneLog;
+M44 gSceneViewProj;
+
 bool RenderFrontEndScene() {
+    static const bool trace = std::getenv("NFSMW_TRACE_SCENE") != nullptr;
+    static int frame;
+    bool log = trace && (frame++ % 120 == 0);
     GarageMainScreen *garage = GarageMainScreen::GetInstance();
+    eView *view = eGetView(1, false);
+    if (log) {
+        Camera *c = view->GetCamera();
+        std::fprintf(stderr, "[scene] garage %p camera %p fov %u near %.2f far %.1f pos (%.2f %.2f %.2f)\n", (void *)garage, (void *)c,
+                     c ? c->GetFieldOfView() : 0, c ? c->GetNearZ() : 0.0f, c ? c->GetFarZ() : 0.0f, c ? c->GetPosition()->x : 0.0f,
+                     c ? c->GetPosition()->y : 0.0f, c ? c->GetPosition()->z : 0.0f);
+    }
     if (garage == nullptr) {
         return false;
     }
-    eView *view = eGetView(1, false);
     M44 view_proj;
     if (!ViewProjectionFor(view, view_proj)) {
         return false;
     }
     PortMetal3DBeginFrame(view_proj);
+    gSceneLog = log;
+    std::memcpy(gSceneViewProj, view_proj, sizeof(M44));
+    if (log) {
+        Camera *c = view->GetCamera();
+        std::fprintf(stderr, "[scene] dir (%.2f %.2f %.2f) target (%.2f %.2f %.2f)\n", c->GetDirection()->x, c->GetDirection()->y,
+                     c->GetDirection()->z, c->GetTarget()->x, c->GetTarget()->y, c->GetTarget()->z);
+    }
+    static const bool on_top = std::getenv("NFSMW_SCENE_ON_TOP") != nullptr;
+    PortMetal3DSetOverlay(on_top);
+    gSceneDraws = 0;
     garage->HandleRender(1);
+    int backdrop = gSceneDraws;
     RenderFrontEndCars(view, 0);
+    if (log) {
+        std::fprintf(stderr, "[scene] draws: backdrop %d, cars %d\n", backdrop, gSceneDraws - backdrop);
+    }
     return true;
 }
 
@@ -255,6 +282,19 @@ void eViewPlatInterface::Render(eModel *model, bMatrix4 *local_to_world, eLightC
         Identity(world);
     }
     DrawSolid(model->GetSolid(), world);
+    gSceneDraws++;
+    if (gSceneLog) {
+        eSolid *s = model->GetSolid();
+        float local[4] = {(s->AABBMinX + s->AABBMaxX) * 0.5f, (s->AABBMinY + s->AABBMaxY) * 0.5f, (s->AABBMinZ + s->AABBMaxZ) * 0.5f, 1.0f};
+        M44 mvp;
+        Multiply(mvp, world, gSceneViewProj);
+        float clip[4];
+        for (int j = 0; j < 4; j++) {
+            clip[j] = local[0] * mvp[0 * 4 + j] + local[1] * mvp[1 * 4 + j] + local[2] * mvp[2 * 4 + j] + local[3] * mvp[3 * 4 + j];
+        }
+        std::fprintf(stderr, "[scene]   %s centre (%.1f %.1f %.1f) size %.1f -> clip (%.2f %.2f %.2f w %.2f)\n", s->Name, local[0], local[1], local[2],
+                     s->AABBMaxX - s->AABBMinX, clip[0], clip[1], clip[2], clip[3]);
+    }
 }
 
 // Builds this frame's 3D scene (published with the frontend).

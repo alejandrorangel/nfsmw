@@ -175,7 +175,15 @@ bMatrix4 *bTransposeMatrix(bMatrix4 *dest, const bMatrix4 *m) {
 #ifdef EA_PLATFORM_GAMECUBE
     MTX44Transpose(*reinterpret_cast<const Mtx44 *>(m), *reinterpret_cast<Mtx44 *>(dest));
 #else
-// TODO
+    bMatrix4 t;
+    const float *src = reinterpret_cast<const float *>(m);
+    float *out = reinterpret_cast<float *>(&t);
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
+            out[i * 4 + j] = src[j * 4 + i];
+        }
+    }
+    *dest = t; // dest may alias m
 #endif
     return dest;
 }
