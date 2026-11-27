@@ -21,11 +21,53 @@ static eLightMaterial *DefaultLightMaterial; // size: 0x4, address: 0x8041A63C
 #endif
 int32 DrawLightFlares;
 
+#if defined(EA_PORT_NATIVE)
+// PC (speed.exe 1.3 @ 0x501A10). A light material chunk is one 32-bit
+// eLightMaterial record (bTNode + NameHash at 0xC, Version 0x10, Name 0x14,
+// data 0x30); natively it gets a native copy, remembered in the record's link
+// slots for the unloader. Light flare packs (0x80135100) come later.
+int LoaderLights(bChunk *bchunk) {
+    if (bchunk->GetID() != BCHUNK_LIGHT_MATERIALS) {
+        return 1;
+    }
+    char *disk = bchunk->GetData();
+    uint32 version;
+    bMemCpy(&version, disk + 0x10, 4);
+    if (version == 3) {
+        eLightMaterial *light_material = static_cast<eLightMaterial *>(bMalloc(sizeof(eLightMaterial), "eLightMaterial (native)", 0, 0));
+        bMemSet(light_material, 0, sizeof(*light_material));
+        bMemCpy(&light_material->NameHash, disk + 0x0C, 4);
+        light_material->Version = version;
+        bMemCpy(light_material->Name, disk + 0x14, sizeof(light_material->Name));
+        bMemCpy(&light_material->feData, disk + 0x30, sizeof(light_material->feData));
+        bMemCpy(disk, &light_material, sizeof(light_material));
+        LightMaterialList.AddTail(light_material);
+        if (light_material->NameHash == STRINGHASH_DEFAULT) {
+            DefaultLightMaterial = light_material;
+        }
+    }
+    return 1;
+}
+#else
 int LoaderLights(bChunk *bchunk /* r30 */) {}
+#endif
 
 // UNSOLVED but identical
 int UnloaderLights(bChunk *bchunk) {
     if (bchunk->GetID() == BCHUNK_LIGHT_MATERIALS) {
+#if defined(EA_PORT_NATIVE)
+        uint32 version;
+        bMemCpy(&version, bchunk->GetData() + 0x10, 4);
+        if (version == 3) {
+            eLightMaterial *light_material;
+            bMemCpy(&light_material, bchunk->GetData(), sizeof(light_material));
+            light_material->Remove();
+            if (light_material->NameHash == STRINGHASH_DEFAULT) {
+                DefaultLightMaterial = &DefaultLightMaterialData;
+            }
+            bFree(light_material);
+        }
+#else
         eLightMaterial *light_material = reinterpret_cast<eLightMaterial *>(bchunk->GetData());
         if (light_material->Version == 3) {
             light_material->Remove();
@@ -33,6 +75,7 @@ int UnloaderLights(bChunk *bchunk) {
                 DefaultLightMaterial = &DefaultLightMaterialData;
             }
         }
+#endif
     } else if (bchunk->GetID() == BCHUNK_LIGHT_FLARES_PACK) {
         bChunk *chunk = bchunk->GetFirstChunk();
         bChunk *last_chunk = bchunk->GetLastChunk();

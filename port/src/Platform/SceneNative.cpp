@@ -8,6 +8,7 @@
 #include "Speed/Indep/Src/Ecstasy/Ecstasy.hpp"
 #include "Speed/Indep/Src/Ecstasy/EcstasyData.hpp"
 #include "Speed/Indep/Src/Ecstasy/Texture.hpp"
+#include "Speed/Indep/Src/Ecstasy/eLight.hpp"
 #include "Speed/Indep/Src/Camera/Camera.hpp"
 #include "Speed/Indep/Src/Frontend/FECarLoader.hpp"
 #include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/FEPkg_GarageMain.hpp"
@@ -24,6 +25,7 @@
 
 TextureInfo *PortSolidTexture(eSolid *solid, int index); // SolidNative.cpp
 extern bTList<FrontEndRenderingCar> FrontEndRenderingCarList; // CarRender.cpp
+extern bTList<eLightMaterial> LightMaterialList;               // eLight.cpp
 
 namespace {
 
@@ -345,6 +347,11 @@ bool RenderFrontEndScene() {
             }
         }
         std::fprintf(stderr, "[scene] %d wheel/tire solids loaded\n", wheels);
+        int materials = 0;
+        for (eLightMaterial *m = LightMaterialList.GetHead(); m != LightMaterialList.EndOfList(); m = m->GetNext()) {
+            materials++;
+        }
+        std::fprintf(stderr, "[scene] %d light materials\n", materials);
         GarageCarLoader *loader = GetGarageCarLoader();
         std::fprintf(stderr, "[scene] garage loader: loading %d current %d switched %d\n", loader->IsThereALoadingRideInfo(),
                      loader->IsThereACurrentRideInfo(), loader->HasSwitched());

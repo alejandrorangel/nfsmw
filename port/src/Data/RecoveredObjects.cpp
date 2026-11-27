@@ -45,3 +45,7 @@ bChunkLoader bChunkLoaderTextureAnimPack(0xB0300100, LoaderTexturePack, Unloader
 int LoaderSolidList(bChunk *chunk);
 int UnloaderSolidList(bChunk *chunk);
 bChunkLoader bChunkLoaderSolidList(0x80134000, LoaderSolidList, UnloaderSolidList); // models (SolidNative.cpp)
+
+int LoaderLights(bChunk *chunk);
+int UnloaderLights(bChunk *chunk);
+bChunkLoader bChunkLoaderLightMaterials(0x135200, LoaderLights, UnloaderLights); // light materials (eLight.cpp)
