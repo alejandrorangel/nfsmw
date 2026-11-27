@@ -628,17 +628,22 @@ void Game_NotifySpeedTrapTriggered(GRuntimeInstance *activity, GRuntimeInstance 
     GManager::Get().TrackValue("speedtrap_speed", speedKmh);
     float mps = speedKmh * 0.27778f;
     unsigned int trapKey = trap != nullptr ? trap->GetCollection() : 0;
-    // TODO(port): the PC finds the world's GSpeedTrap with this key
-    // (GManager::GetFirstSpeedTrap/GetNextSpeedTrap 0x5E9D40/0x5E4770), calls
-    // its NotifyTriggered(mps) (0x601730: completes it, refreshes the bin's
-    // progress and the map icons) and shows its bounty (GetBounty 0x5E56C0)
-    // on the free roam screen. GManager's speed traps aren't ported.
+    // The world's (active) speed trap with this key records the pass.
+    GSpeedTrap *speedTrap = GManager::Get().GetFirstSpeedTrap(true, 0);
+    for (; speedTrap != nullptr; speedTrap = GManager::Get().GetNextSpeedTrap(speedTrap, true, 0)) {
+        if (speedTrap->GetSpeedTrapKey() == trapKey) {
+            speedTrap->NotifyTriggered(mps);
+            break;
+        }
+    }
     if (!GRaceStatus::Exists()) {
         return;
     }
     GRaceStatus &raceStatus = RaceStatus();
     if (raceStatus.GetPlayMode() == GRaceStatus::kPlayMode_Roaming) {
-        FE_ShowSpeedTrapScreen(speedKmh, 0.0f);
+        // The PC reads the bounty off the trap it found (a null trap would
+        // crash there; no bounty here).
+        FE_ShowSpeedTrapScreen(speedKmh, speedTrap != nullptr ? speedTrap->GetBounty() : 0.0f);
         Game_ChallengeCompleted();
         return;
     }
@@ -1043,10 +1048,31 @@ void Game_WarpToMarkerWhenRoaming(GRuntimeInstance *marker) {
 // PC: 0x605890. Nothing left on PC.
 void Game_DoSpecialFinalization(GRuntimeInstance *activity) {}
 
-// PC: 0x611E80 / 0x604E40. TODO(port): speed traps and menu gates (career).
+// PC: 0x611E80. A trigger is an active speed trap unless the player is
+// racing or in a pursuit.
 bool Game_IsActiveSpeedTrap(GRuntimeInstance *trigger) {
+    if (RaceStatus().GetPlayMode() == GRaceStatus::kPlayMode_Racing) {
+        return false;
+    }
+    IPlayer *player = IPlayer::First(PLAYER_ALL);
+    ISimable *simable = player != nullptr ? player->GetSimable() : nullptr;
+    IVehicleAI *ai;
+    if (simable != nullptr && simable->QueryInterface(&ai) && ai->GetPursuit() != nullptr) {
+        return false;
+    }
+    if (trigger == nullptr) {
+        return false;
+    }
+    unsigned int key = trigger->GetCollection();
+    for (GSpeedTrap *trap = GManager::Get().GetFirstSpeedTrap(true, 0); trap != nullptr; trap = GManager::Get().GetNextSpeedTrap(trap, true, 0)) {
+        if (trap->GetSpeedTrapKey() == key) {
+            return true;
+        }
+    }
     return false;
 }
+
+// PC: 0x604E40. TODO(port): menu gates (career).
 
 bool Game_IsActiveMenuGate(GRuntimeInstance *trigger) {
     return false;

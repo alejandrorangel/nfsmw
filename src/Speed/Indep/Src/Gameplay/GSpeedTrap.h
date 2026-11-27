@@ -57,6 +57,9 @@ class GSpeedTrap {
     bool operator<(const struct GSpeedTrap &rhs) const {}
 
   private:
+#if defined(EA_PORT_NATIVE)
+    friend class GManager;
+#endif
     void SetFlag(unsigned int mask) {
         mFlags |= mask;
     }

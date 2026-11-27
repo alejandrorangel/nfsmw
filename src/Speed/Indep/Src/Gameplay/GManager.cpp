@@ -136,7 +136,12 @@ void GManager::InitializeVaults() {
 
     // The PC build then sets up the icons (0x320 bytes from FastMem), the
     // milestones, speed traps and bounty spawn points and the section icon
-    // callback; those parts of GManager aren't ported yet.
+    // callback.
+    // TODO(port): icons, milestones, bounty spawn points and the section icon
+    // callback aren't ported yet.
+#if defined(EA_PORT_NATIVE)
+    AllocateSpeedTraps();
+#endif
 }
 
 // PC: 0x5E3D80.
@@ -403,8 +408,11 @@ void GManager::BeginGameplay() {
     mMenuGateIconsShown = false;
     mSpeedTrapIconsShown = false;
     mSpeedTrapRaceIconsShown = false;
-    // TODO(port): RefreshEngageTriggerIcons, RefreshSpeedTrapIcons,
-    // SpawnAllLoadedSectionIcons (icons aren't ported).
+    // TODO(port): RefreshEngageTriggerIcons, SpawnAllLoadedSectionIcons
+    // (icons aren't ported).
+#if defined(EA_PORT_NATIVE)
+    RefreshSpeedTrapIcons();
+#endif
     if (startupRace == nullptr && GRaceStatus::Get().GetCurrentBin() != nullptr) {
         GRaceStatus::Get().GetCurrentBin()->EnableBarriers();
     }

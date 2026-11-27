@@ -68,7 +68,13 @@ class GTrigger : public GRuntimeInstance {
         return mTriggerEnabled != 0;
     }
 
+#if defined(EA_PORT_NATIVE)
+    struct GIcon *GetIcon() const {
+        return mIcon;
+    } // Decl: 61
+#else
     // struct GIcon *GetIcon() const {} // Decl: 61
+#endif
 
   private:
     void MarkAsInside(ISimable *simable);

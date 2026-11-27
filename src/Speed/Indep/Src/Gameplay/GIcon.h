@@ -30,12 +30,31 @@ class GIcon {
         kType_Count = 17,
     };
 
+#if defined(EA_PORT_NATIVE)
+    // PC (inlined in GManager::RefreshSpeedTrapIcons 0x5E9DE0): flag 1 shows
+    // the icon in the world, flag 2 on the map.
+    void Show() { // Decl: 62
+        SetFlag(1);
+    }
+    void Hide() { // Decl: 63
+        ClearFlag(1);
+    }
+    void HideUntilRespawn() {} // Decl: 64
+
+    void ShowOnMap() { // Decl: 66
+        SetFlag(2);
+    }
+    void HideOnMap() { // Decl: 67
+        ClearFlag(2);
+    }
+#else
     void Show() {}             // Decl: 62
     void Hide() {}             // Decl: 63
     void HideUntilRespawn() {} // Decl: 64
 
     void ShowOnMap() {} // Decl: 66
     void HideOnMap() {} // Decl: 67
+#endif
 
     void SetGPSing() { // Decl: 70
         SetFlag(0x80);

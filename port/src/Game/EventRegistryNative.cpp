@@ -4,7 +4,11 @@
 // events: gEventKeyOrderTable (0x8A5418, event IDs in Eytzinger order) and
 // gMakeEventCallbacks (0x8F5F40). Only a few events are reconstructed so far;
 // this table lists those. Unknown IDs return null and callers skip them.
+#include "Speed/Indep/Src/Generated/Events/EEnterBin.hpp"
+#include "Speed/Indep/Src/Generated/Events/EFadeScreenOff.hpp"
+#include "Speed/Indep/Src/Generated/Events/EFadeScreenOn.hpp"
 #include "Speed/Indep/Src/Generated/Events/EGTriggerInternal.hpp"
+#include "Speed/Indep/Src/Generated/Events/ESndGameState.hpp"
 #include "Speed/Indep/Src/Generated/Events/ESimulate.hpp"
 #include "Speed/Indep/Src/Main/Event.h"
 #include "Speed/Indep/Libs/Support/Miscellaneous/StringHash.h"
@@ -19,6 +23,12 @@ struct EventEntry {
 const EventEntry kEvents[] = {
     {0x522D67DB, ESimulate_MakeEvent_Callback},
     {0xC34649C0, EGTriggerInternal_MakeEvent_Callback},
+    {0x5F8C3748, EFadeScreenOn_MakeEvent_Callback},
+    {0x77803D76, EFadeScreenOff_MakeEvent_Callback},
+    {0x75B0D22B, ESndGameState_MakeEvent_Callback},
+    {0x2AF7332B, EEnterBin_MakeEvent_Callback},
+    // TODO(port): ECinematicMoment (0x7D2B68BD) needs its name pointers
+    // resolved from the event data first.
 };
 
 } // namespace
@@ -51,6 +61,7 @@ struct lua_State;
 int EShowRaceCountdown_MakeEvent_LuaBinding(lua_State *luaState);
 int EResetProps_MakeEvent_LuaBinding(lua_State *luaState);
 int ETerminateMusic_MakeEvent_LuaBinding(lua_State *luaState);
+int EEnterBin_MakeEvent_LuaBinding(lua_State *luaState);
 
 namespace {
 
@@ -63,6 +74,7 @@ const LuaBindingEntry kLuaBindings[] = {
     {"EShowRaceCountdown", EShowRaceCountdown_MakeEvent_LuaBinding},
     {"EResetProps", EResetProps_MakeEvent_LuaBinding},
     {"ETerminateMusic", ETerminateMusic_MakeEvent_LuaBinding},
+    {"EEnterBin", EEnterBin_MakeEvent_LuaBinding},
 };
 
 } // namespace

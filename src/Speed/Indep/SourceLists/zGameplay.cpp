@@ -16,6 +16,7 @@
 #include "Speed/Indep/Src/Gameplay/GHandler.cpp"
 #include "Speed/Indep/Src/Gameplay/GTrigger.cpp"
 #include "Speed/Indep/Src/Gameplay/GCharacter.cpp"
+#include "Speed/Indep/Src/Gameplay/GSpeedTrap.cpp"
 #endif
 #if defined(EA_PORT_NATIVE)
 #include "Speed/Indep/Src/Lua/LuaRuntime.cpp"

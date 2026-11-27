@@ -47,6 +47,8 @@
 #include "Speed/Indep/Src/Generated/Events/ESndGameState.cpp"
 
 #include "Speed/Indep/Src/Generated/Events/ECinematicMoment.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EEnterBin.cpp"
 #endif
 
 #include "Speed/Indep/Src/Input/Common/action.cpp"
