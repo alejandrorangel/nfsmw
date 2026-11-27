@@ -113,7 +113,7 @@ void MaterialConstants(const eLightMaterial *light_material, float out[20]) {
     out[19] = d.SpecularPower;
 }
 
-void DrawSolid(eSolid *solid, const M44 world) {
+void DrawSolid(eSolid *solid, const M44 world, const eDynamicLightContext *lights = nullptr) {
     eSolidPlatInfo *info = solid->GetPlatInfo();
     if (info == nullptr) {
         return;
@@ -134,6 +134,22 @@ void DrawSolid(eSolid *solid, const M44 world) {
             light_material = solid->LightMaterialTable[light_index].LightMaterial;
         }
         MaterialConstants(light_material, d.material);
+        if (lights && lights->NumLights > 0) {
+            const float *dm = reinterpret_cast<const float *>(&lights->LocalDirectionMatrix);
+            const float *cm = reinterpret_cast<const float *>(&lights->LocalColourMatrix);
+            for (int i = 0; i < 3; i++) {
+                d.lights[i * 4 + 0] = dm[0 * 4 + i]; // directions: columns
+                d.lights[i * 4 + 1] = dm[1 * 4 + i];
+                d.lights[i * 4 + 2] = dm[2 * 4 + i];
+                d.lights[12 + i * 4 + 0] = cm[i * 4 + 0]; // colours: rows
+                d.lights[12 + i * 4 + 1] = cm[i * 4 + 1];
+                d.lights[12 + i * 4 + 2] = cm[i * 4 + 2];
+            }
+            d.lights[24] = lights->LocalEyePosition.x;
+            d.lights[25] = lights->LocalEyePosition.y;
+            d.lights[26] = lights->LocalEyePosition.z;
+            d.flags |= PORT_3D_LIT;
+        }
         d.num_indices = group.NumIndices;
         if (texture && texture->AlphaBlendType == TEXBLEND_ADDATIVE) {
             d.flags = PORT_3D_ADDITIVE;
@@ -440,7 +456,11 @@ void eViewPlatInterface::Render(eModel *model, bMatrix4 *local_to_world, eLightC
         replaced = replaced_storage;
         model->ApplyReplacementTextureTable(replaced);
     }
-    DrawSolid(model->GetSolid(), world);
+    const eDynamicLightContext *dynamic_lights = nullptr;
+    if (light_context && light_context->Type == 0) {
+        dynamic_lights = static_cast<const eDynamicLightContext *>(light_context);
+    }
+    DrawSolid(model->GetSolid(), world, dynamic_lights);
     if (replaced) {
         model->RestoreReplacementTextureTable(replaced);
     }

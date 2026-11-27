@@ -49,3 +49,33 @@ bChunkLoader bChunkLoaderSolidList(0x80134000, LoaderSolidList, UnloaderSolidLis
 int LoaderLights(bChunk *chunk);
 int UnloaderLights(bChunk *chunk);
 bChunkLoader bChunkLoaderLightMaterials(0x135200, LoaderLights, UnloaderLights); // light materials (eLight.cpp)
+
+// Shaper light rigs (eLight.hpp), from speed.exe 1.3 .data @ 0x8F2AB0..0x8F2FB0:
+// {mode, theta, phi, r, g, b, scale} per light; elSetupLights uses lights 1..3.
+#include "Speed/Indep/Src/Ecstasy/eLight.hpp"
+
+#define SHAPER(m, t, p, r, g, b, s) {static_cast<ESHAPER_LIGHT_MODE>(m), t, p, r, g, b, s}
+#define SHAPER_OFF SHAPER(0, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f)
+#define GARAGE_RIG(sign)                                                                                                               \
+    {0, {SHAPER_OFF, SHAPER(0, sign 90.0f, 48.0f, 1.0f, 1.0f, 0.95f, 0.98f), SHAPER(0, sign 134.0f, 185.0f, 0.83f, 0.83f, 1.0f, 0.5f),     \
+         SHAPER(0, sign 27.0f, 175.0f, 0.83f, 0.83f, 1.0f, 0.35f)},                                                                     \
+     bVector3(0.0f, 0.0f, 0.0f), 0}
+
+eShaperLightRig ShaperLightsDefault = {
+    0, {SHAPER_OFF, SHAPER(2, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f, 0.2f), SHAPER(3, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f, 0.2f), SHAPER(1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f)},
+    bVector3(0.0f, 0.0f, 0.0f), 0};
+eShaperLightRig ShaperLightsBackRoom = GARAGE_RIG(+);
+eShaperLightRig ShaperLightsCarLot = GARAGE_RIG(-);
+eShaperLightRig ShaperLightsCShop = GARAGE_RIG(+);
+eShaperLightRig ShaperLightsQRace = GARAGE_RIG(+);
+eShaperLightRig ShaperLightsSafehouse = GARAGE_RIG(+);
+eShaperLightRig ShaperLightsCarsInGame = {
+    0, {SHAPER_OFF, SHAPER(2, 0.0f, 350.0f, 0.85f, 0.9f, 1.0f, 0.83f), SHAPER(2, 50.0f, 220.0f, 0.55f, 0.6f, 1.0f, 0.4f),
+        SHAPER(2, 310.0f, 220.0f, 0.65f, 0.7f, 1.0f, 0.45f)},
+    bVector3(0.0f, 0.0f, 0.0f), 0};
+eShaperLightRig ShaperLightsCharacters = {
+    0, {SHAPER_OFF, SHAPER(1, 122.9f, 194.0f, 0.5f, 0.5f, 0.5f, 0.53f), SHAPER(1, 28.0f, 0.0f, 1.0f, 1.0f, 1.0f, 0.59f), SHAPER(1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f)},
+    bVector3(0.0f, 0.0f, 0.0f), 0};
+eShaperLightRig ShaperLightsCharactersBackup = {
+    0, {SHAPER_OFF, SHAPER(2, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f), SHAPER(1, 30.1f, 0.0f, 1.0f, 1.0f, 1.0f, 0.63f), SHAPER(1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f)},
+    bVector3(0.0f, 0.0f, 0.0f), 0};

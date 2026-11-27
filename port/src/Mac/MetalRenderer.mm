@@ -162,6 +162,7 @@ struct Draw3D {
     uint32_t effect;
     float world[16];
     float material[20];
+    float lights[28];
 };
 
 struct Frame3D {
@@ -206,6 +207,7 @@ void PortMetal3DAdd(const Port3DDraw *draw) {
         d.effect = draw->effect;
         memcpy(d.world, draw->world, sizeof(d.world));
         memcpy(d.material, draw->material, sizeof(d.material));
+        memcpy(d.lights, draw->lights, sizeof(d.lights));
         g3DBuilding.draws.push_back(d);
     }
 }
@@ -256,7 +258,14 @@ fragment float4 fe_fs(FEOut in [[stage_in]], texture2d<float> tex [[texture(0)]]
 
 // 3D meshes. Vertices are pulled from the raw 36-byte PC layout.
 struct MeshConst { float4x4 mvp; float4x4 world; uint stride; uint shade; uint effect; uint pad; float4 eye; };
-struct MeshOut { float4 pos [[position]]; float2 uv; float4 color; float3 normal; float3 world_pos; };
+struct MeshOut { float4 pos [[position]]; float2 uv; float4 color; float3 normal; float3 world_pos; float3 local_normal; float3 local_pos; };
+
+// Model-space lights for the car effect (eDynamicLightContext).
+struct Lights {
+    float4 dir[3];
+    float4 colour[3];
+    float4 eye;
+};
 
 // Shading constants per draw (see Port3DDraw::material).
 struct Material {
@@ -271,6 +280,8 @@ vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffe
     // Row-vector matrices loaded column-major: M * p computes p * M.
     o.pos = c.mvp * p;
     o.world_pos = (c.world * p).xyz;
+    o.local_pos = p.xyz;
+    o.local_normal = float3(v[3], v[4], v[5]);
     o.normal = (c.world * float4(v[3], v[4], v[5], 0)).xyz;
     uint argb = as_type<uint>(v[6]);
     o.color = float4((argb >> 16) & 0xff, (argb >> 8) & 0xff, argb & 0xff, argb >> 24) / 255.0;
@@ -286,11 +297,20 @@ float3 EnvColour(float3 r) {
 // PC CAR effect, technique 'car' shader=1 (IDI_CAR_FX vs #11 / ps #10), per
 // pixel: fresnel-style diffuse/specular/envmap ranges from the light
 // material, three directional lights, and a 2*(N.H)^8 highlight.
-float4 CarShade(MeshOut in, float4 t, constant MeshConst &c, constant Material &m) {
-    const float3 light_dir[3] = {normalize(float3(-0.3, -0.4, 0.85)), normalize(float3(0.6, 0.5, 0.3)), normalize(float3(0.0, 0.8, -0.2))};
-    const float3 light_col[3] = {float3(0.85, 0.85, 0.82), float3(0.35, 0.38, 0.45), float3(0.25, 0.25, 0.28)};
+float4 CarShade(MeshOut in, float4 t, constant MeshConst &c, constant Material &m, constant Lights &l, bool lit) {
+    float3 light_dir[3] = {normalize(float3(-0.3, -0.4, 0.85)), normalize(float3(0.6, 0.5, 0.3)), normalize(float3(0.0, 0.8, -0.2))};
+    float3 light_col[3] = {float3(0.85, 0.85, 0.82), float3(0.35, 0.38, 0.45), float3(0.25, 0.25, 0.28)};
     float3 n = normalize(in.normal);
     float3 v = normalize(c.eye.xyz - in.world_pos);
+    if (lit) {
+        // The game's lights, in model space as on PC.
+        for (int i = 0; i < 3; i++) {
+            light_dir[i] = l.dir[i].xyz;
+            light_col[i] = l.colour[i].rgb;
+        }
+        n = normalize(in.local_normal);
+        v = normalize(l.eye.xyz - in.local_pos);
+    }
     float ndotv = max(dot(n, v), 0.01);
     float ao = saturate(in.color.r * 2.0); // vertex colour red: occlusion mask
     float3 spec = (m.specular_min.rgb + pow(ndotv, m.specular_power) * m.specular_range.rgb) * ao;
@@ -312,14 +332,14 @@ float4 CarShade(MeshOut in, float4 t, constant MeshConst &c, constant Material &
 // shade: bit 0 texture-only debug view, bit 1 alpha test (punch-through
 // textures only; elsewhere alpha is a gloss/spec mask, or blends).
 fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(0)]], constant MeshConst &c [[buffer(0)]],
-                        constant Material &m [[buffer(1)]]) {
+                        constant Material &m [[buffer(1)]], constant Lights &l [[buffer(2)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear, address::repeat);
     float4 t = tex.sample(s, in.uv);
     float4 out;
     if (c.shade & 1) {
         out = t;
     } else if (c.effect == 4) {
-        out = CarShade(in, t, c, m);
+        out = CarShade(in, t, c, m, l, (c.shade & 4) != 0);
     } else {
         // PC WORLD / WORLDPRELIT: 2 x texture x vertex colour (rgb),
         // texture alpha x vertex alpha.
@@ -466,6 +486,9 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 if (d.flags & PORT_3D_ALPHA_TEST) {
                     c.shade |= 2;
                 }
+                if (d.flags & PORT_3D_LIT) {
+                    c.shade |= 4;
+                }
                 // mvp = world * view_proj (row vectors).
                 for (int i = 0; i < 4; i++) {
                     for (int j = 0; j < 4; j++) {
@@ -484,6 +507,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 [enc setFragmentTexture:(d.texture ? d.texture : _white) atIndex:0];
                 [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
                 [enc setFragmentBytes:d.material length:sizeof(d.material) atIndex:1];
+                [enc setFragmentBytes:d.lights length:sizeof(d.lights) atIndex:2];
                 [enc drawIndexedPrimitives:MTLPrimitiveTypeTriangle
                                 indexCount:d.num_indices
                                  indexType:MTLIndexTypeUInt16

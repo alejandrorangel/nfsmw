@@ -59,8 +59,11 @@ struct Port3DDraw {
     // SpecularMin, SpecularRange (rgba each), then EnvmapMin, EnvmapRange,
     // EnvmapPower, SpecularPower.
     float material[20];
+    // Model-space lighting (eDynamicLightContext), when PORT_3D_LIT: three
+    // light directions, three colours, then the eye position (xyzw each).
+    float lights[28];
 };
-enum { PORT_3D_ALPHA_BLEND = 1, PORT_3D_ADDITIVE = 2, PORT_3D_ALPHA_TEST = 4 };
+enum { PORT_3D_ALPHA_BLEND = 1, PORT_3D_ADDITIVE = 2, PORT_3D_ALPHA_TEST = 4, PORT_3D_LIT = 8 };
 
 void PortMetal3DBeginFrame(const float view_proj[16]);
 void PortMetal3DSetEye(const float eye[3]); // world-space camera position

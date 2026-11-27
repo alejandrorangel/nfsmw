@@ -238,10 +238,89 @@ void elResetLightContext(eDynamicLightContext *light_context) {
 }
 
 #if defined(EA_PORT_NATIVE)
-// Not decompiled yet; the native renderer lights models itself for now (the
-// light context keeps what elResetLightContext set). Callers ignore the result.
+// PC (speed.exe 1.3 @ 0x502130): the rig's lights 1..3 become the context's
+// three directional lights -- directions (unit, pointing at the light) in
+// the columns of LocalDirectionMatrix, colours (rgb * scale) in the rows of
+// LocalColourMatrix -- in the space of local_world when given, else world.
+// Directions come from (theta + 180, 90 - phi) in degrees. World-space and
+// world-position lights follow the PC; camera-space and sun lights are
+// approximated (camera rotation, a fixed high sun) until the sky is ported.
 int elSetupLights(eDynamicLightContext *light_context, eShaperLightRig *shaper_lights, bVector3 *local_pos, bMatrix4 *local_world,
                   bMatrix4 *world_view, eView *view) {
+    if (light_context == nullptr) {
+        return -1;
+    }
+    if (shaper_lights == nullptr) {
+        return 1;
+    }
+    static const bVector3 kSun(0.3f, 0.35f, 0.88f);
+    bVector3 dirs[3];
+    for (int i = 0; i < 3; i++) {
+        eShaperLight &light = shaper_lights->Lights[i + 1];
+        bVector3 &d = dirs[i];
+        switch (light.CameraSpace) {
+            case LIGHT_WORLD_POSITION:
+                d = shaper_lights->position;
+                if (local_pos) {
+                    d -= *local_pos;
+                }
+                break;
+            case LIGHT_SUN_DIRECTION:
+            case LIGHT_OPPOSITE_SUN_DIRECTION: {
+                bVector3 sun_angles;
+                float sign = light.CameraSpace == LIGHT_SUN_DIRECTION ? 1.0f : -1.0f;
+                CartesianToSpherical(&sun_angles, sign * kSun.x, sign * kSun.y, sign * kSun.z);
+                SphericalToCartesian(&d, light.Theta + 180.0f + sun_angles.x * (360.0f / 65536.0f), 90.0f - light.Phi, 1.0f);
+                break;
+            }
+            case LIGHT_CAMERA_SPACE: {
+                bVector3 c;
+                SphericalToCartesian(&c, light.Theta + 180.0f, 90.0f - light.Phi, 1.0f);
+                // Camera space -> world: rows of the world->camera rotation.
+                bMatrix4 *wc = (view && view->GetCamera()) ? view->GetCamera()->GetWorldToCameraMatrix() : nullptr;
+                if (wc) {
+                    d.x = -c.x * wc->v0.x + -c.y * wc->v0.y + c.z * wc->v0.z;
+                    d.y = -c.x * wc->v1.x + -c.y * wc->v1.y + c.z * wc->v1.z;
+                    d.z = -c.x * wc->v2.x + -c.y * wc->v2.y + c.z * wc->v2.z;
+                } else {
+                    d = c;
+                }
+                break;
+            }
+            default:
+                SphericalToCartesian(&d, light.Theta + 180.0f, 90.0f - light.Phi, 1.0f);
+                break;
+        }
+    }
+    bMatrix4 &dir_m = light_context->LocalDirectionMatrix;
+    bMatrix4 &col_m = light_context->LocalColourMatrix;
+    bMemSet(&dir_m, 0, sizeof(dir_m));
+    bMemSet(&col_m, 0, sizeof(col_m));
+    bVector4 *rows[3] = {&col_m.v0, &col_m.v1, &col_m.v2};
+    for (int i = 0; i < 3; i++) {
+        bVector3 d = dirs[i];
+        if (local_world) {
+            // world -> local for a rotation: dot with the matrix's rows.
+            bVector3 w = d;
+            d.x = w.x * local_world->v0.x + w.y * local_world->v0.y + w.z * local_world->v0.z;
+            d.y = w.x * local_world->v1.x + w.y * local_world->v1.y + w.z * local_world->v1.z;
+            d.z = w.x * local_world->v2.x + w.y * local_world->v2.y + w.z * local_world->v2.z;
+        }
+        float len = bSqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+        if (len > 0.0f) {
+            d.x /= len, d.y /= len, d.z /= len;
+        }
+        float *m = reinterpret_cast<float *>(&dir_m);
+        m[0 * 4 + i] = d.x; // column i
+        m[1 * 4 + i] = d.y;
+        m[2 * 4 + i] = d.z;
+        eShaperLight &light = shaper_lights->Lights[i + 1];
+        rows[i]->x = light.Red * light.Scale;
+        rows[i]->y = light.Green * light.Scale;
+        rows[i]->z = light.Blue * light.Scale;
+        rows[i]->w = 0.0f;
+    }
+    light_context->NumLights = 3;
     return 1;
 }
 #else
