@@ -355,3 +355,30 @@ void eSolidNotifyTextureLoading(TexturePack *texture_pack, TextureInfo *texture_
         }
     }
 }
+
+// PC NotifySolidUnloader (0x506B50): before a solid goes away, every model
+// using it moves to another loaded solid of the same name when the solid's
+// flag 0x100 says one may exist (eFindSolid), else to UnattachedModelList with
+// no solid. Natively this was a stub, so streamed-out scenery models kept a
+// pointer to the freed solid (crash in DrawSolid reading 0xEE fill).
+extern bTList<eModel> UnattachedModelList; // eModel.cpp
+
+void NotifySolidUnloader(eSolid *solid) {
+    eSolid *replacement = nullptr;
+    if ((solid->Flags & 0x100) != 0) {
+        replacement = eFindSolid(solid->NameHash, nullptr);
+        if (replacement == solid) {
+            replacement = nullptr;
+        }
+    }
+    while (!solid->ModelList.IsEmpty()) {
+        eModel *model = solid->ModelList.GetHead();
+        model->Remove();
+        if (replacement != nullptr) {
+            replacement->ModelList.AddTail(model);
+        } else {
+            UnattachedModelList.AddTail(model);
+        }
+        model->PortSetSolid(replacement);
+    }
+}

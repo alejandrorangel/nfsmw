@@ -27,6 +27,10 @@ class eModel : public bTNode<eModel> {
     void RestoreReplacementTextureTable(TextureInfo ***replaced_textures);
     void ApplyReplacementTextureTable(TextureInfo ***replaced_textures);
 #if defined(EA_PORT_NATIVE)
+    // NotifySolidUnloader (SolidNative.cpp) relinks models itself.
+    void PortSetSolid(eSolid *solid) {
+        Solid = solid;
+    }
     int PortNumReplacementTextures() const {
         return pReplacementTextureTable ? NumReplacementTextures : 0;
     }
