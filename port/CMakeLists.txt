@@ -98,6 +98,7 @@ add_library(nfsmw_platform OBJECT
     src/Platform/SolidNative.cpp
     src/Platform/SceneNative.cpp
     src/Platform/ViewsNative.cpp
+    src/Platform/EnvMapNative.cpp
     src/Platform/VisualTreatmentNative.cpp
     src/Game/SelectCarCameraMover.cpp
     src/Game/CameraDriveNative.cpp

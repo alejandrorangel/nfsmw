@@ -63,8 +63,12 @@ struct Port3DDraw {
     // Model-space lighting (eDynamicLightContext), when PORT_3D_LIT: three
     // light directions, three colours, then the eye position (xyzw each).
     float lights[28];
+    // Car effect WorldView (eDynamicLightContext::EnvMapMatrix rows 0..2,
+    // xyzw each), when PORT_3D_ENVMAP: takes the model-space reflection
+    // vector into the space of the environment cube.
+    float envmap[12];
 };
-enum { PORT_3D_ALPHA_BLEND = 1, PORT_3D_ADDITIVE = 2, PORT_3D_ALPHA_TEST = 4, PORT_3D_LIT = 8 };
+enum { PORT_3D_ALPHA_BLEND = 1, PORT_3D_ADDITIVE = 2, PORT_3D_ALPHA_TEST = 4, PORT_3D_LIT = 8, PORT_3D_ENVMAP = 16 };
 
 void PortMetal3DBeginFrame(const float view_proj[16]);
 void PortMetal3DSetEye(const float eye[3]); // world-space camera position
@@ -115,6 +119,25 @@ struct PortWorldFog {
 };
 // Scattering and lighting for this 3D frame (call after PortMetal3DBeginFrame; null = off).
 void PortMetal3DSetFog(const PortWorldFog *fog);
+
+// The car effect's EnvMapTex (IDI_CAR_FX envmap_sampler), a cube with faces
+// 0..5 = +X, -X, +Y, -Y, +Z, -Z (D3D order and orientation). speed.exe 1.3
+// (sub_6BD4B0) keeps two: a 256x256 render-target cube drawn every frame in
+// game from the six env-map views, and a static one built from the garage
+// textures for the frontend (sub_6C5B80 picks by game flow state).
+enum PortEnvMapMode {
+    PORT_ENVMAP_NONE,    // no cube this frame (shader fallback)
+    PORT_ENVMAP_DYNAMIC, // the render-target cube (faces from PortMetal3DBeginEnvFace)
+    PORT_ENVMAP_STATIC,  // a cube from PortMetalCreateCube
+};
+void PortMetal3DSetEnvMap(PortEnvMapMode mode, void *static_cube);
+// Draws added until PortMetal3DEndEnvFace go to that face of the dynamic cube,
+// rendered before this frame's scene (cleared to black, PC sub_6BD3B0).
+void PortMetal3DBeginEnvFace(int face, const float view_proj[16], const float eye[3]);
+void PortMetal3DEndEnvFace();
+// A cube texture from six 2D textures of one size and format (level 0 is
+// copied; PC EnvMapTextureLoadedCallback copies each face's pixels).
+void *PortMetalCreateCube(void *const faces[6], const char *label);
 
 // GPU buffers for model data (retained; release with PortMetalReleaseBuffer).
 void *PortMetalCreateBuffer(const void *data, size_t length, const char *label);

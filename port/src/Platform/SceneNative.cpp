@@ -9,6 +9,7 @@
 #include "Speed/Indep/Src/Ecstasy/EcstasyData.hpp"
 #include "Speed/Indep/Src/Ecstasy/Texture.hpp"
 #include "Speed/Indep/Src/Ecstasy/eLight.hpp"
+#include "Speed/Indep/Src/Ecstasy/eEnvMap.hpp"
 #include "Speed/Indep/Src/Camera/Camera.hpp"
 #include "Speed/Indep/Src/Frontend/FECarLoader.hpp"
 #include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/FEPkg_GarageMain.hpp"
@@ -22,11 +23,13 @@
 #include "Speed/Indep/Src/Generated/AttribSys/Classes/effects.h"
 #include "Speed/Indep/Src/Generated/AttribSys/Classes/timeofdaylighting.h"
 #include "Speed/Indep/Src/World/Rain.hpp"
+#include "Speed/Indep/Src/World/SkyRender.hpp"
 #include "Speed/Indep/Src/Misc/Timer.hpp"
 #include "Speed/Indep/bWare/Inc/bWare.hpp"
 
 #include "../Mac/MetalBridge.h"
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -122,7 +125,9 @@ void MaterialConstants(const eLightMaterial *light_material, float out[20]) {
     out[19] = d.SpecularPower;
 }
 
-void DrawSolid(eSolid *solid, const M44 world, const eDynamicLightContext *lights = nullptr) {
+// render_flags: eViewPlatInterface::Render flags (bit 0: CarRender's
+// disable_env_flag, no environment map).
+void DrawSolid(eSolid *solid, const M44 world, const eDynamicLightContext *lights = nullptr, unsigned int render_flags = 0) {
     eSolidPlatInfo *info = solid->GetPlatInfo();
     if (info == nullptr) {
         return;
@@ -158,14 +163,20 @@ void DrawSolid(eSolid *solid, const M44 world, const eDynamicLightContext *light
             d.lights[25] = lights->LocalEyePosition.y;
             d.lights[26] = lights->LocalEyePosition.z;
             d.flags |= PORT_3D_LIT;
+            if (!(render_flags & 1)) {
+                // IDI_CAR_FX WorldView: the light context's EnvMapMatrix
+                // (elSetupEnvMap: local_world * hack_man_matrix).
+                std::memcpy(d.envmap, &lights->EnvMapMatrix, sizeof(d.envmap));
+                d.flags |= PORT_3D_ENVMAP;
+            }
         }
         d.num_indices = group.NumIndices;
         if (texture && texture->AlphaBlendType == TEXBLEND_ADDATIVE) {
-            d.flags = PORT_3D_ADDITIVE;
+            d.flags |= PORT_3D_ADDITIVE;
         } else if (texture && texture->AlphaUsageType == TEXUSAGE_MODULATED) {
-            d.flags = PORT_3D_ALPHA_BLEND;
+            d.flags |= PORT_3D_ALPHA_BLEND;
         } else if (texture && texture->AlphaUsageType == TEXUSAGE_PUNCHTHRU) {
-            d.flags = PORT_3D_ALPHA_TEST;
+            d.flags |= PORT_3D_ALPHA_TEST;
         }
         std::memcpy(d.world, world, sizeof(M44));
         PortMetal3DAdd(&d);
@@ -255,6 +266,11 @@ void SmokeDraw() {
 } // namespace
 
 void RenderFrontEndCars(eView *view, int reflection); // CarRender.cpp
+void UpdateEnvironmentMapCameras(); // CarRender.cpp
+void StuffSkyLayer(eView *view, SKY_LAYER layer); // SkyRender.cpp
+int PortEnvMapQuality();            // EnvMapNative.cpp
+void *PortFEEnvMapCube();           // EnvMapNative.cpp
+
 
 namespace {
 
@@ -435,6 +451,29 @@ bool ViewProjectionFor(eView *view, M44 out) {
     return true;
 }
 
+// An env-map face view: the camera's 90 degree field of view on a square
+// target (the cube face).
+bool SquareViewProjectionFor(eView *view, M44 out) {
+    Camera *camera = view->GetCamera();
+    if (camera == nullptr) {
+        return false;
+    }
+    float fov = camera->GetFieldOfView() * (2.0f * 3.1415927f / 65536.0f);
+    if (fov <= 0.0f) {
+        return false;
+    }
+    float znear = camera->GetNearZ() > 0.0f ? camera->GetNearZ() : 0.5f;
+    float zfar = camera->GetFarZ() > znear ? camera->GetFarZ() : 100.0f;
+    float s = 1.0f / std::tan(fov * 0.5f);
+    float a = zfar / (zfar - znear);
+    float b = -znear * zfar / (zfar - znear);
+    M44 proj = {s, 0, 0, 0, 0, -s, 0, 0, 0, 0, a, 1, 0, 0, b, 0};
+    M44 world_to_camera;
+    std::memcpy(world_to_camera, camera->GetWorldToCameraMatrix(), sizeof(M44));
+    Multiply(out, world_to_camera, proj);
+    return true;
+}
+
 // Each view's world -> clip matrix for the frame (visibility tests).
 const int kMaxViews = 22;
 M44 gViewClip[kMaxViews];
@@ -528,6 +567,11 @@ bool RenderFrontEndScene() {
     PortMetal3DBeginFrame(view_proj);
     SetupFrameLighting(view);
     SetViewClip(view, view_proj);
+    // eDisplayFrame 0x6E736A; the frontend cars use the garage cube.
+    if (PortEnvMapQuality() != 0) {
+        UpdateEnvironmentMapCameras();
+        PortMetal3DSetEnvMap(PORT_ENVMAP_STATIC, PortFEEnvMapCube());
+    }
     {
         bVector3 *eye = view->GetCamera()->GetPosition();
         float e[3] = {eye->x, eye->y, eye->z};
@@ -621,7 +665,7 @@ void eViewPlatInterface::Render(eModel *model, bMatrix4 *local_to_world, eLightC
     if (light_context && light_context->Type == 0) {
         dynamic_lights = static_cast<const eDynamicLightContext *>(light_context);
     }
-    DrawSolid(model->GetSolid(), world, dynamic_lights);
+    DrawSolid(model->GetSolid(), world, dynamic_lights, flags);
     if (replaced) {
         model->RestoreReplacementTextureTable(replaced);
     }
@@ -683,7 +727,7 @@ void SetupCullInfo(eView *view, SceneryCullInfo *info, unsigned int exclude) {
     if (mode == 4 || mode == 3) {
         flags |= 1;
     }
-    if (id > 0x11 && id < 0x18) {
+    if (id >= EVIEW_FIRST_ENVMAP && id <= EVIEW_LAST_ENVMAP) { // PC views 18..23
         flags |= 0x100;
     }
     if (flags & 0x1800) {
@@ -782,16 +826,52 @@ bool RenderWorldScene(int frame) {
 
     gWorldCullInfo.NumCullInfos = 0;
     SetupCullInfo(view, &gWorldCullInfo.SceneryCullInfos[gWorldCullInfo.NumCullInfos++], 0x6000);
+    // The env-map views (sub_6BFDD0 culls each active one with 0x1100 at
+    // shadow detail 0x901830 < 2; the high preset has 1).
+    eEnvMap *envmap = PortEnvMapQuality() != 0 ? eGetEnvMap() : nullptr;
+    if (envmap) {
+        UpdateEnvironmentMapCameras(); // eDisplayFrame 0x6E736A
+        PortMetal3DSetEnvMap(PORT_ENVMAP_DYNAMIC, nullptr);
+        for (int i = 0; i < 6; i++) {
+            eView *face = envmap->Views[i];
+            M44 face_proj;
+            if (face && face->IsActive() && SquareViewProjectionFor(face, face_proj)) {
+                SetViewClip(face, face_proj);
+                SetupCullInfo(face, &gWorldCullInfo.SceneryCullInfos[gWorldCullInfo.NumCullInfos++], 0x1100);
+            }
+        }
+    }
     gWorldCullInfo.DoCulling();
     gSceneDraws = 0;
     gSceneCalls = gSceneNoSolid = 0;
+    int envmap_draws = 0;
+    if (envmap) {
+        // ___eDisplayFrame 0x6DE675: each active face gets the scenery with
+        // stuff flags 0 (0x9017BC, the high preset's 2; the sky layer and
+        // light flares the PC also draws here are not ported yet).
+        for (int i = 0; i < 6; i++) {
+            eView *face = envmap->Views[i];
+            M44 face_proj;
+            if (face && face->IsActive() && SquareViewProjectionFor(face, face_proj)) {
+                bVector3 *p = face->GetCamera()->GetPosition();
+                float face_eye[3] = {p->x, p->y, p->z};
+                PortMetal3DBeginEnvFace(i, face_proj, face_eye);
+                // 0x6DE741: StuffSkyLayer(face, SKY_LAYER_LOWREZ, ...).
+                StuffSkyLayer(face, SKY_LAYER_LOWREZ);
+                gWorldCullInfo.StuffScenery(face, 0);
+                PortMetal3DEndEnvFace();
+            }
+        }
+        envmap_draws = gSceneDraws;
+        gSceneDraws = 0;
+    }
     gWorldCullInfo.StuffScenery(view, 0x20);
     int scenery = gSceneDraws;
     RenderWorldModels(view, 0);
     int models = gSceneDraws - scenery;
     DrawTestCars(view, 0); // ___eDisplayFrame 0x6DEE44: sub_750B10 → VehicleRenderConn::RenderAll
     if (log) {
-        std::fprintf(stderr, "[world] cars %d\n", gSceneDraws - scenery - models);
+        std::fprintf(stderr, "[world] cars %d, env map faces %d draws\n", gSceneDraws - scenery - models, envmap_draws);
         std::fprintf(stderr, "[world] camera (%.1f %.1f %.1f) dir (%.2f %.2f %.2f) draws: scenery %d, models %d (calls %d, no solid %d)\n",
                      eye->x, eye->y, eye->z, view->GetCamera()->GetDirection()->x, view->GetCamera()->GetDirection()->y,
                      view->GetCamera()->GetDirection()->z, scenery, gSceneDraws - scenery, gSceneCalls, gSceneNoSolid);
@@ -802,6 +882,24 @@ bool RenderWorldScene(int frame) {
 } // namespace
 
 void PortRenderScene(int frame) {
+    static const bool trace = std::getenv("NFSMW_TRACE_SCENE") != nullptr;
+    struct Timer {
+        bool on;
+        std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+        ~Timer() {
+            static double sum;
+            static int n;
+            if (!on) {
+                return;
+            }
+            sum += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            if (++n == 120) {
+                std::fprintf(stderr, "[scene] build %.2f ms/frame\n", sum / n);
+                sum = 0;
+                n = 0;
+            }
+        }
+    } timer{trace};
     M44 view_proj;
     Identity(view_proj);
     if (SmokeSetup(frame, view_proj)) {

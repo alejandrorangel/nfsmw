@@ -163,12 +163,24 @@ struct Draw3D {
     float world[16];
     float material[20];
     float lights[28];
+    float envmap[12];
+};
+
+// One face of the dynamic environment cube (PC env-map views).
+struct EnvFace3D {
+    bool active = false; // drawn this frame
+    float view_proj[16];
+    float eye[3];
+    std::vector<Draw3D> draws;
 };
 
 struct Frame3D {
     float view_proj[16];
     float eye[3] = {0, 0, 0};
     std::vector<Draw3D> draws;
+    EnvFace3D env_faces[6];
+    PortEnvMapMode env_mode = PORT_ENVMAP_NONE;
+    id<MTLTexture> env_static;
     bool overlay = false;
     bool treatment = false; // apply the visual treatment (vt) to this frame
     PortVisualTreatment vt;
@@ -177,6 +189,7 @@ struct Frame3D {
 };
 static Frame3D g3DBuilding;
 static Frame3D g3DPublished;
+static std::vector<Draw3D> *g3DTarget = &g3DBuilding.draws; // where PortMetal3DAdd goes
 
 static float gViewAspect = 4.0f / 3.0f;
 
@@ -187,6 +200,13 @@ float PortMetalViewAspect() {
 void PortMetal3DBeginFrame(const float view_proj[16]) {
     memcpy(g3DBuilding.view_proj, view_proj, sizeof(g3DBuilding.view_proj));
     g3DBuilding.draws.clear();
+    for (EnvFace3D &f : g3DBuilding.env_faces) {
+        f.active = false;
+        f.draws.clear();
+    }
+    g3DBuilding.env_mode = PORT_ENVMAP_NONE;
+    g3DBuilding.env_static = nil;
+    g3DTarget = &g3DBuilding.draws;
     g3DBuilding.overlay = false;
     g3DBuilding.treatment = false;
     g3DBuilding.gain_map = nil;
@@ -217,6 +237,68 @@ void PortMetal3DSetTreatment(const PortVisualTreatment *treatment) {
     }
 }
 
+void PortMetal3DSetEnvMap(PortEnvMapMode mode, void *static_cube) {
+    g3DBuilding.env_mode = mode;
+    g3DBuilding.env_static = mode == PORT_ENVMAP_STATIC ? (__bridge id<MTLTexture>)static_cube : nil;
+    if (mode == PORT_ENVMAP_STATIC && static_cube == nullptr) {
+        g3DBuilding.env_mode = PORT_ENVMAP_NONE;
+    }
+}
+
+void PortMetal3DBeginEnvFace(int face, const float view_proj[16], const float eye[3]) {
+    if (face < 0 || face >= 6) {
+        return;
+    }
+    EnvFace3D &f = g3DBuilding.env_faces[face];
+    f.active = true;
+    f.draws.clear();
+    memcpy(f.view_proj, view_proj, sizeof(f.view_proj));
+    memcpy(f.eye, eye, sizeof(f.eye));
+    g3DTarget = &f.draws;
+}
+
+void PortMetal3DEndEnvFace() {
+    g3DTarget = &g3DBuilding.draws;
+}
+
+// Blits level 0 of each face into a new cube, on its own queue (game thread).
+void *PortMetalCreateCube(void *const faces[6], const char *label) {
+    if (gDevice == nil || faces[0] == nullptr) {
+        return nullptr;
+    }
+    static id<MTLCommandQueue> queue;
+    static std::once_flag once;
+    std::call_once(once, [] { queue = [gDevice newCommandQueue]; });
+    id<MTLTexture> first = (__bridge id<MTLTexture>)faces[0];
+    MTLTextureDescriptor *desc = [MTLTextureDescriptor textureCubeDescriptorWithPixelFormat:first.pixelFormat
+                                                                                     size:first.width
+                                                                                mipmapped:NO];
+    desc.usage = MTLTextureUsageShaderRead;
+    desc.storageMode = MTLStorageModePrivate;
+    id<MTLTexture> cube = [gDevice newTextureWithDescriptor:desc];
+    if (cube == nil) {
+        return nullptr;
+    }
+    if (label) {
+        cube.label = [NSString stringWithUTF8String:label];
+    }
+    id<MTLCommandBuffer> cmd = [queue commandBuffer];
+    id<MTLBlitCommandEncoder> blit = [cmd blitCommandEncoder];
+    for (int i = 0; i < 6; i++) {
+        id<MTLTexture> f = (__bridge id<MTLTexture>)faces[i];
+        if (f == nil || f.pixelFormat != first.pixelFormat || f.width != first.width || f.height != first.width) {
+            continue;
+        }
+        [blit copyFromTexture:f sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0)
+                   sourceSize:MTLSizeMake(f.width, f.height, 1)
+                    toTexture:cube destinationSlice:i destinationLevel:0 destinationOrigin:MTLOriginMake(0, 0, 0)];
+    }
+    [blit endEncoding];
+    [cmd commit];
+    [cmd waitUntilCompleted];
+    return (__bridge_retained void *)cube;
+}
+
 void PortMetal3DSetEye(const float eye[3]) {
     memcpy(g3DBuilding.eye, eye, sizeof(g3DBuilding.eye));
 }
@@ -239,7 +321,8 @@ void PortMetal3DAdd(const Port3DDraw *draw) {
         memcpy(d.world, draw->world, sizeof(d.world));
         memcpy(d.material, draw->material, sizeof(d.material));
         memcpy(d.lights, draw->lights, sizeof(d.lights));
-        g3DBuilding.draws.push_back(d);
+        memcpy(d.envmap, draw->envmap, sizeof(d.envmap));
+        g3DTarget->push_back(d);
     }
 }
 
@@ -374,15 +457,19 @@ vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffe
     return o;
 }
 
-// Simple stand-in for the game's environment cube map: brighter above.
+// Fallback while no environment cube exists yet: brighter above (z up).
 float3 EnvColour(float3 r) {
     return mix(float3(0.08, 0.08, 0.09), float3(0.55, 0.57, 0.6), saturate(r.z * 0.5 + 0.5));
 }
 
+// EnvMapMatrix rows (Port3DDraw::envmap).
+struct EnvMatrix { float4 row[3]; };
+
 // PC CAR effect, technique 'car' shader=1 (IDI_CAR_FX vs #11 / ps #10), per
 // pixel: fresnel-style diffuse/specular/envmap ranges from the light
 // material, three directional lights, and a 2*(N.H)^8 highlight.
-float4 CarShade(MeshOut in, float4 t, constant MeshConst &c, constant Material &m, constant Lights &l, bool lit) {
+float4 CarShade(MeshOut in, float4 t, constant MeshConst &c, constant Material &m, constant Lights &l, bool lit,
+                texturecube<float> env_map, constant EnvMatrix &em) {
     float3 light_dir[3] = {normalize(float3(-0.3, -0.4, 0.85)), normalize(float3(0.6, 0.5, 0.3)), normalize(float3(0.0, 0.8, -0.2))};
     float3 light_col[3] = {float3(0.85, 0.85, 0.82), float3(0.35, 0.38, 0.45), float3(0.25, 0.25, 0.28)};
     float3 n = normalize(in.normal);
@@ -409,22 +496,42 @@ float4 CarShade(MeshOut in, float4 t, constant MeshConst &c, constant Material &
     float3 h = normalize(v + light_dir[0]);
     float nh = saturate(dot(n, h));
     float highlight = 2.0 * pow(nh, 8.0);
+    // vs #11: oT0 = (2 (N.V) N - V) * WorldView; ps #10: t0 = texCUBE(oT0),
+    // env term t0 * oD1.w * oD0.w.
     float3 r = 2.0 * ndotv * n - v;
-    float3 rgb = t.rgb * d + highlight * diffuse.a * spec + EnvColour(r) * env_strength * diffuse.a;
+    float3 env = 0;
+    if (c.shade & 16) {
+        float3 re = r.x * em.row[0].xyz + r.y * em.row[1].xyz + r.z * em.row[2].xyz;
+        if (c.shade & 8) {
+            constexpr sampler es(filter::linear, mip_filter::linear, address::clamp_to_edge);
+            env = env_map.sample(es, re).rgb;
+        } else {
+            env = EnvColour(float3(re.x, re.z, -re.y)); // camera space, y down
+        }
+    } else if (!lit) {
+        env = EnvColour(r);
+    }
+    if (c.shade & 32) {
+        return float4(env, 1); // NFSMW_SHADE=envmap: the cube lookup alone
+    }
+    float3 rgb = t.rgb * d + highlight * diffuse.a * spec + env * env_strength * diffuse.a;
     return float4(rgb, t.a * diffuse.a);
 }
 
 // shade: bit 0 texture-only debug view, bit 1 alpha test (punch-through
-// textures only; elsewhere alpha is a gloss/spec mask, or blends).
-fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(0)]], constant MeshConst &c [[buffer(0)]],
-                        constant Material &m [[buffer(1)]], constant Lights &l [[buffer(2)]]) {
+// textures only; elsewhere alpha is a gloss/spec mask, or blends), bit 2
+// lit (model-space lights), bit 3 an environment cube is bound, bit 4 the
+// draw has an EnvMapMatrix.
+fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(0)]], texturecube<float> env_map [[texture(1)]],
+                        constant MeshConst &c [[buffer(0)]], constant Material &m [[buffer(1)]], constant Lights &l [[buffer(2)]],
+                        constant EnvMatrix &em [[buffer(3)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear, address::repeat);
     float4 t = tex.sample(s, in.uv);
     float4 out;
     if (c.shade & 1) {
         out = t;
     } else if (c.effect == 4) {
-        out = CarShade(in, t, c, m, l, (c.shade & 4) != 0);
+        out = CarShade(in, t, c, m, l, (c.shade & 4) != 0, env_map, em);
     } else {
         // PC WORLD (ps #12): 2 x texture x (oD0 + oD1) + in-scatter (mad_x2,
         // then add t2); alpha texture x oD0 alpha. WORLDPRELIT and the
@@ -514,6 +621,10 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     id<MTLRenderPipelineState> _treatmentPipeline;
     id<MTLTexture> _sceneColor, _sceneDepth; // the frame (PC 0x93DEF8)
     id<MTLTexture> _bloom[2];                // quarter size (PC 0x982964, 0x982968)
+    // Dynamic environment cube (PC 0x982A30) and its depth (0x982A4C).
+    id<MTLTexture> _envCube, _envDepth;
+    id<MTLTexture> _blackCube; // bound when there is none
+    unsigned _envFacesDrawn; // faces drawn at least once (bit per face)
     uint64_t _frame;
 }
 
@@ -611,6 +722,12 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         _white = [_device newTextureWithDescriptor:wd];
         uint32_t white = 0xFFFFFFFF;
         [_white replaceRegion:MTLRegionMake2D(0, 0, 1, 1) mipmapLevel:0 withBytes:&white bytesPerRow:4];
+        MTLTextureDescriptor *bd = [MTLTextureDescriptor textureCubeDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm size:1 mipmapped:NO];
+        _blackCube = [_device newTextureWithDescriptor:bd];
+        uint32_t black = 0xFF000000;
+        for (int i = 0; i < 6; i++) {
+            [_blackCube replaceRegion:MTLRegionMake2D(0, 0, 1, 1) mipmapLevel:0 slice:i withBytes:&black bytesPerRow:4 bytesPerImage:4];
+        }
     }
     return self;
 }
@@ -618,14 +735,80 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
 - (void)mtkView:(MTKView *)view drawableSizeWillChange:(CGSize)size {
 }
 
+// This frame's EnvMapTex, or nil (shader fallback).
+- (id<MTLTexture>)envMapFor:(const Frame3D &)scene {
+    if (scene.env_mode == PORT_ENVMAP_STATIC) {
+        return scene.env_static;
+    }
+    if (scene.env_mode == PORT_ENVMAP_DYNAMIC && _envCube && _envFacesDrawn == 0x3F) {
+        return _envCube;
+    }
+    return nil;
+}
+
 - (void)drawScene:(const Frame3D &)scene encoder:(id<MTLRenderCommandEncoder>)enc view:(MTKView *)view {
-    if (!scene.draws.empty() && _meshPipelines[0]) {
+    CGSize size = view.drawableSize;
+    [self drawDraws:scene.draws viewProj:scene.view_proj eye:scene.eye fog:scene.fog envMap:[self envMapFor:scene]
+              width:size.width height:size.height encoder:enc];
+}
+
+// PC ___eDisplayFrame 0x6DE64C: with the env map on, in game, each active
+// env-map view is drawn into its cube face (cleared black, sub_6BD3B0)
+// before the player view. 256x256 (0x8F8FF4), A8R8G8B8 (0x8F8FF8).
+- (void)drawEnvFaces:(const Frame3D &)scene commandBuffer:(id<MTLCommandBuffer>)cmd {
+    if (scene.env_mode != PORT_ENVMAP_DYNAMIC || !_meshPipelines[0]) {
+        return;
+    }
+    const NSUInteger size = 256;
+    if (_envCube == nil) {
+        MTLTextureDescriptor *cd = [MTLTextureDescriptor textureCubeDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm size:size mipmapped:NO];
+        cd.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+        cd.storageMode = MTLStorageModePrivate;
+        _envCube = [_device newTextureWithDescriptor:cd];
+        _envCube.label = @"EnvMap cube";
+        MTLTextureDescriptor *dd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float_Stencil8
+                                                                                      width:size
+                                                                                     height:size
+                                                                                  mipmapped:NO];
+        dd.usage = MTLTextureUsageRenderTarget;
+        dd.storageMode = MTLStorageModeMemoryless;
+        _envDepth = [_device newTextureWithDescriptor:dd];
+        _envFacesDrawn = 0;
+    }
+    for (int face = 0; face < 6; face++) {
+        const EnvFace3D &f = scene.env_faces[face];
+        if (!f.active) {
+            continue;
+        }
+        MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+        rp.colorAttachments[0].texture = _envCube;
+        rp.colorAttachments[0].slice = face;
+        rp.colorAttachments[0].loadAction = MTLLoadActionClear;
+        rp.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
+        rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+        rp.depthAttachment.texture = _envDepth;
+        rp.depthAttachment.loadAction = MTLLoadActionClear;
+        rp.depthAttachment.clearDepth = 1.0;
+        rp.depthAttachment.storeAction = MTLStoreActionDontCare;
+        rp.stencilAttachment.texture = _envDepth;
+        rp.stencilAttachment.loadAction = MTLLoadActionClear;
+        rp.stencilAttachment.storeAction = MTLStoreActionDontCare;
+        id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rp];
+        enc.label = @"EnvMap face";
+        [self drawDraws:f.draws viewProj:f.view_proj eye:f.eye fog:scene.fog envMap:nil width:size height:size encoder:enc];
+        [enc endEncoding];
+        _envFacesDrawn |= 1u << face;
+    }
+}
+
+- (void)drawDraws:(const std::vector<Draw3D> &)draws viewProj:(const float *)view_proj eye:(const float *)eye fog:(const PortWorldFog &)fog
+           envMap:(id<MTLTexture>)env_map width:(double)width height:(double)height encoder:(id<MTLRenderCommandEncoder>)enc {
+    if (!draws.empty() && _meshPipelines[0]) {
         // Opaque first, then blended in submission order.
-        CGSize size = view.drawableSize;
-        [enc setViewport:(MTLViewport){0, 0, size.width, size.height, 0, 1}];
+        [enc setViewport:(MTLViewport){0, 0, width, height, 0, 1}];
         [enc setCullMode:MTLCullModeNone];
         for (int blended = 0; blended < 2; blended++) {
-            for (const Draw3D &d : scene.draws) {
+            for (const Draw3D &d : draws) {
                 int mode = (d.flags & PORT_3D_ADDITIVE) ? 2 : (d.flags & PORT_3D_ALPHA_BLEND) ? 1 : 0;
                 if ((mode != 0) != (blended != 0)) {
                     continue;
@@ -641,21 +824,30 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 } c = {};
                 c.stride = d.vertex_stride;
                 c.effect = d.effect;
-                memcpy(c.eye, scene.eye, sizeof(scene.eye));
+                memcpy(c.eye, eye, sizeof(float) * 3);
                 static const char *shade_env = getenv("NFSMW_SHADE");
                 c.shade = (shade_env && strcmp(shade_env, "texture") == 0) ? 1 : 0;
+                if (shade_env && strcmp(shade_env, "envmap") == 0) {
+                    c.shade |= 32;
+                }
                 if (d.flags & PORT_3D_ALPHA_TEST) {
                     c.shade |= 2;
                 }
                 if (d.flags & PORT_3D_LIT) {
                     c.shade |= 4;
                 }
+                if (env_map) {
+                    c.shade |= 8;
+                }
+                if (d.flags & PORT_3D_ENVMAP) {
+                    c.shade |= 16;
+                }
                 // mvp = world * view_proj (row vectors).
                 for (int i = 0; i < 4; i++) {
                     for (int j = 0; j < 4; j++) {
                         float sum = 0;
                         for (int k = 0; k < 4; k++) {
-                            sum += d.world[i * 4 + k] * scene.view_proj[k * 4 + j];
+                            sum += d.world[i * 4 + k] * view_proj[k * 4 + j];
                         }
                         c.mvp[i * 4 + j] = sum;
                     }
@@ -665,8 +857,10 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 [enc setDepthStencilState:(mode == 0 ? _depthWrite : _depthTest)];
                 [enc setVertexBuffer:d.vertex_buffer offset:0 atIndex:0];
                 [enc setVertexBytes:&c length:sizeof(c) atIndex:1];
-                [enc setVertexBytes:&scene.fog length:sizeof(scene.fog) atIndex:2];
+                [enc setVertexBytes:&fog length:sizeof(fog) atIndex:2];
                 [enc setFragmentTexture:(d.texture ? d.texture : _white) atIndex:0];
+                [enc setFragmentTexture:(env_map ? env_map : _blackCube) atIndex:1];
+                [enc setFragmentBytes:d.envmap length:sizeof(d.envmap) atIndex:3];
                 [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
                 [enc setFragmentBytes:d.material length:sizeof(d.material) atIndex:1];
                 [enc setFragmentBytes:d.lights length:sizeof(d.lights) atIndex:2];
@@ -818,6 +1012,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     pass.depthAttachment.loadAction = MTLLoadActionClear;
 
     id<MTLCommandBuffer> cmd = [_queue commandBuffer];
+    [self drawEnvFaces:scene commandBuffer:cmd];
     bool treated = !scene.overlay && scene.treatment && !scene.draws.empty() && _filterPipeline && _treatmentPipeline;
     if (treated) {
         [self drawTreatedScene:scene commandBuffer:cmd view:view];
@@ -878,6 +1073,20 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     }
     [enc endEncoding];
     [cmd presentDrawable:view.currentDrawable];
+    static const bool trace_gpu = getenv("NFSMW_TRACE_GPU") != nullptr;
+    if (trace_gpu) {
+        // GPU time per frame, averaged over 120 frames.
+        [cmd addCompletedHandler:^(id<MTLCommandBuffer> b) {
+            static double sum;
+            static int n;
+            sum += b.GPUEndTime - b.GPUStartTime;
+            if (++n == 120) {
+                fprintf(stderr, "[gpu] %.2f ms/frame\n", sum / n * 1000.0);
+                sum = 0;
+                n = 0;
+            }
+        }];
+    }
     [cmd commit];
 }
 
