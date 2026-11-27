@@ -132,6 +132,12 @@ void SeedRandomNumber() {
         seed = Joylog::GetData(32, JOYLOG_CHANNEL_RANDOM);
     } else {
         seed = bGetTicker() + 0x12345678;
+#if defined(EA_PORT_NATIVE)
+        extern bool PortBenchmarkActive(); // NFSMW_BENCHMARK: the same seed every run
+        if (PortBenchmarkActive()) {
+            seed = 0x12345678;
+        }
+#endif
         Joylog::AddData(seed, 32, JOYLOG_CHANNEL_RANDOM);
     }
     bSetRandomSeed(seed, &bDefaultSeed);
@@ -573,6 +579,13 @@ int MainThreadFunction(int argc, char **argv)
 
     WriteFreekerBaseAddressBeacon();
 
+#if defined(EA_PORT_NATIVE)
+    // NFSMW_BENCHMARK: the SkipFE race becomes the startup race now, so the
+    // QuickGame starts the player on its grid (World_DEBUGStartLocation).
+    extern void PortBenchmarkSetStartupRace();
+    PortBenchmarkSetStartupRace();
+#endif
+
     if (SkipFE) {
         RaceStarter::StartSkipFERace();
     } else {
@@ -590,6 +603,15 @@ int MainThreadFunction(int argc, char **argv)
         uint32 current_tick = bGetTicker();
         float milliseconds = bGetTickerDifference(loop_ticker, current_tick);
         bFix milliseconds_fix;
+#if defined(EA_PORT_NATIVE)
+        // NFSMW_BENCHMARK: every frame is 1/60 s of game time, whatever the real time.
+        extern float PortBenchmarkFixedFrameMs();
+        if (float fixed_ms = PortBenchmarkFixedFrameMs()) {
+            loop_ticker = current_tick;
+            MainLoop(fixed_ms);
+            continue;
+        }
+#endif
 
         if (current_tick != loop_ticker && milliseconds <= 0.0f) {
             loop_ticker = current_tick;

@@ -14,6 +14,7 @@
 #include "Speed/Indep/Src/Misc/GameFlow.hpp"
 
 #include "../Mac/MetalBridge.h"
+#include "Benchmark.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -183,7 +184,11 @@ void eDisplayFrame() {
     eFrameCounter++;
     // 0x6E7667: then the mouse state (FEMSG_MOUSE_CHANGED etc.) for the next frame.
     gFEMouseState.Update();
-    PaceFrame();
+    if (PortBenchmarkActive()) {
+        PortBenchmarkEndFrame(render_start); // presents now, unpaced
+    } else {
+        PaceFrame();
+    }
     ft.last_end = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
 
     if (std::getenv("NFSMW_TRACE_FLOW") && frame % 60 == 0) {

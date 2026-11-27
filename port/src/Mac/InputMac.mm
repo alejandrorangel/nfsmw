@@ -5,6 +5,7 @@
 
 #include "InputBridge.h"
 #include "MetalBridge.h"
+#include "../Platform/Benchmark.h"
 
 #include <algorithm>
 #include <cmath>
@@ -493,6 +494,9 @@ int PortInputTakeMouseWheel() {
 
 void PortInputGetState(PortInputState *out) {
     std::memset(out, 0, sizeof(*out));
+    if (PortBenchmarkInput(out)) {
+        return; // NFSMW_BENCHMARK: scripted input only
+    }
     {
         std::lock_guard<std::mutex> guard(gInputLock);
         std::memcpy(out->keys, gKeys, sizeof(gKeys));

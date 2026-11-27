@@ -245,6 +245,19 @@ float Scheduler::Run(bool full_speed) {
         return 0.0f;
     }
 
+#if defined(EA_PORT_NATIVE)
+    // NFSMW_BENCHMARK: exactly one tick per frame, no waiting for real time.
+    extern bool PortBenchmarkActive();
+    if (PortBenchmarkActive() && !full_speed) {
+        mTimer = target_timer;
+        mTime += fTimeStep;
+        mTickBank = 0.0f;
+        extern int gPortLastSchedulerTicks;
+        gPortLastSchedulerTicks = 1;
+        RunNormalSpeed(1);
+        return fTimeStep;
+    }
+#endif
     if (!full_speed && time_delta_seconds < fTimeStep) {
         bThreadYield(static_cast<int>((fTimeStep - time_delta_seconds) * 1000.0f));
     }

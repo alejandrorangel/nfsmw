@@ -1,6 +1,7 @@
 #import "MetalRenderer.h"
 
 #include "MetalBridge.h"
+#import "BenchmarkMac.h"
 
 #include <atomic>
 #include <mutex>
@@ -2197,7 +2198,11 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
 
 - (void)drawInMTKView:(MTKView *)view {
     _drawableHeight = view.drawableSize.height;
-    MTLRenderPassDescriptor *pass = view.currentRenderPassDescriptor;
+    // NFSMW_BENCHMARK draws into an offscreen target instead of the drawable.
+    MTLRenderPassDescriptor *pass = PortMacBenchmarkRenderPass(view);
+    if (!pass) {
+        pass = view.currentRenderPassDescriptor;
+    }
     if (!pass) {
         return;
     }
@@ -2294,7 +2299,9 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
         [self drawScene:scene encoder:enc view:view];
     }
     [enc endEncoding];
-    [cmd presentDrawable:view.currentDrawable];
+    if (!PortMacBenchmarkEndDraw(cmd, view)) { // NFSMW_BENCHMARK presents itself
+        [cmd presentDrawable:view.currentDrawable];
+    }
     static const bool trace_gpu = getenv("NFSMW_TRACE_GPU") != nullptr;
     if (trace_gpu) {
         // GPU time per frame, averaged over 120 frames.

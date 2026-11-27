@@ -242,6 +242,8 @@ static intptr_t OpenNow(const char *name, unsigned int modeflags) {
     return HandleFromFd(fd);
 }
 
+bool PortBenchmarkActive(); // BenchmarkNative.cpp
+
 // ---------------------------------------------------------------------------
 // Asynchronous ops. Every op runs on one worker thread, in submission order
 // (the original serviced the disc the same way). An op stays alive until
@@ -327,6 +329,16 @@ void Worker() {
 }
 
 FILEOP Submit(Op *op) {
+    if (::PortBenchmarkActive()) {
+        // NFSMW_BENCHMARK: every op is done by the time it's asked for, so
+        // what's loaded by a given frame doesn't depend on the disk's timing.
+        RunOp(*op);
+        op->done = true;
+        std::lock_guard<std::mutex> lock(gOpLock);
+        int id = gNextOp++;
+        gOps[id] = op;
+        return id;
+    }
     std::call_once(gWorkerOnce, [] { std::thread(Worker).detach(); });
     std::lock_guard<std::mutex> lock(gOpLock);
     int id = gNextOp++;

@@ -5,6 +5,7 @@
 
 #import "MetalRenderer.h"
 #include "MetalBridge.h"
+#include "../Platform/Benchmark.h"
 
 #include <pthread.h>
 #include <unistd.h>
@@ -37,6 +38,7 @@ static void *GameThread(void *) {
             IsMemcardEnabled = 0;
         }
     }
+    PortBenchmarkInit(); // NFSMW_BENCHMARK: the scenario's race switches, no sound
     bMemoryInit();
     if (IsSoundEnabled != 0) {
         port_audio::StartAudioOutput();
@@ -96,6 +98,7 @@ int PortDisplayModeFits(int width, int height) {
 }
 
 void PortSetDisplayMode(int width, int height, bool vsync) {
+    vsync = PortBenchmarkVSync(vsync);
     dispatch_async(dispatch_get_main_queue(), ^{
       if (gView) {
           ((CAMetalLayer *)gView.layer).displaySyncEnabled = vsync;
@@ -141,6 +144,9 @@ void PortSetDisplayMode(int width, int height, bool vsync) {
     _window.contentView = view;
     gWindow = _window;
     gView = view;
+    if (PortBenchmarkActive()) {
+        PortMacBenchmarkSetupView((__bridge void *)view); // the game thread presents each frame
+    }
     gScreenSize = NSScreen.mainScreen ? NSScreen.mainScreen.visibleFrame.size : NSMakeSize(1280, 800);
     [_window center];
     [_window makeKeyAndOrderFront:nil];
@@ -159,6 +165,7 @@ void PortSetDisplayMode(int width, int height, bool vsync) {
 int main(int argc, const char *argv[]) {
     g_argc = argc;
     g_argv = const_cast<char **>(argv);
+    PortBenchmarkConfigure(argc, g_argv);
     @autoreleasepool {
         // No window state restoration: after a crash or a killed run, AppKit
         // would otherwise block launch with a modal "reopen windows?" prompt.
