@@ -759,7 +759,14 @@ bool FEPackageReader::ReadScriptTags(FETag *pTag, u32 Length) {
                 RunningTrackOffset += pTrack->ParamSize >> 2;
                 break;
             case Tag_FEScriptTrackOffset:
+#if defined(EA_PORT_NATIVE)
+                // The offset is the tag's first data byte: the high byte of a
+                // big-endian u16 on GameCube, the low byte on little-endian
+                // hosts (>> 8 gave 0, so position tracks wrote into Col).
+                pTrack->LongOffset = pTag->Data()[0];
+#else
                 pTrack->LongOffset = pTag->Getu16(0) >> 8;
+#endif
                 break;
             case Tag_FEScriptTrackIndex: {
                 if (pScript != nullptr) {
@@ -806,12 +813,20 @@ bool FEPackageReader::ReadScriptTags(FETag *pTag, u32 Length) {
             }
             case Tag_FEScriptTrackInterpType:
                 if (pScript != nullptr) {
+#if defined(EA_PORT_NATIVE)
+                    pTrack->InterpType = pTag->Data()[0]; // first byte (see Tag_FEScriptTrackOffset)
+#else
                     pTrack->InterpType = static_cast<u8>(pTag->Getu16(0) >> 8);
+#endif
                 }
                 break;
             case Tag_FEScriptTrackInterpAction:
                 if (pScript != nullptr) {
+#if defined(EA_PORT_NATIVE)
+                    pTrack->InterpAction = pTag->Data()[0]; // first byte (see Tag_FEScriptTrackOffset)
+#else
                     pTrack->InterpAction = static_cast<u8>(pTag->Getu16(0) >> 8);
+#endif
                 }
                 break;
             case Tag_FEScriptTrackBaseKey: {
