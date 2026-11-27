@@ -85,6 +85,7 @@ void CopyPlatInfo(TextureInfoPlatInfo *native, const char *disk) {
     std::memcpy(native->Disk, disk, PORT_DISK_TEXTURE_PLAT_INFO_SIZE);
     std::memcpy(&native->Format, disk + PORT_DISK_TEXTURE_PLAT_INFO_FORMAT_OFFSET, sizeof(native->Format));
     native->MetalTexture = nullptr;
+    native->LockedPixels = nullptr;
 }
 
 struct NativeTextureRecord {

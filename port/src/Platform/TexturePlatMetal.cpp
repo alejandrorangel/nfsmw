@@ -168,11 +168,54 @@ void TextureInfoPlatInterface::Close() {
     }
 }
 
+// PC LockImage (0x6BED80) locks the D3D texture, whose palettised and 16-bit
+// images were converted to A8R8G8B8 at load -- so callers (skin compositing)
+// always get 32-bit pixels. Converted formats get a 32-bit copy here.
 void *TextureInfoPlatInterface::LockImage(TextureLockType lock) {
-    return static_cast<TextureInfo *>(this)->ImageData;
+    TextureInfo *t = static_cast<TextureInfo *>(this);
+    TextureInfoPlatInfo *plat = this->PlatInfo;
+    FormatInfo f;
+    if (plat == nullptr || t->ImageData == nullptr || !LookupFormat(plat->Format, f) || !f.convert) {
+        return t->ImageData;
+    }
+    if (plat->LockedPixels == nullptr) {
+        size_t pixels = static_cast<size_t>(t->Width) * t->Height;
+        uint8_t *copy = static_cast<uint8_t *>(std::malloc(pixels * 4));
+        ConvertToBGRA(plat->Format, static_cast<const uint8_t *>(t->ImageData), static_cast<int>(pixels),
+                      static_cast<const uint8_t *>(t->PaletteData), copy);
+        plat->LockedPixels = copy;
+    }
+    return plat->LockedPixels;
 }
 
-void TextureInfoPlatInterface::UnlockImage(void *image_lock) {}
+// Code that writes into a locked image (car skin compositing) changes only
+// the CPU copy; push the base level back to the GPU. Lower mips would still
+// hold the old picture, so the re-made texture keeps just the base level.
+void TextureInfoPlatInterface::UnlockImage(void *image_lock) {
+    TextureInfo *t = static_cast<TextureInfo *>(this);
+    TextureInfoPlatInfo *plat = this->PlatInfo;
+    if (plat != nullptr && image_lock != nullptr && image_lock == plat->LockedPixels) {
+        std::free(plat->LockedPixels); // a converted copy: read-only use
+        plat->LockedPixels = nullptr;
+        return;
+    }
+    if (image_lock == nullptr || plat == nullptr || t->ImageData == nullptr) {
+        return;
+    }
+    FormatInfo f;
+    if (!LookupFormat(plat->Format, f) || f.block_bytes != 0 || f.convert) {
+        return; // only plain 32-bit images are composited
+    }
+    void *texture = PortMetalCreateTexture(t->Width, t->Height, 1, f.metal, t->DebugName);
+    if (texture == nullptr) {
+        return;
+    }
+    PortMetalUploadMip(texture, 0, t->Width, t->Height, t->ImageData, static_cast<size_t>(t->Width) * f.src_bpp);
+    if (plat->MetalTexture != nullptr) {
+        PortMetalReleaseTexture(plat->MetalTexture);
+    }
+    plat->MetalTexture = texture;
+}
 
 void *TextureInfoPlatInterface::LockPalette(TextureLockType lock) {
     return static_cast<TextureInfo *>(this)->PaletteData;

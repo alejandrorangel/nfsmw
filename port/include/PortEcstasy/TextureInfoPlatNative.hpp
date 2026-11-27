@@ -33,6 +33,7 @@ enum PortD3DFormat {
 struct TextureInfoPlatInfo : public bTNode<TextureInfoPlatInfo> {
     unsigned int Format;    // D3DFORMAT from the pack
     void *MetalTexture;     // retained id<MTLTexture>, or null
+    void *LockedPixels;     // 32-bit copy handed out by LockImage for converted formats
     unsigned char Disk[PORT_DISK_TEXTURE_PLAT_INFO_SIZE]; // original record, for reference
 };
 

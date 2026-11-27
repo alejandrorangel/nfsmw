@@ -387,6 +387,10 @@ bool RenderFrontEndScene() {
             materials++;
         }
         std::fprintf(stderr, "[scene] %d light materials\n", materials);
+        TextureInfo *skin_loaded = GetTextureInfo(0x530b82b0, 0, 0);
+        TextureInfo *skin_any = GetTextureInfo(0x530b82b0, 0, 1);
+        std::fprintf(stderr, "[scene] DUMMY_SKIN1 loaded %p, known %p (%dx%d comp %d)\n", (void *)skin_loaded, (void *)skin_any,
+                     skin_any ? skin_any->Width : 0, skin_any ? skin_any->Height : 0, skin_any ? skin_any->ImageCompressionType : -1);
         static bool dumped;
         if (!dumped) {
             dumped = true;
