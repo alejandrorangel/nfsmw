@@ -17,6 +17,7 @@
 #include "Speed/Indep/Src/Misc/GameFlow.hpp"
 #include "Speed/Indep/Src/World/Scenery.hpp"
 #include "Speed/Indep/Src/Gameplay/GRaceDatabase.h"
+#include "Speed/Indep/Src/World/VehicleRenderConn.h"
 #include "Speed/Indep/Src/Ecstasy/eMath.hpp"
 #include "Speed/Indep/Src/Generated/AttribSys/Classes/effects.h"
 #include "Speed/Indep/Src/Generated/AttribSys/Classes/timeofdaylighting.h"
@@ -641,6 +642,7 @@ eVisibleState eViewPlatInterface::GetVisibleStateSB(const bVector3 *position, bM
 
 // Builds this frame's 3D scene (published with the frontend).
 void RenderWorldModels(eView *view, int exc_flag); // WorldModel.cpp
+void DrawTestCars(eView *view, int reflection);     // CarRender.cpp
 EVIEWMODE eGetCurrentViewMode();
 
 namespace {
@@ -691,6 +693,28 @@ void SetupCullInfo(eView *view, SceneryCullInfo *info, unsigned int exclude) {
 void PortDebugRaceCamera(eView *view) {
     static const bool off = std::getenv("NFSMW_NO_DEBUG_CAM") != nullptr;
     Camera *camera = view->GetCamera();
+    // TODO(port): the race camera (CameraAI director / chase cam) isn't ported;
+    // follow the first vehicle from behind meanwhile.
+    if (!off && VehicleRenderConn::GetList().begin() != VehicleRenderConn::GetList().end()) {
+        VehicleRenderConn *car = *VehicleRenderConn::GetList().begin();
+        const bMatrix4 *m = car->GetBodyMatrix();
+        const bVector4 *p = m != nullptr ? &m->v3 : nullptr;
+        if (p != nullptr) {
+            bVector3 fwd(m->v0.x, m->v0.y, 0.0f);
+            float len = bLength(&fwd);
+            if (len > 0.001f) {
+                fwd.x /= len;
+                fwd.y /= len;
+            }
+            bVector3 eye(p->x - fwd.x * 7.0f, p->y - fwd.y * 7.0f, p->z + 2.4f);
+            bVector3 center(p->x + fwd.x * 4.0f, p->y + fwd.y * 4.0f, p->z + 0.8f);
+            bVector3 up(0.0f, 0.0f, 1.0f);
+            bMatrix4 cm;
+            eCreateLookAtMatrix(&cm, eye, center, up);
+            camera->SetCameraMatrix(cm, 0.0f);
+            return;
+        }
+    }
     if (off || bLength(camera->GetPosition()) > 50.0f || !GRaceDatabase::Exists()) {
         return;
     }
@@ -745,7 +769,10 @@ bool RenderWorldScene(int frame) {
     gWorldCullInfo.StuffScenery(view, 0x20);
     int scenery = gSceneDraws;
     RenderWorldModels(view, 0);
+    int models = gSceneDraws - scenery;
+    DrawTestCars(view, 0); // ___eDisplayFrame 0x6DEE44: sub_750B10 → VehicleRenderConn::RenderAll
     if (log) {
+        std::fprintf(stderr, "[world] cars %d\n", gSceneDraws - scenery - models);
         std::fprintf(stderr, "[world] camera (%.1f %.1f %.1f) dir (%.2f %.2f %.2f) draws: scenery %d, models %d (calls %d, no solid %d)\n",
                      eye->x, eye->y, eye->z, view->GetCamera()->GetDirection()->x, view->GetCamera()->GetDirection()->y,
                      view->GetCamera()->GetDirection()->z, scenery, gSceneDraws - scenery, gSceneCalls, gSceneNoSolid);
