@@ -357,9 +357,21 @@ void EndianSwapChunkHeadersRecursive(bChunk *first_chunk, bChunk *last_chunk) {
     }
 }
 
+#if defined(EA_PORT_NATIVE)
+// PC (speed.exe 1.3 @ 0x8F7DD4): on by default, cleared while an NIS preloads.
+bool TempChunksEnabled = true;
+#endif
+
 bool IsTempChunk(bChunk *chunk) {
     unsigned int chunk_id = chunk->GetID();
+#if defined(EA_PORT_NATIVE)
+    // PC IsTempChunk (0x64A9A0): texture pixel data is temporary -- the textures
+    // are created on the GPU when the pack loads, so LoadTempPermChunks keeps only
+    // the rest. A track section like 'Y0' is ~105 MB loaded but ~300 KB permanent.
+    return chunk_id == BCHUNK_TEXTURE_PACK_DATA && TempChunksEnabled;
+#else
     return false;
+#endif
 }
 
 int SplitPermTempChunks(bool split_temp, bChunk *source_chunks, int source_chunks_size, uint8 *dest_buffer, int dest_position, int depth) {

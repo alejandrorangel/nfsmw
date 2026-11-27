@@ -20,6 +20,28 @@
 
 #include <algorithm>
 
+#if defined(EA_PORT_NATIVE)
+#include <cstdio>
+#include <cstdlib>
+// NFSMW_TRACE_STREAM=1: print track section load/activate/unload/jettison events.
+static bool TraceStream() {
+    static int on = -1;
+    if (on < 0) {
+        const char *e = std::getenv("NFSMW_TRACE_STREAM");
+        on = e && *e && *e != '0';
+    }
+    return on != 0;
+}
+#define TS_TRACE(...)                                                                                                                \
+    do {                                                                                                                              \
+        if (TraceStream()) {                                                                                                          \
+            std::fprintf(stderr, "[stream] " __VA_ARGS__);                                                                           \
+        }                                                                                                                             \
+    } while (0)
+#else
+#define TS_TRACE(...)
+#endif
+
 // TODO move
 extern BOOL bMemoryTracing;
 extern int SeeulatorToolActive;
@@ -845,6 +867,8 @@ void TrackStreamer::ActivateSection(TrackStreamingSection *section) {
     section->pMemory = chunks;
     section->LoadedSize = sizeof_chunks;
     section->Status = TrackStreamingSection::ACTIVATED;
+    TS_TRACE("activate %s (%d) size %d -> %d, pool free %d largest %d\n", section->SectionName, section->SectionNumber, section->Size,
+             sizeof_chunks, bCountFreeMemory(7), bLargestMalloc(7));
     section->LoadedTime = 0;
     eAllowDuplicateSolids(false);
     SetDuplicateTextureWarning(true);
@@ -886,6 +910,7 @@ void TrackStreamer::UnloadSection(TrackStreamingSection *section) {
 
         section->UnactivatedFrameCount = 0;
         bFree(section->pMemory);
+        TS_TRACE("unload %s (%d)\n", section->SectionName, section->SectionNumber);
         section->pMemory = nullptr;
         section->Status = TrackStreamingSection::UNLOADED;
         section->LoadedTime = 0;
@@ -984,6 +1009,8 @@ int TrackStreamer::UnloadLeastRecentlyUsedSection() {
 }
 
 void TrackStreamer::JettisonSection(TrackStreamingSection *section) {
+    TS_TRACE("jettison %s (%d) size %d status %d, pool free %d\n", section->SectionName, section->SectionNumber, section->Size,
+             section->Status, bCountFreeMemory(7));
     this->AmountJettisoned += section->Size;
     this->JettisonedSections[this->NumJettisonedSections++] = section;
 
@@ -1793,6 +1820,9 @@ bool TrackStreamer::HandleMemoryAllocation() {
                 this->FreeSectionMemory();
             }
 
+#if !defined(EA_PORT_NATIVE)
+            // PC HandleMemoryAllocation (0x72FBA0) never fills holes: moving loaded
+            // sections would break the native copies and pointers made from them.
             {
                 int amount_hole_filled = this->DoHoleFilling(0);
                 total_amount_hole_filled += amount_hole_filled;
@@ -1800,6 +1830,7 @@ bool TrackStreamer::HandleMemoryAllocation() {
                     continue;
                 }
             }
+#endif
 
             this->CurrentZoneOutOfMemory = true;
             if (!this->JettisonLeastImportantSection()) {
@@ -1867,8 +1898,10 @@ bool TrackStreamer::MakeSpaceInPool(int size, bool force_unloading) {
         }
     }
 
+#if !defined(EA_PORT_NATIVE) // PC MakeSpaceInPool (0x730BF0) doesn't fill holes either
     ForceHoleFillerMethod = 0;
     this->DoHoleFilling(0x7FFFFFFF);
+#endif
     ForceHoleFillerMethod = -1;
     return size <= bLargestMalloc(7);
 }
@@ -2084,6 +2117,8 @@ void TrackStreamer::SwitchZones(short *current_zones) {
     bMemSet(this->JettisonedSections, 0, sizeof(this->JettisonedSections));
     this->AssignLoadingPriority();
     this->CalculateLoadingBacklog();
+    TS_TRACE("switch zones %d/%d: %d sections current, pool free %d largest %d\n", current_zones[0], current_zones[1],
+             this->NumCurrentStreamingSections, bCountFreeMemory(7), bLargestMalloc(7));
 }
 
 // UNSOLVED regswaps

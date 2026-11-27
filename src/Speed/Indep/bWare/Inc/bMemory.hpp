@@ -28,7 +28,11 @@ struct MemoryPoolOverrideInfo {
     const char *Name; // offset 0x0, size 0x4
 #endif
     void *Pool;                                           // offset 0x4, size 0x4
+#if defined(EA_PORT_NATIVE)
+    intptr_t Address; // a 32-bit field truncates the pool address: bFree then never finds the pool
+#else
     int32 Address;                                        // offset 0x8, size 0x4
+#endif
     int32 Size;                                           // offset 0xC, size 0x4
     void *(*Malloc)(void *, int, const char *, int, int); // offset 0x10, size 0x4
     void (*Free)(void *, void *);                         // offset 0x14, size 0x4
