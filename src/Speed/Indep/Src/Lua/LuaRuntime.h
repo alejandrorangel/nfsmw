@@ -48,6 +48,10 @@ class LuaRuntime {
 
     static void DumpStack(lua_State *luaState);
     static int HandleGlobalIndex(lua_State *luaState);
+#if defined(EA_PORT_NATIVE)
+    static unsigned int SerializeTable(lua_State *luaState, unsigned char *dest, bool session);
+    static unsigned int DeserializeTable(lua_State *luaState, const unsigned char *src, bool session);
+#endif
 
   private:
     LuaRuntime(unsigned int memPoolSize);

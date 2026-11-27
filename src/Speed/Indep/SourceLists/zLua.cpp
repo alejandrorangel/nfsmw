@@ -40,4 +40,13 @@ extern "C" {
 #include "Speed/Indep/Src/Lua/source/lparser.c"
 
 #include "Speed/Indep/Src/Lua/source/lgc.c"
+
+#if defined(EA_PORT_NATIVE)
+// The size of a full userdata (the PC reads Udata::len directly in
+// LuaRuntime's table serializer, 0x617A80).
+size_t PortLua_UserdataSize(lua_State *L, int index) {
+    void *p = lua_touserdata(L, index);
+    return p != NULL && !lua_islightuserdata(L, index) ? (reinterpret_cast<Udata *>(p) - 1)->uv.len : 0;
+}
+#endif
 }

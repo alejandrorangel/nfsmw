@@ -225,6 +225,20 @@ void DriveWithAI() {
     }
 }
 
+// The career's gameplay data (GManager::SaveGameplayData: the persistent
+// activity vars, milestones, speed traps, bins, SMS...) saved, loaded back
+// and saved again: the two saves must match.
+void CheckSaveRoundTrip() {
+    static uint8 first[0x4000];
+    static uint8 second[0x4000];
+    const bool saved = GManager::Get().SaveGameplayData(first, sizeof(first));
+    const bool loaded = saved && GManager::Get().LoadGameplayData(first, sizeof(first));
+    const bool resaved = loaded && GManager::Get().SaveGameplayData(second, sizeof(second));
+    const GManager::SavedGameplayDataHeader *header = reinterpret_cast<const GManager::SavedGameplayDataHeader *>(first);
+    std::fprintf(stderr, "[benchmark] gameplay data: save %d load %d save %d, %u persistent blocks, %u milestones, identical %d\n", saved, loaded, resaved,
+                 header->mNumPersistent, header->mNumMilestoneRecords, resaved && std::memcmp(first, second, sizeof(first)) == 0);
+}
+
 // The career event scenario: a career race's trigger in the current bin
 // (NFSMW_BENCHMARK_RACE picks one by event ID), the player warped into it;
 // the engage key (enter) brings up its info dialog, enter accepts it, the AI
@@ -388,6 +402,7 @@ void CareerEventUpdate() {
             break;
         case kEvent_BackRoaming:
             if (since >= 600) {
+                CheckSaveRoundTrip();
                 Finish();
             }
             break;
@@ -418,6 +433,7 @@ void MilestoneUpdate() {
     const bool hud = std::strstr(control, "HUD") != nullptr || *control == '\0';
     const bool sms = std::strncmp(control, "SMS_", 4) == 0;
     gEventPress = false;
+    gEventLeft = false;
     if (gBenchFrame == 120) {
         LogMilestones("free roam");
         if (ICopMgr::Exists()) {
@@ -485,8 +501,34 @@ void MilestoneUpdate() {
             LogMilestones("escaped");
             std::fprintf(stderr, "[benchmark] in the frontend (frame %d)\n", gBenchFrame);
         }
-        if (fe_frame >= 0 && gBenchFrame - fe_frame == 600) {
-            std::fprintf(stderr, "[benchmark] frontend screen: %s\n", control);
+        // In the safehouse: "Resume Free Roam" (the menu's first, focused
+        // option) back to the world, where the career's activities pick up
+        // from their saved vars.
+        static int back_frame = -1;
+        if (fe_frame >= 0 && back_frame < 0) {
+            const int in_fe = gBenchFrame - fe_frame;
+            if (in_fe == 300) {
+                std::fprintf(stderr, "[benchmark] frontend screen: %s, resume free roam\n", control);
+            }
+            gEventPress = in_fe >= 300 && in_fe < 306;
+            // "Leave the safe house?" (No has the focus): left, enter.
+            if (std::strcmp(control, "Dialog.fng") == 0) {
+                const int in_dialog = gBenchFrame - gControlFrame;
+                gEventLeft = in_dialog >= 60 && in_dialog < 66;
+                gEventPress = in_dialog >= 90 && in_dialog < 96;
+            }
+            if (!TheGameFlowManager.IsInFrontend() && TheGameFlowManager.IsInGame() && hud && in_fe > 306) {
+                back_frame = gBenchFrame;
+                std::fprintf(stderr, "[benchmark] back in free roam (frame %d)\n", gBenchFrame);
+            }
+            if (in_fe > 300 + 60 * 60) {
+                std::fprintf(stderr, "[benchmark] no free roam after the safehouse\n");
+                Finish();
+            }
+        }
+        if (back_frame >= 0 && gBenchFrame - back_frame == 600) {
+            LogMilestones("back in free roam");
+            CheckSaveRoundTrip();
             Finish();
         }
     }

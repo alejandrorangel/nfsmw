@@ -35,8 +35,15 @@ GActivity::GActivity(const Attrib::Key &activityKey)
     DeserializeVars();
 }
 
-// PS2: 0x2E18A8.
+// PS2: 0x2E18A8 / PC: 0x5F7C10. A persistent activity keeps its state and
+// vars (its block) for when it's made again (leaving gameplay, a vault
+// unloading).
 GActivity::~GActivity() {
+#if defined(EA_PORT_NATIVE)
+    if (Persistent() && LuaRuntime::Exists()) {
+        SerializeVars(true);
+    }
+#endif
     if (mRunning) {
         Suspend();
     }
@@ -388,12 +395,84 @@ void GActivity::HandleMessage(LuaMessageDeliveryInfo *deliveryInfo) {
     }
 }
 
-// PC: 0x5F9640 (SerializeVars) / 0x5F9480 (DeserializeVars). The current
+// PC: 0x5F6BA0 (SerializeVars) / 0x5F9480 (DeserializeVars). The current
 // state and the script vars are kept in GManager's object state blocks so they
 // survive unloading the vault (and saving the game).
-// TODO(port): the object state blocks (GManager::AllocObjectStateBlock /
-// GetObjectStateBlock) and LuaRuntime::SerializeTable/DeserializeTable aren't
-// ported; activities start from scratch every time.
-void GActivity::SerializeVars(bool abandonLuaTable) {}
+// The block: the current state's name hash, flags (1 running, 2 done) and the
+// table's size, then the table (LuaRuntime::SerializeTable). A "done"
+// activity keeps no vars. Activities without the Persistent attribute keep
+// session blocks (not saved), which may hold userdata.
+void GActivity::SerializeVars(bool abandonLuaTable) {
+    if (!mVarsInLuaVM) {
+        return;
+    }
+    const char *stateName = mCurrentState != nullptr ? static_cast<const char *>(mCurrentState->Name()) : "";
+    if (stateName == nullptr) {
+        stateName = "";
+    }
+    const bool done = mCurrentState != nullptr && bStrCmp(stateName, "done") == 0;
+    const unsigned int stateHash = bStrLen(stateName) != 0 ? stringhash32(stateName) : 0;
+    unsigned int flags = mRunning ? 1 : 0;
+    if (done) {
+        flags |= 2;
+    }
+    const bool persistent = Persistent();
+    lua_State *luaState = LuaRuntime::Get().GetState();
+    const int top = lua_gettop(luaState);
+    unsigned int tableBytes = 0;
+    if (!done) {
+        lua_pushstring(luaState, GetActivityName());
+        lua_gettable(luaState, LUA_REGISTRYINDEX);
+        if (lua_type(luaState, -1) == LUA_TTABLE) {
+            tableBytes = LuaRuntime::SerializeTable(luaState, nullptr, !persistent) & 0xFFFF;
+        }
+    }
+    SerializedHeader *block = static_cast<SerializedHeader *>(GManager::Get().AllocObjectStateBlock(GetCollection(), tableBytes + sizeof(SerializedHeader), persistent));
+    if (block != nullptr) {
+        block->mStateNameHash = stateHash;
+        block->mFlags = static_cast<unsigned short>(flags);
+        block->mTableBytes = static_cast<unsigned short>(tableBytes);
+        if (tableBytes != 0) {
+            LuaRuntime::SerializeTable(luaState, reinterpret_cast<unsigned char *>(block + 1), !persistent);
+        }
+    }
+    lua_settop(luaState, top);
+    if (abandonLuaTable) {
+        ClearActivityVars(luaState);
+        mVarsInLuaVM = false;
+    }
+}
 
-void GActivity::DeserializeVars() {}
+// The state and vars back from the activity's block (if it has one).
+void GActivity::DeserializeVars() {
+    SerializedHeader *block = static_cast<SerializedHeader *>(GManager::Get().GetObjectStateBlock(GetCollection()));
+    if (block == nullptr || !LuaRuntime::Exists()) {
+        return;
+    }
+    const bool gathered = mStateHandlers.empty();
+    if (gathered) {
+        GatherStatesAndHandlers();
+    }
+    if (block->mStateNameHash != 0) {
+        for (StateToHandlers::iterator it = mStateHandlers.begin(); it != mStateHandlers.end(); ++it) {
+            const char *name = it->first->Name();
+            if (name != nullptr && stringhash32(name) == block->mStateNameHash) {
+                mCurrentState = it->first;
+                break;
+            }
+        }
+    }
+    if (block->mTableBytes != 0) {
+        lua_State *luaState = LuaRuntime::Get().GetState();
+        if (LuaRuntime::DeserializeTable(luaState, reinterpret_cast<const unsigned char *>(block + 1), !Persistent()) != 0) {
+            lua_pushstring(luaState, GetActivityName());
+            lua_pushvalue(luaState, -2);
+            lua_settable(luaState, LUA_REGISTRYINDEX);
+            lua_settop(luaState, -2);
+            mVarsInLuaVM = true;
+        }
+    }
+    if (gathered) {
+        ClearStateHandlers();
+    }
+}
