@@ -293,6 +293,15 @@ class AIVehicle : public VehicleBehavior, public IVehicleAI, public AIAvoidable,
 
     void ClearGoal();
 
+#if defined(EA_PORT_NATIVE)
+  public:
+    AIGoal *PortGetGoal() const {
+        return this->mCurrentGoal;
+    }
+
+  protected:
+#endif
+
     AIGoal *GetGoal() const {
         return this->mCurrentGoal;
     }

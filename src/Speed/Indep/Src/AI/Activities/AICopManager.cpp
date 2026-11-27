@@ -61,6 +61,27 @@
 
 #define UPDATE_SUPPORT_COPS // Decl: 97
 
+#if defined(EA_PORT_NATIVE)
+#include <cstdio>
+#include <cstdlib>
+// NFSMW_TRACE_COPS=1: cop manager state each tick, cop spawns and pursuits
+static bool TraceCops() {
+    static int enabled = -1;
+    if (enabled < 0) {
+        enabled = std::getenv("NFSMW_TRACE_COPS") != nullptr;
+    }
+    return enabled != 0;
+}
+#define COP_TRACE(...)                                                                                                                               \
+    do {                                                                                                                                             \
+        if (TraceCops()) {                                                                                                                           \
+            std::fprintf(stderr, "[cops] " __VA_ARGS__);                                                                                             \
+        }                                                                                                                                            \
+    } while (0)
+#else
+#define COP_TRACE(...)
+#endif
+
 static const int PrintCopAI = 0;                  // Decl: 106
 static const float kHeavySupportDelayTime = 3.0f; // Decl: 107
 
@@ -314,6 +335,7 @@ AICopManager::AICopManager(Sim::Param params)
     }
 
     ICopMgr::mDisableCops = static_cast<int>(SkipFE != 0 && SkipFEDisableCops != 0);
+    COP_TRACE("AICopManager() SkipFE=%d disable=%d\n", SkipFE, ICopMgr::mDisableCops);
 
     this->mActionQ = new ActionQueue(0, Attrib::Hash::controller::key_debug, "AICopManager", false); // TODO magic
     this->mAttributes = nullptr;
@@ -672,6 +694,13 @@ void AICopManager::UpdateSpawnRequests() {
 void AICopManager::MessageSetAutoSpawnMode(const MSetCopAutoSpawnMode &message) {}
 
 void AICopManager::MessageSetCopsEnabled(const MSetCopsEnabled &message) {
+#if defined(EA_PORT_NATIVE)
+    COP_TRACE("MSetCopsEnabled(%d) t=%.1f\n", message.GetCopsEnabled(), Sim::GetTime());
+    // NFSMW_FORCE_COPS=1 (testing): keep cops on in races that turn them off (quick race, the prologue)
+    if (std::getenv("NFSMW_FORCE_COPS") != nullptr) {
+        return;
+    }
+#endif
     ICopMgr::mDisableCops = static_cast<int>(message.GetCopsEnabled() == false);
 }
 
@@ -2267,6 +2296,63 @@ bool AICopManager::OnTask(HSIMTASK htask, float dT) {
     ProfileNode profile_node("TODO", 0);
     this->mLockoutTimer -= dT;
     if (htask == this->mSimulateTask) {
+#if defined(EA_PORT_NATIVE)
+        static float sNextCopTrace = 0.0f;
+        if (TraceCops() && Sim::GetTime() >= sNextCopTrace) {
+            sNextCopTrace = Sim::GetTime() + 1.0f;
+            COP_TRACE("t=%.1f disable=%d lockout=%.1f nonew=%d vehicles=%d active=%d pursuits=%d reqs=%d\n", Sim::GetTime(), mDisableCops,
+                      this->mLockoutTimer, this->mNoNewPursuitsOrCops, static_cast<int>(this->mIVehicleList.size()),
+                      this->mNumActiveCopCars, static_cast<int>(this->mIPursuitList.size()), static_cast<int>(this->mSpawnRequests.size()));
+            IPlayer *player = IPlayer::First(PLAYER_LOCAL);
+            ISimable *psim = player ? player->GetSimable() : nullptr;
+            IVehicle *pveh = nullptr;
+            IPerpetrator *pperp = nullptr;
+            if (psim != nullptr) {
+                psim->QueryInterface(&pveh);
+                psim->QueryInterface(&pperp);
+            }
+            if (pveh != nullptr) {
+                const UMath::Vector3 &pp = pveh->GetPosition();
+                COP_TRACE("  player pos=(%.1f %.1f %.1f) speed=%.1f heat=%.2f\n", pp.x, pp.y, pp.z, pveh->GetSpeed(),
+                          pperp ? pperp->GetHeat() : -1.0f);
+            }
+            for (Pursuits::const_iterator iter = this->mIPursuitList.begin(); iter != this->mIPursuitList.end(); ++iter) {
+                IPursuit *ip = *iter;
+                COP_TRACE("  pursuit cops=%d target=%p insight=%d bailed=%d busted=%d untilbusted=%.2f evade=%.2f cooldown=%.1f/%.1f "
+                          "canshowbusted=%d end=%d\n",
+                          ip->GetNumCops(), ip->GetTarget() ? ip->GetTarget()->GetSimable() : nullptr, ip->IsPerpInSight(),
+                          ip->IsPursuitBailed(), ip->IsPerpBusted(), ip->TimeUntilBusted(), ip->GetEvadeLevel(),
+                          ip->GetCoolDownTimeRemaining(), ip->GetCoolDownTimeRequired(), ip->PursuitMeterCanShowBusted(), ip->ShouldEnd());
+            }
+            for (IVehicle::List::const_iterator iter = this->mIVehicleList.begin(); iter != this->mIVehicleList.end(); ++iter) {
+                IVehicle *v = *iter;
+                const UMath::Vector3 &p = v->GetPosition();
+                IVehicleAI *ai = v->GetAIVehiclePtr();
+                AIGoal *goal = ai ? static_cast<AIVehicle *>(ai)->PortGetGoal() : nullptr;
+                AIAction *action = goal ? goal->PortCurrentAction() : nullptr;
+                COP_TRACE("  %s active=%d loading=%d pos=(%.1f %.1f %.1f) speed=%.1f goal=%08x action=%s\n", v->GetVehicleName(), v->IsActive(),
+                          v->IsLoading(), p.x, p.y, p.z, v->GetSpeed(), ai ? ai->GetGoalName().GetValue() : 0,
+                          action ? action->GetActionNameString() : "-");
+            }
+        }
+        // NFSMW_FORCE_PURSUIT=<dist> (testing): once cops may spawn, spawn a pursuing cop <dist> m behind the player, the way
+        // the scripts' Game.SpawnCop does
+        static int sForcedPursuit = 0;
+        if (sForcedPursuit == 0 && std::getenv("NFSMW_FORCE_PURSUIT") != nullptr && this->VehicleSpawningEnabled(false)) {
+            IPlayer *player = IPlayer::First(PLAYER_LOCAL);
+            ISimable *psim = player ? player->GetSimable() : nullptr;
+            if (psim != nullptr && psim->GetRigidBody() != nullptr) {
+                sForcedPursuit = 1;
+                float dist = static_cast<float>(std::atof(std::getenv("NFSMW_FORCE_PURSUIT")));
+                UMath::Vector3 fwd;
+                psim->GetRigidBody()->GetForwardVector(fwd);
+                UMath::Vector3 pos = psim->GetRigidBody()->GetPosition();
+                UMath::ScaleAdd(fwd, -dist, pos, pos);
+                COP_TRACE("forcing a pursuit at t=%.1f: cop at (%.1f %.1f %.1f)\n", Sim::GetTime(), pos.x, pos.y, pos.z);
+                this->SpawnCop(pos, fwd, "copmidsize", true, false);
+            }
+        }
+#endif
         this->UpdateDebug();
         this->mPursuitRequestVehicle = nullptr;
 

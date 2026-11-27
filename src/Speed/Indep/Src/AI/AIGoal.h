@@ -44,6 +44,13 @@ class AIGoal : public UTL::COM::Factory<ISimable *, AIGoal, UCrc32> {
         }
     }
 
+#if defined(EA_PORT_NATIVE)
+    // debug traces
+    AIAction *PortCurrentAction() const {
+        return this->mCurrentAction;
+    }
+#endif
+
   protected:
     AIGoal(ISimable *isimable);
 
