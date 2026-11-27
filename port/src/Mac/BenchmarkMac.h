@@ -16,3 +16,6 @@ void PortMacBenchmarkFrameTaken(MTKView *view);
 // A draw the benchmark didn't ask for (AppKit's, e.g. at a resize): left out,
 // so it can't take a frame before the draw meant for it.
 bool PortMacBenchmarkSkipDraw(MTKView *view);
+// A command buffer of the frame being drawn besides the main one (the
+// env-map faces'): its GPU time counts for the frame.
+void PortMacBenchmarkExtraCommandBuffer(id<MTLCommandBuffer> cmd, MTKView *view);

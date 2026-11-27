@@ -187,6 +187,29 @@ static void WritePNG(id<MTLBuffer> buffer, NSUInteger width, NSUInteger height, 
     CGColorSpaceRelease(space);
 }
 
+static void AddGPUTime(id<MTLCommandBuffer> cmd, int frame) {
+    if (frame <= 0) {
+        return;
+    }
+    std::lock_guard<std::mutex> guard(gBenchLock);
+    if (gGPUms.size() <= static_cast<size_t>(frame)) {
+        gGPUms.resize(frame + 1, 0.0);
+    }
+    gGPUms[frame] += (cmd.GPUEndTime - cmd.GPUStartTime) * 1000.0;
+}
+
+void PortMacBenchmarkExtraCommandBuffer(id<MTLCommandBuffer> cmd, MTKView *view) {
+    if (gBenchView == nil || view != gBenchView) {
+        return;
+    }
+    int frame = gPendingFrame;
+    dispatch_group_enter(gBenchGroup);
+    [cmd addCompletedHandler:^(id<MTLCommandBuffer> b) {
+      AddGPUTime(b, frame);
+      dispatch_group_leave(gBenchGroup);
+    }];
+}
+
 bool PortMacBenchmarkEndDraw(id<MTLCommandBuffer> cmd, MTKView *view) {
     if (gBenchView == nil || view != gBenchView) {
         return false;
@@ -224,13 +247,7 @@ bool PortMacBenchmarkEndDraw(id<MTLCommandBuffer> cmd, MTKView *view) {
     gEncoded = true;
     dispatch_group_enter(gBenchGroup);
     [cmd addCompletedHandler:^(id<MTLCommandBuffer> b) {
-      if (frame > 0) {
-          std::lock_guard<std::mutex> guard(gBenchLock);
-          if (gGPUms.size() <= static_cast<size_t>(frame)) {
-              gGPUms.resize(frame + 1, 0.0);
-          }
-          gGPUms[frame] += (b.GPUEndTime - b.GPUStartTime) * 1000.0;
-      }
+      AddGPUTime(b, frame);
       if (pixels) {
           // Off the GPU's completion thread, so the next frames don't wait.
           dispatch_group_async(gBenchGroup, dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{

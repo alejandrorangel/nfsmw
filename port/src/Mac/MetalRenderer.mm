@@ -544,6 +544,24 @@ int PortMetalFEEndFrame() {
     return gFEPublished.quads;
 }
 
+// What drawDraws reads of the renderer's per-frame state, taken when a list
+// is encoded: the pass (sample count, colour write mask, ...), the sky, the
+// shadow map and the reflection bound then. The env-map faces are encoded
+// on a worker thread with what these were when they started (the last
+// frame's shadow map and reflection, as on the main thread before).
+struct PassState {
+    int samples, mask;
+    bool main_scene, skip_sky_alpha, only_sky_alpha, env_face;
+    PortSky sky;
+    id<MTLTexture> sky_misc[3];
+    bool shadow_valid;
+    id<MTLTexture> shadow_depth, shadow_colour;
+    NSUInteger shadow_size;
+    float shadow_transform[16];
+    float inv_shadow_strength;
+    id<MTLTexture> refl_bound;
+};
+
 // ---------------------------------------------------------------------------
 // Renderer. Draws the latest frontend frame; until the game has drawn one, it
 // shows the most recently loaded game texture, centred
@@ -1353,6 +1371,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     // copied) when the game has published a new one, else drawn again.
     Frame3D _scene;
     uint64_t _sceneSerial;
+    dispatch_group_t _envGroup; // the env-map faces' encode (drawEnvFaces)
 }
 
 - (instancetype)initWithView:(MTKView *)view {
@@ -1360,6 +1379,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         _device = view.device;
         gDevice = _device;
         _queue = [_device newCommandQueue];
+        _envGroup = dispatch_group_create();
         view.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
         view.depthStencilPixelFormat = MTLPixelFormatDepth32Float_Stencil8;
         view.preferredFramesPerSecond = 60;
@@ -1549,11 +1569,11 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
 - (void)mtkView:(MTKView *)view drawableSizeWillChange:(CGSize)size {
 }
 
-// The mesh pipeline for a blend mode in the current pass (_passSamples,
-// _passMask).
-- (id<MTLRenderPipelineState>)meshPipeline:(int)mode {
-    int si = _passSamples >= 8 ? 3 : _passSamples >= 4 ? 2 : _passSamples >= 2 ? 1 : 0;
-    int mask = _passMask;
+// The mesh pipeline for a blend mode in a pass of this sample count and
+// colour write mask. Made on first use (main thread); the 1-sample, all
+// channels ones (the env-map faces', from a worker thread) always exist.
+- (id<MTLRenderPipelineState>)meshPipeline:(int)mode samples:(int)samples mask:(int)mask {
+    int si = samples >= 8 ? 3 : samples >= 4 ? 2 : samples >= 2 ? 1 : 0;
     if (si == 0 && mask == 0) {
         return _meshPipelines[mode];
     }
@@ -1711,16 +1731,43 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     return nil;
 }
 
+// drawDraws' state now (see PassState).
+- (PassState)passState {
+    PassState st;
+    st.samples = _passSamples;
+    st.mask = _passMask;
+    st.main_scene = _passMainScene;
+    st.skip_sky_alpha = _skipSkyAlpha;
+    st.only_sky_alpha = _onlySkyAlpha;
+    st.env_face = _drawingEnvFace;
+    st.sky = _sky;
+    for (int i = 0; i < 3; i++) {
+        st.sky_misc[i] = _skyMisc[i];
+    }
+    st.shadow_valid = _shadowValid;
+    st.shadow_depth = _shadowDepth;
+    st.shadow_colour = _shadowColour;
+    st.shadow_size = _shadowSize;
+    memcpy(st.shadow_transform, _shadowTransform, sizeof(st.shadow_transform));
+    st.inv_shadow_strength = _invShadowStrength;
+    st.refl_bound = _reflBound;
+    return st;
+}
+
 - (void)drawScene:(const Frame3D &)scene encoder:(id<MTLRenderCommandEncoder>)enc view:(MTKView *)view {
     CGSize size = view.drawableSize;
     [self drawDraws:scene.draws viewProj:scene.view_proj eye:scene.eye fog:scene.fog envMap:[self envMapFor:scene]
-              width:size.width height:size.height encoder:enc];
+              width:size.width height:size.height encoder:enc state:[self passState]];
 }
 
 // PC ___eDisplayFrame 0x6DE64C: with the env map on, in game, each active
 // env-map view is drawn into its cube face (cleared black, sub_6BD3B0)
 // before the player view. 256x256 (0x8F8FF4), A8R8G8B8 (0x8F8FF8).
-- (void)drawEnvFaces:(const Frame3D &)scene commandBuffer:(id<MTLCommandBuffer>)cmd {
+// The faces are encoded on a worker thread into their own command buffer,
+// enqueued now (so the GPU runs them before this frame's other passes, as
+// before) while the main thread encodes the rest; drawInMTKView waits for it
+// (_envGroup) before the next frame is taken.
+- (void)drawEnvFaces:(const Frame3D &)scene view:(MTKView *)view {
     if (scene.env_mode != PORT_ENVMAP_DYNAMIC || !_meshPipelines[0]) {
         return;
     }
@@ -1740,36 +1787,55 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         _envDepth = [_device newTextureWithDescriptor:dd];
         _envFacesDrawn = 0;
     }
+    unsigned faces = 0;
     for (int face = 0; face < 6; face++) {
-        const EnvFace3D &f = scene.env_faces[face];
-        if (!f.active) {
-            continue;
+        if (scene.env_faces[face].active) {
+            faces |= 1u << face;
         }
-        MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
-        rp.colorAttachments[0].texture = _envCube;
-        rp.colorAttachments[0].slice = face;
-        rp.colorAttachments[0].loadAction = MTLLoadActionClear;
-        rp.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
-        rp.colorAttachments[0].storeAction = MTLStoreActionStore;
-        rp.depthAttachment.texture = _envDepth;
-        rp.depthAttachment.loadAction = MTLLoadActionClear;
-        rp.depthAttachment.clearDepth = 1.0;
-        rp.depthAttachment.storeAction = MTLStoreActionDontCare;
-        rp.stencilAttachment.texture = _envDepth;
-        rp.stencilAttachment.loadAction = MTLLoadActionClear;
-        rp.stencilAttachment.storeAction = MTLStoreActionDontCare;
-        id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rp];
-        enc.label = @"EnvMap face";
-        _drawingEnvFace = true;
-        [self drawDraws:f.draws viewProj:f.view_proj eye:f.eye fog:scene.fog envMap:nil width:size height:size encoder:enc];
-        _drawingEnvFace = false;
-        // ___eDisplayFrame 0x6DE7F4: the face's world (type 1), pool and car
-        // flares under IDI_WORLDPRELIT_FX.
-        PortMetalPrelitDraw((__bridge void *)enc, (__bridge void *)_device, f.view_proj, 1, (int)_colorFormat, (int)_depthFormat,
-                            PORT_PRELIT_PART_ENV_FACE + face);
-        [enc endEncoding];
-        _envFacesDrawn |= 1u << face;
     }
+    if (faces == 0) {
+        return;
+    }
+    _envFacesDrawn |= faces;
+    id<MTLCommandBuffer> cmd = [_queue commandBuffer];
+    cmd.label = @"EnvMap faces";
+    [cmd enqueue];
+    PortMacBenchmarkExtraCommandBuffer(cmd, view);
+    _drawingEnvFace = true;
+    const PassState st = [self passState];
+    _drawingEnvFace = false;
+    const Frame3D *frame = &scene; // _scene: not swapped until the faces are done
+    id<MTLTexture> cube = _envCube, depth = _envDepth;
+    dispatch_group_async(_envGroup, dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), ^{
+      for (int face = 0; face < 6; face++) {
+          const EnvFace3D &f = frame->env_faces[face];
+          if (!f.active) {
+              continue;
+          }
+          MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+          rp.colorAttachments[0].texture = cube;
+          rp.colorAttachments[0].slice = face;
+          rp.colorAttachments[0].loadAction = MTLLoadActionClear;
+          rp.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
+          rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+          rp.depthAttachment.texture = depth;
+          rp.depthAttachment.loadAction = MTLLoadActionClear;
+          rp.depthAttachment.clearDepth = 1.0;
+          rp.depthAttachment.storeAction = MTLStoreActionDontCare;
+          rp.stencilAttachment.texture = depth;
+          rp.stencilAttachment.loadAction = MTLLoadActionClear;
+          rp.stencilAttachment.storeAction = MTLStoreActionDontCare;
+          id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rp];
+          enc.label = @"EnvMap face";
+          [self drawDraws:f.draws viewProj:f.view_proj eye:f.eye fog:frame->fog envMap:nil width:size height:size encoder:enc state:st];
+          // ___eDisplayFrame 0x6DE7F4: the face's world (type 1), pool and car
+          // flares under IDI_WORLDPRELIT_FX.
+          PortMetalPrelitDraw((__bridge void *)enc, (__bridge void *)_device, f.view_proj, 1, (int)_colorFormat, (int)_depthFormat,
+                              PORT_PRELIT_PART_ENV_FACE + face);
+          [enc endEncoding];
+      }
+      [cmd commit];
+    });
 }
 
 // PC sub_6E54E0 / sub_6E44C0: the shadow view (render target type 4,
@@ -1883,7 +1949,8 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
 }
 
 - (void)drawDraws:(const std::vector<Draw3D> &)draws viewProj:(const float *)view_proj eye:(const float *)eye fog:(const PortWorldFog &)fog
-           envMap:(id<MTLTexture>)env_map width:(double)width height:(double)height encoder:(id<MTLRenderCommandEncoder>)enc {
+           envMap:(id<MTLTexture>)env_map width:(double)width height:(double)height encoder:(id<MTLRenderCommandEncoder>)enc
+            state:(const PassState &)st {
     if (!draws.empty() && _meshPipelines[0]) {
         // The camera's x axis: view_proj = view * proj with proj diagonal in
         // x (ViewProjectionFor), so view column 0 is view_proj column 0 / sx.
@@ -1924,14 +1991,14 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
             float scroll;
             float pad[3];
             float intensity[4];
-        } sky = {_sky.cloud_scroll, {0, 0, 0},
-                 {_sky.cloud_intensity[0], _sky.cloud_intensity[1], _sky.cloud_intensity[2], _sky.cloud_intensity[3]}};
+        } sky = {st.sky.cloud_scroll, {0, 0, 0},
+                 {st.sky.cloud_intensity[0], st.sky.cloud_intensity[1], st.sky.cloud_intensity[2], st.sky.cloud_intensity[3]}};
         [enc setVertexBytes:&sky length:sizeof(sky) atIndex:3];
         [enc setFragmentSamplerState:_meshSamplers[gTextureFiltering.load() % 3] atIndex:0];
         [enc setFragmentTexture:(env_map ? env_map : _blackCube) atIndex:1];
-        [enc setFragmentTexture:(_shadowValid ? _shadowDepth : _shadowDepthLit) atIndex:4];
-        [enc setFragmentTexture:(_shadowValid ? _shadowColour : _black) atIndex:5];
-        [enc setFragmentTexture:(_reflBound ? _reflBound : _white) atIndex:9];
+        [enc setFragmentTexture:(st.shadow_valid ? st.shadow_depth : _shadowDepthLit) atIndex:4];
+        [enc setFragmentTexture:(st.shadow_valid ? st.shadow_colour : _black) atIndex:5];
+        [enc setFragmentTexture:(st.refl_bound ? st.refl_bound : _white) atIndex:9];
         struct Bound {
             id<MTLRenderPipelineState> pipeline;
             id<MTLDepthStencilState> depth;
@@ -1969,13 +2036,13 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         // LESSEQUAL after the world, so the frame's alpha (cleared to 0, the
         // world drawn with ColorWriteMode 7) holds the sky's: what over
         // bright's downsample (IDI_FILTER_FX p5) scales by.
-        const int saved_mask = _passMask;
-        for (int blended = _onlySkyAlpha ? 2 : 0; blended < (_passMainScene && !_skipSkyAlpha ? 3 : 2); blended++) {
+        int mask = st.mask;
+        for (int blended = st.only_sky_alpha ? 2 : 0; blended < (st.main_scene && !st.skip_sky_alpha ? 3 : 2); blended++) {
             if (blended == 2) {
-                _passMask = 2;
+                mask = 2;
             }
             for (int m = 0; m < 3; m++) {
-                pipelines[m] = [self meshPipeline:m];
+                pipelines[m] = [self meshPipeline:m samples:st.samples mask:mask];
             }
             for (const Draw3D &d : draws) {
                 int mode = (d.flags & PORT_3D_ADDITIVE) ? 2 : (d.flags & PORT_3D_ALPHA_BLEND) ? 1 : 0;
@@ -2006,7 +2073,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 } c = {};
                 c.stride = d.vertex_stride;
                 c.effect = d.effect;
-                if (_drawingEnvFace) {
+                if (st.env_face) {
                     // eViewPlatInterface::Render 0x6DA9B0: in views other than
                     // the main one (render target type != 0), WORLD draws with
                     // WORLDNOFOG (8) and WORLDREFLECT / WORLDNORMALMAP with
@@ -2022,7 +2089,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 if (d.effect == 22) {
                     // sub_6C6630: ShadowColor.w = 0x8FAE68, x 2 off the main
                     // render target.
-                    c.eye[3] = d.material[0] * (_drawingEnvFace ? 2.0f : 1.0f);
+                    c.eye[3] = d.material[0] * (st.env_face ? 2.0f : 1.0f);
                 }
                 memcpy(c.view_x, view_x, sizeof(view_x));
                 static const char *shade_env = getenv("NFSMW_SHADE");
@@ -2056,15 +2123,15 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 // ...), with ShadowTransform = world x the shadow view's
                 // texture matrix (sub_6C82B0).
                 c.shadow_level = d.shadow_level;
-                c.shadow_map = _shadowValid ? 1 : 0;
-                c.shadow_texel = 1.0f / (float)(_shadowSize ? _shadowSize : 1024);
-                c.inv_shadow = _invShadowStrength;
+                c.shadow_map = st.shadow_valid ? 1 : 0;
+                c.shadow_texel = 1.0f / (float)(st.shadow_size ? st.shadow_size : 1024);
+                c.inv_shadow = st.inv_shadow_strength;
                 if (d.shadow_level != 0) {
                     for (int i = 0; i < 4; i++) {
                         for (int j = 0; j < 4; j++) {
                             float sum = 0;
                             for (int k = 0; k < 4; k++) {
-                                sum += d.world[i * 4 + k] * _shadowTransform[k * 4 + j];
+                                sum += d.world[i * 4 + k] * st.shadow_transform[k * 4 + j];
                             }
                             c.shadow[i * 4 + j] = sum;
                         }
@@ -2118,7 +2185,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 if (c.effect == 19 && !bound.sky_bound) {
                     [enc setFragmentBytes:&sky length:sizeof(sky) atIndex:5];
                     for (int i = 0; i < 3; i++) {
-                        [enc setFragmentTexture:(_skyMisc[i] ? _skyMisc[i] : _black) atIndex:6 + i];
+                        [enc setFragmentTexture:(st.sky_misc[i] ? st.sky_misc[i] : _black) atIndex:6 + i];
                     }
                     bound.sky_bound = true;
                 }
@@ -2146,7 +2213,6 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 }
             }
         }
-        _passMask = saved_mask;
     }
 }
 
@@ -2443,7 +2509,7 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
         enc.label = @"Road reflection";
         _drawingEnvFace = true; // a non-main render target: the NOFOG effects
         [self drawDraws:scene.reflection_draws viewProj:scene.reflection_view_proj eye:scene.eye fog:scene.fog
-                 envMap:[self envMapFor:scene] width:w height:h encoder:enc];
+                 envMap:[self envMapFor:scene] width:w height:h encoder:enc state:[self passState]];
         _drawingEnvFace = false;
         [enc endEncoding];
         _reflValid = true;
@@ -2731,7 +2797,7 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
     for (int i = 0; i < 3; i++) {
         _skyMisc[i] = scene.sky_misc[i];
     }
-    [self drawEnvFaces:scene commandBuffer:cmd];
+    [self drawEnvFaces:scene view:view];
     [self drawShadowMap:scene commandBuffer:cmd];
     if (scene.shadow_transform_set) {
         memcpy(_shadowTransform, scene.shadow_transform, sizeof(_shadowTransform));
@@ -2821,6 +2887,9 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
         }];
     }
     [cmd commit];
+    // The faces' worker reads _scene and the prelit frame: done before the
+    // next frame is taken.
+    dispatch_group_wait(_envGroup, DISPATCH_TIME_FOREVER);
 }
 
 @end

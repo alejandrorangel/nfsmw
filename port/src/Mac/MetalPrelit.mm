@@ -271,6 +271,10 @@ void PortMetalPrelitDraw(void *encoder, void *device, const float view_proj[16],
     }
     id<MTLRenderCommandEncoder> enc = (__bridge id<MTLRenderCommandEncoder>)encoder;
     id<MTLDevice> dev = (__bridge id<MTLDevice>)device;
+    // The env-map faces' worker and the main thread draw at once: the
+    // pipelines are made under a lock.
+    static std::mutex setup_lock;
+    std::unique_lock<std::mutex> setup(setup_lock);
     if (!Setup(dev, (MTLPixelFormat)colour_format, (MTLPixelFormat)depth_format)) {
         return;
     }
