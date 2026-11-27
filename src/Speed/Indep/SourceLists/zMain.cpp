@@ -21,6 +21,8 @@
 #include "Speed/Indep/Src/Generated/Events/EResetProps.cpp"
 
 #include "Speed/Indep/Src/Generated/Events/EReloadHud.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EGTriggerInternal.cpp"
 #endif
 
 #include "Speed/Indep/Src/Input/Common/action.cpp"

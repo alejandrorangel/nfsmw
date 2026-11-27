@@ -55,9 +55,10 @@ GTrigger::GTrigger(const Attrib::Key &triggerKey)
             height = 50.0f;
             length = 1.0f;
         } else {
-            width = dims->x;
-            height = dims->y;
-            length = dims->z;
+            // vault axes: PC takes width, height, length from y, z, x
+            width = dims->y;
+            height = dims->z;
+            length = dims->x;
         }
         shape = 1;
         radius = UMath::Sqrt(width * 0.5f * (width * 0.5f) + length * 0.5f * (length * 0.5f));

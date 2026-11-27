@@ -1183,8 +1183,16 @@ void PVehicle::DoStaging(float dT) {
 // speed.exe 1.3: 0x686060
 void PVehicle::OnTaskSimulate(float dT) {
 #if defined(EA_PORT_NATIVE)
-    if (TraceVehicle() && mDriverClass == DRIVER_HUMAN) {
-        static float accum = 0.0f;
+    if (TraceVehicle() && (mDriverClass == DRIVER_HUMAN || mDriverClass == DRIVER_RACER)) {
+        // one line a second per vehicle (the player and the racers)
+        static const void *owners[8];
+        static float accums[8];
+        int slot = 0;
+        while (slot < 7 && owners[slot] != this && owners[slot] != nullptr) {
+            slot++;
+        }
+        owners[slot] = this;
+        float &accum = accums[slot];
         accum += dT;
         if (accum >= 1.0f) {
             accum = 0.0f;
@@ -1192,9 +1200,9 @@ void PVehicle::OnTaskSimulate(float dT) {
             UMath::Vector3 v;
             GetLinearVelocity(v);
             const InputControls *in = mInput ? &mInput->GetControls() : nullptr;
-            VEHICLE_TRACE("player pos %.2f %.2f %.2f vel %.2f %.2f %.2f speed %.2f wheels %u gas %.2f brake %.2f steer %.2f gear %d rpm %.0f player %d forcestop %d staging %d\n",
-                          p.x, p.y, p.z, v.x, v.y, v.z, mSpeed, mWheelsOnGround, in ? in->fGas : 0.0f, in ? in->fBrake : 0.0f,
-                          in ? in->fSteering : 0.0f, mTranny ? (int)mTranny->GetGear() : -1, mEngine ? mEngine->GetRPM() : 0.0f, GetPlayer() != nullptr, mForceStop, mStaging);
+            VEHICLE_TRACE("%s%d pos %.2f %.2f %.2f vel %.2f %.2f %.2f speed %.2f wheels %u gas %.2f brake %.2f steer %.2f gear %d rpm %.0f player %d forcestop %d staging %d mode %d\n",
+                          mDriverClass == DRIVER_HUMAN ? "player" : "racer", slot, p.x, p.y, p.z, v.x, v.y, v.z, mSpeed, mWheelsOnGround, in ? in->fGas : 0.0f, in ? in->fBrake : 0.0f,
+                          in ? in->fSteering : 0.0f, mTranny ? (int)mTranny->GetGear() : -1, mEngine ? mEngine->GetRPM() : 0.0f, GetPlayer() != nullptr, mForceStop, mStaging, (int)mPhysicsMode);
         }
     }
 #endif

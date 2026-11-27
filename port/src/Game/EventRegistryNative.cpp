@@ -4,6 +4,7 @@
 // events: gEventKeyOrderTable (0x8A5418, event IDs in Eytzinger order) and
 // gMakeEventCallbacks (0x8F5F40). Only a few events are reconstructed so far;
 // this table lists those. Unknown IDs return null and callers skip them.
+#include "Speed/Indep/Src/Generated/Events/EGTriggerInternal.hpp"
 #include "Speed/Indep/Src/Generated/Events/ESimulate.hpp"
 #include "Speed/Indep/Src/Main/Event.h"
 #include "Speed/Indep/Libs/Support/Miscellaneous/StringHash.h"
@@ -17,6 +18,7 @@ struct EventEntry {
 
 const EventEntry kEvents[] = {
     {0x522D67DB, ESimulate_MakeEvent_Callback},
+    {0xC34649C0, EGTriggerInternal_MakeEvent_Callback},
 };
 
 } // namespace

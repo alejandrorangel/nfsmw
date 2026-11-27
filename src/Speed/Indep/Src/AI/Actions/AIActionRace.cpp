@@ -18,6 +18,11 @@
 #include "Speed/Indep/bWare/Inc/bMath.hpp"
 #include "Speed/Indep/bWare/Inc/bTypes.hpp"
 
+#if defined(EA_PORT_NATIVE)
+#include <cstdio>
+#include <cstdlib>
+#endif
+
 // TODO use these
 static const bool bDrawNavTrail = false;        // size: 0x1, Decl: 37
 static const bool bDrawSpeedLimits = false;     // size: 0x1, Decl: 38
@@ -1068,6 +1073,35 @@ void AIActionRace::Update(float dT) {
 
     this->mIInput->SetControlNOS(want_nos);
     this->GetAI()->DoDriving(7);
+#if defined(EA_PORT_NATIVE)
+    // NFSMW_TRACE_AI=1: each racer's race action state once a second
+    static int trace = -1;
+    if (trace < 0) {
+        trace = std::getenv("NFSMW_TRACE_AI") != nullptr;
+    }
+    if (trace) {
+        static const void *owners[8];
+        static float accums[8];
+        int slot = 0;
+        while (slot < 7 && owners[slot] != this && owners[slot] != nullptr) {
+            slot++;
+        }
+        owners[slot] = this;
+        accums[slot] += dT;
+        if (accums[slot] >= 1.0f) {
+            accums[slot] = 0.0f;
+            AITarget *target = this->GetAI()->GetTarget();
+            const UMath::Vector3 &tp = target->GetPosition();
+            std::fprintf(stderr,
+                         "[ai] %d pos %.0f %.0f %.0f speed %.1f limit %.1f potential %.1f top %.1f accel %.2f curv %.4f skill %.2f navtype %d "
+                         "finding %d deadend %d nav %.0f %.0f %.0f occl %.0f %.0f %.0f target %d %.0f %.0f %.0f stop %d pursuit %d\n",
+                         slot, car_position.x, car_position.y, car_position.z, actual_speed, this->fSpeedLimit, this->fPotentialSpeed,
+                         this->mTopSpeed, potential_acceleration, curvature, skill, (int)road_nav->GetNavType(), road_nav->FindingPath(),
+                         road_nav->HitDeadEnd(), nav_position.x, nav_position.y, nav_position.z, occluded_position.x, occluded_position.y,
+                         occluded_position.z, target->IsValid(), tp.x, tp.y, tp.z, need_to_stop, this->bIsPursuitMode);
+        }
+    }
+#endif
 }
 
 void AIActionRace::OnDebugDraw() {}
