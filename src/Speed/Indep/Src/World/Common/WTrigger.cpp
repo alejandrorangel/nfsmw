@@ -136,7 +136,7 @@ void WTrigger::UpdateBox(const UMath::Matrix4 &mat, const UMath::Vector3 &dimens
     this->fMatRow0Width.w = dimension.x + dimension.x;
     this->fMatRow2Length.w = dimension.z + dimension.z;
 
-    WGridManagedDynamicElem::AddElem(&oldPosRad, &this->fPosRadius, WGrid_kTrigger, reinterpret_cast<uintptr_t>(this));
+    WGridManagedDynamicElem::AddElem(&oldPosRad, &this->fPosRadius, WGrid_kTrigger, WCollisionAssets::TriggerTag(this));
 }
 
 bool WTrigger::UpdatePos(const UMath::Vector3 &newPos, uintptr_t triggerInd) {

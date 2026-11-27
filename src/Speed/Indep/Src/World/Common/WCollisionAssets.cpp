@@ -7,6 +7,9 @@
 #include "Speed/Indep/Src/World/WCollisionPack.h"
 #include "Speed/Indep/Src/World/WGridManagedDynamicElem.h"
 #include "Speed/Indep/Src/World/WTrigger.h"
+#if defined(EA_PORT_NATIVE)
+#include "PortPtr32.h"
+#endif
 #include "Speed/Indep/bWare/Inc/bWare.hpp"
 
 #define COLLISION_PACK_MAX (2700)
@@ -282,19 +285,33 @@ WCollisionObject *WCollisionAssets::CreateObject(const UMath::Vector3 &dim, cons
     return obj;
 }
 
+// The world grid keeps element tags in 32 bits (WGridNodeElemTag); on PC a
+// trigger's tag is its pointer. Natively the pointer is encoded (PortPtr32).
+uintptr_t WCollisionAssets::TriggerTag(const WTrigger *trig) {
+#if defined(EA_PORT_NATIVE)
+    return PortPtr32Encode(trig);
+#else
+    return reinterpret_cast<uintptr_t>(trig);
+#endif
+}
+
 WTrigger &WCollisionAssets::Trigger(uintptr_t tag) const {
+#if defined(EA_PORT_NATIVE)
+    return *static_cast<WTrigger *>(PortPtr32Decode(static_cast<uint32_t>(tag)));
+#else
     return *reinterpret_cast<WTrigger *>(tag);
+#endif
 }
 
 void WCollisionAssets::AddTrigger(WTrigger *trig) {
-    trig->UpdatePos(UMath::Vector4To3(trig->fPosRadius), reinterpret_cast<uintptr_t>(trig));
+    trig->UpdatePos(UMath::Vector4To3(trig->fPosRadius), TriggerTag(trig));
 }
 
 // UNSOLVED gotta use trigger->fFlags
 void WCollisionAssets::RemoveTrigger(WTrigger *trigger) {
     UMath::Vector4 oldPosRad = trigger->fPosRadius;
 
-    WGridManagedDynamicElem::AddElem(&oldPosRad, nullptr, WGrid_kTrigger, reinterpret_cast<uintptr_t>(trigger));
+    WGridManagedDynamicElem::AddElem(&oldPosRad, nullptr, WGrid_kTrigger, TriggerTag(trigger));
     if (trigger && ((static_cast<unsigned int>(reinterpret_cast<unsigned char *>(trigger)[0x12]) << 8) & 0x100) == 0) {
         delete trigger;
     }

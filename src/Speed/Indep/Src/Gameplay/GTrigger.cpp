@@ -13,21 +13,12 @@
 static const unsigned int kEGTriggerInternalID = 0xc34649c0;
 
 // Puts the trigger in (or takes it out of) the world grid.
-// TODO(port): the grid keeps trigger tags in 32 bits (WGridNodeElemTag) and
-// WCollisionAssets::Trigger turns a tag straight back into a pointer, so a
-// 64-bit GTrigger can't be registered yet (WTriggerManager::ProcessRB faults
-// on the truncated pointer). Until the world side encodes them, gameplay
-// triggers never fire (no MTriggerEnter from the world).
 static void AddWorldTrigger(WTrigger *trigger) {
-#if !defined(EA_PORT_NATIVE)
     WCollisionAssets::Get().AddTrigger(trigger);
-#endif
 }
 
 static void RemoveWorldTrigger(WTrigger *trigger) {
-#if !defined(EA_PORT_NATIVE)
     WCollisionAssets::Get().RemoveTrigger(trigger);
-#endif
 }
 
 // PC: 0x601790. The world trigger is a box (Dimensions, or Width by 1m) or a

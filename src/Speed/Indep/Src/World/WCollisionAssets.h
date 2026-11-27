@@ -40,6 +40,7 @@ class WCollisionAssets {
     WGridNodeElemTag AddObject(WCollisionObject *obj);
     WCollisionObject *CreateObject(const UMath::Vector3 &dim, const UMath::Matrix4 &mat, bool dynamicFlag);
     WTrigger &Trigger(uintptr_t tag) const;
+    static uintptr_t TriggerTag(const WTrigger *trig);
     void AddTrigger(WTrigger *trig);
     void RemoveTrigger(WTrigger *trigger);
     // bool FindElemIndex(WGridNode_ElemType type, const void *ptr, WGridNodeElemTag &ind);
