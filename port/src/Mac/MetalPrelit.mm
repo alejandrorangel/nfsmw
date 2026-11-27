@@ -30,7 +30,12 @@ struct Frame {
 
 Frame gBuilding;
 Frame gPublished;
+bool gPublishedNew; // gPublished hasn't been taken yet
 std::mutex gLock;
+// Render thread: the frame being drawn (PortMetalPrelitTakeFrame) and its
+// vertices, uploaded once for all of its PortMetalPrelitDraw calls.
+Frame gDrawing;
+id<MTLBuffer> gDrawingVertices;
 
 // IDI_PARTICLES_FX technique #0 (vs #5, ps #4 'mul_x2 r0, t0, v0') and
 // IDI_WORLDPRELIT_FX technique #0 (vs #1, ps #0, the same): position times
@@ -227,8 +232,7 @@ void PortMetalPrelitAddQuads(void *texture, PortPrelitBlend blend, uint32_t flag
 }
 
 bool PortMetalPrelitHasPart(int part) {
-    std::lock_guard<std::mutex> guard(gLock);
-    for (const Batch &b : gPublished.batches) {
+    for (const Batch &b : gDrawing.batches) {
         if (b.part == part) {
             return true;
         }
@@ -239,30 +243,35 @@ bool PortMetalPrelitHasPart(int part) {
 void PortMetalPrelitPublish() {
     std::lock_guard<std::mutex> guard(gLock);
     std::swap(gPublished, gBuilding);
+    gPublishedNew = true;
+}
+
+void PortMetalPrelitTakeFrame(void *device) {
+    std::lock_guard<std::mutex> guard(gLock);
+    if (!gPublishedNew) {
+        return; // no new frame: draw this one again
+    }
+    std::swap(gDrawing, gPublished); // the game clears what it gets back (PortMetalPrelitBeginFrame)
+    gPublishedNew = false;
+    gDrawingVertices = nil;
+    if (!gDrawing.vertices.empty()) {
+        gDrawingVertices = [(__bridge id<MTLDevice>)device newBufferWithBytes:gDrawing.vertices.data()
+                                                                       length:gDrawing.vertices.size() * sizeof(PortPrelitVertex)
+                                                                      options:MTLResourceStorageModeShared];
+    }
 }
 
 void PortMetalPrelitDraw(void *encoder, void *device, const float view_proj[16], int samples, int colour_format, int depth_format,
                          int part, void *shadow_map, const float shadow_transform[16]) {
-    std::vector<PortPrelitVertex> vertices;
-    std::vector<Batch> batches;
-    {
-        std::lock_guard<std::mutex> guard(gLock);
-        for (const Batch &b : gPublished.batches) {
-            if (part < 0 ? b.part <= 1 : b.part == part) {
-                batches.push_back(b);
-            }
-        }
-        if (batches.empty()) {
-            return;
-        }
-        vertices = gPublished.vertices;
+    auto in_part = [part](const Batch &b) { return part < 0 ? b.part <= 1 : b.part == part; };
+    if (gDrawingVertices == nil || std::none_of(gDrawing.batches.begin(), gDrawing.batches.end(), in_part)) {
+        return;
     }
     id<MTLRenderCommandEncoder> enc = (__bridge id<MTLRenderCommandEncoder>)encoder;
     id<MTLDevice> dev = (__bridge id<MTLDevice>)device;
     if (!Setup(dev, (MTLPixelFormat)colour_format, (MTLPixelFormat)depth_format)) {
         return;
     }
-    id<MTLBuffer> vb = [dev newBufferWithBytes:vertices.data() length:vertices.size() * sizeof(PortPrelitVertex) options:MTLResourceStorageModeShared];
     struct {
         float view_proj[16];
         float shadow[16];
@@ -278,9 +287,12 @@ void PortMetalPrelitDraw(void *encoder, void *device, const float view_proj[16],
         sm = nil;
     }
     [enc setCullMode:MTLCullModeNone];
-    [enc setVertexBuffer:vb offset:0 atIndex:0];
+    [enc setVertexBuffer:gDrawingVertices offset:0 atIndex:0];
     [enc setFragmentSamplerState:gP.sampler atIndex:0];
-    for (const Batch &b : batches) {
+    for (const Batch &b : gDrawing.batches) {
+        if (!in_part(b)) {
+            continue;
+        }
         id<MTLRenderPipelineState> pso = Pipeline(samples, b.blend);
         if (pso == nil) {
             continue;

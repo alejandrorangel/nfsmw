@@ -44,11 +44,16 @@ void PortMetalPrelitAddQuads(void *texture, PortPrelitBlend blend, uint32_t flag
 // env-map face i's flares.
 enum { PORT_PRELIT_PART_REFLECTION = 3, PORT_PRELIT_PART_ENV_FACE = 4 };
 void PortMetalPrelitSetPart(int part);
-// Render thread: whether the published frame has quads in this part.
+// Render thread: whether the frame being drawn has quads in this part.
 bool PortMetalPrelitHasPart(int part);
 // Publishes the building frame (PortMetalFEEndFrame calls it).
 void PortMetalPrelitPublish();
-// Render thread: draws the published frame into encoder (an
+// Render thread, with the 3D frame (under the lock PortMetalFEEndFrame
+// holds): takes the published frame, if it's new, as the one to draw and
+// uploads its vertices (device: an id<MTLDevice>); otherwise the last one
+// is drawn again.
+void PortMetalPrelitTakeFrame(void *device);
+// Render thread: draws the taken frame into encoder (an
 // id<MTLRenderCommandEncoder> of the main scene pass, samples per pixel)
 // with view_proj (world -> clip, row vectors). part: 0, 1 or 2 (see
 // PortMetalPrelitSetPart), -1 parts 0 and 1. shadow_map (the frame's

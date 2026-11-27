@@ -239,6 +239,7 @@ struct Frame3D {
 };
 static Frame3D g3DBuilding;
 static Frame3D g3DPublished;
+static uint64_t g3DPublishedSerial; // frames published (gFELock)
 static std::vector<Draw3D> *g3DTarget = &g3DBuilding.draws; // where PortMetal3DAdd goes
 
 static float gViewAspect = 4.0f / 3.0f;
@@ -533,6 +534,7 @@ int PortMetalFEEndFrame() {
     std::lock_guard<std::mutex> guard(gFELock);
     std::swap(gFEPublished, gFEBuilding);
     std::swap(g3DPublished, g3DBuilding);
+    g3DPublishedSerial++;
     PortMetalPrelitPublish();
     return gFEPublished.quads;
 }
@@ -1342,7 +1344,10 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     bool _shadowValid;        // this frame's scene has a shadow map
     float _shadowTransform[16];
     float _invShadowStrength;
-    uint64_t _frame;
+    // The 3D frame being drawn: the published one, taken (swapped out, not
+    // copied) when the game has published a new one, else drawn again.
+    Frame3D _scene;
+    uint64_t _sceneSerial;
 }
 
 - (instancetype)initWithView:(MTKView *)view {
@@ -2683,13 +2688,17 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
     pass.colorAttachments[0].loadAction = MTLLoadActionClear;
 
     FEFrame fe;
-    Frame3D scene;
     {
         std::lock_guard<std::mutex> guard(gFELock);
         fe.vertices = gFEPublished.vertices;
         fe.batches = gFEPublished.batches;
-        scene = g3DPublished;
+        if (_sceneSerial != g3DPublishedSerial) {
+            std::swap(_scene, g3DPublished); // the game clears what it gets back (PortMetal3DBeginFrame)
+            _sceneSerial = g3DPublishedSerial;
+        }
+        PortMetalPrelitTakeFrame((__bridge void *)_device);
     }
+    const Frame3D &scene = _scene;
     gViewAspect = (float)(view.drawableSize.width / view.drawableSize.height);
     pass.depthAttachment.clearDepth = 1.0;
     pass.depthAttachment.loadAction = MTLLoadActionClear;
