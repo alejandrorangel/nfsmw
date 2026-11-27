@@ -158,34 +158,64 @@ void PortInputInstallKeyboardMonitor() {
                                           }];
 }
 
-// NFSMW_AUTO_ENTER=<seconds>[,<seconds>...]: holds Enter for 0.2 s at each
-// time after launch, for automated runs past the splash and menus.
-static bool AutoEnterHeld() {
-    static std::vector<double> times = [] {
-        std::vector<double> t;
-        if (const char *env = getenv("NFSMW_AUTO_ENTER")) {
-            for (const char *p = env; *p;) {
-                t.push_back(atof(p));
-                const char *comma = strchr(p, ',');
-                if (!comma) {
-                    break;
-                }
-                p = comma + 1;
-            }
+// Scripted key presses for automated runs, each held for 0.2 s:
+//   NFSMW_AUTO_KEYS=<seconds>:<key>[,...]  keys: enter esc space up down left right
+//   NFSMW_AUTO_ENTER=<seconds>[,...]       shorthand for enter presses
+struct AutoKey {
+    double time;
+    int key;
+};
+
+static int AutoKeyCode(const char *name) {
+    static const struct { const char *name; int key; } kNames[] = {
+        {"enter", PORT_KEY_ENTER}, {"esc", PORT_KEY_ESCAPE}, {"space", PORT_KEY_SPACE}, {"up", PORT_KEY_UP},
+        {"down", PORT_KEY_DOWN},   {"left", PORT_KEY_LEFT},  {"right", PORT_KEY_RIGHT},
+    };
+    for (const auto &n : kNames) {
+        if (strncmp(name, n.name, strlen(n.name)) == 0) {
+            return n.key;
         }
-        return t;
+    }
+    return -1;
+}
+
+static const std::vector<AutoKey> &AutoKeys() {
+    static std::vector<AutoKey> keys = [] {
+        std::vector<AutoKey> k;
+        auto parse = [&k](const char *env, bool times_only) {
+            for (const char *p = env; p && *p;) {
+                double t = atof(p);
+                int key = PORT_KEY_ENTER;
+                if (!times_only) {
+                    const char *colon = strchr(p, ':');
+                    key = colon ? AutoKeyCode(colon + 1) : -1;
+                }
+                if (key >= 0) {
+                    k.push_back({t, key});
+                }
+                const char *comma = strchr(p, ',');
+                p = comma ? comma + 1 : nullptr;
+            }
+        };
+        parse(getenv("NFSMW_AUTO_ENTER"), true);
+        parse(getenv("NFSMW_AUTO_KEYS"), false);
+        return k;
     }();
-    if (times.empty()) {
-        return false;
+    return keys;
+}
+
+static void ApplyAutoKeys(float *keys) {
+    const std::vector<AutoKey> &auto_keys = AutoKeys();
+    if (auto_keys.empty()) {
+        return;
     }
     static const double start = CFAbsoluteTimeGetCurrent();
     double now = CFAbsoluteTimeGetCurrent() - start;
-    for (double t : times) {
-        if (now >= t && now < t + 0.2) {
-            return true;
+    for (const AutoKey &k : auto_keys) {
+        if (now >= k.time && now < k.time + 0.2) {
+            keys[k.key] = 1.0f;
         }
     }
-    return false;
 }
 
 void PortInputGetState(PortInputState *out) {
@@ -193,9 +223,7 @@ void PortInputGetState(PortInputState *out) {
     {
         std::lock_guard<std::mutex> guard(gInputLock);
         std::memcpy(out->keys, gKeys, sizeof(gKeys));
-        if (AutoEnterHeld()) {
-            out->keys[PORT_KEY_ENTER] = 1.0f;
-        }
+        ApplyAutoKeys(out->keys);
         PortMetalViewToFEScreen(gMouseU, gMouseV, &out->mouse_x, &out->mouse_y);
         out->mouse_buttons = gMouseButtons;
     }
