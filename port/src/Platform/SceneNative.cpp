@@ -38,6 +38,7 @@
 #include <set>
 
 TextureInfo *PortSolidTexture(eSolid *solid, int index); // SolidNative.cpp
+void PortRainDropsFrame();                                 // RainNative.cpp
 extern bTList<FrontEndRenderingCar> FrontEndRenderingCarList; // CarRender.cpp
 extern bTList<eLightMaterial> LightMaterialList;               // eLight.cpp
 
@@ -540,43 +541,12 @@ void SetSky(float cloud) {
     PortMetal3DSetSky(&sky);
 }
 
-// Rain +0x36A0, the road reflection strength (SpecularColour.w of the world
-// effects, sub_6D6AA0 / sub_6D71F0), as Rain::UpdateAndRender (0x758100)
-// moves it each unpaused race frame: towards RoadReflection (0x904B38, 1)
-// while it rains (intensity +0x28C non-zero; else towards 0) by 0.005
-// (0x8B2F60) of the difference, dropping to 0 below 0.05 (0x8B2E60) on the
-// way down; with AlwaysRain (0x9B0A30, a debug switch) it is put at
-// RoadReflection first. TODO(port): the weather that sets the intensity
-// (sub_7539D0: the scripted override, chance of rain and the "Rain"
-// parameter map) isn't ported, so races are dry; NFSMW_RAIN=1 stands for
-// AlwaysRain.
-float gRoadReflection;        // +0x36A0
-float gRoadReflectionDesired; // +0x369C
-
-bool ForcedRain() {
-    static const bool on = [] {
-        const char *e = std::getenv("NFSMW_RAIN");
-        return e != nullptr && *e != '\0' && *e != '0';
-    }();
-    return on;
-}
-
-void TickRoadReflection(eView *view) {
-    if (TheGameFlowManager.GetState() != GAMEFLOW_STATE_RACING || TheGameFlowManager.IsPaused() || view->Precipitation == nullptr) {
-        return;
-    }
-    const float road_reflection = 1.0f; // RoadReflection 0x904B38
-    if (ForcedRain()) {
-        gRoadReflection = road_reflection;
-    } else {
-        gRoadReflectionDesired = view->Precipitation->GetRainIntensity() == 0.0f ? 0.0f : road_reflection;
-    }
-    float next = (gRoadReflectionDesired - gRoadReflection) * 0.005f + gRoadReflection;
-    if (gRoadReflectionDesired <= gRoadReflection) {
-        gRoadReflection = next < 0.05f ? 0.0f : next;
-    } else {
-        gRoadReflection = next;
-    }
+// Rain +0x36A0 (RoadDampness), the road reflection strength (SpecularColour.w
+// of the world effects, sub_6D6AA0 / sub_6D71F0): Rain::UpdateAndRender
+// (RainNative.cpp) eases it while it rains; the effect begins read the
+// current view's (view 1's in the player and reflection views).
+float RoadDampness(eView *view) {
+    return view != nullptr && view->Precipitation != nullptr ? view->Precipitation->GetRoadDampness() : 0.0f;
 }
 
 void SetupFrameLighting(eView *view) {
@@ -587,13 +557,9 @@ void SetupFrameLighting(eView *view) {
     SetWorldFog(sun, f);
     float cloud = view && view->Precipitation ? view->Precipitation->GetCloudIntensity() : 0.0f;
     SetTimeOfDayLighting(sun, cloud, f);
-    if (view) {
-        TickRoadReflection(view);
-    }
-    // The effect begins read the current view's Rain +0x36A0 (view 1's in
-    // the player and reflection views); WORLDREFLECT's specular rgb is also
-    // scaled by 1 - its +0x290 cloud intensity (sub_6D71F0).
-    f.specular[3] = gRoadReflection;
+    // WORLDREFLECT's specular rgb is also scaled by 1 - the Rain +0x290
+    // cloud intensity (sub_6D71F0).
+    f.specular[3] = RoadDampness(view);
     f.reflect_specular_scale = 1.0f - cloud;
     PortMetal3DSetFog(&f);
     SetSky(cloud);
@@ -1217,7 +1183,7 @@ bool RenderWorldScene(int frame) {
     // 0x800 (scenery mirrored about each instance's pivot, Scenery.cpp) when
     // Road Reflection Detail is on and the road is wet (Rain +0x36A0 > 0.01).
     const int road_reflection = gPCGraphicsOptions.RoadReflectionEnable;
-    const bool wet = gRoadReflection > 0.01f; // 0x890DC4
+    const bool wet = RoadDampness(view) > 0.01f; // 0x890DC4
     eView *reflection_view = road_reflection != 0 ? eGetView(EVIEW_PLAYER1_GLOW, false) : nullptr;
     if (reflection_view && !reflection_view->IsActive()) {
         reflection_view = nullptr;
@@ -1303,9 +1269,18 @@ bool RenderWorldScene(int frame) {
     int models = gSceneDraws - scenery;
     DrawTestCars(view, 0); // ___eDisplayFrame 0x6DEE44: sub_750B10 → VehicleRenderConn::RenderAll
     gShadowLevelClip = nullptr;
+    // ___eDisplayFrame 0x6DF4F7: with the Particle option (0x9017EC) on, the
+    // particles (EmitterSystem::Render, not ported) and then in a race, in
+    // the IDI_PARTICLES_FX effect with z writes off, player 1's
+    // Rain::UpdateAndRender: the weather, the rain streaks and the drops'
+    // state (their pass: PortRainDropsFrame, sub_6D4620).
+    if (gPCGraphicsOptions.ParticleSystemEnable != 0 && view->Precipitation != nullptr) {
+        view->Precipitation->UpdateAndRender();
+    }
+    PortRainDropsFrame();
     if (log) {
         std::fprintf(stderr, "[world] cars %d, env map faces %d draws, shadow map %d, reflection %d (strength %.2f)\n", gSceneDraws - scenery - models,
-                     envmap_draws, shadow_draws, reflection_draws, gRoadReflection);
+                     envmap_draws, shadow_draws, reflection_draws, RoadDampness(view));
         std::fprintf(stderr, "[world] camera (%.1f %.1f %.1f) dir (%.2f %.2f %.2f) draws: scenery %d, models %d (calls %d, no solid %d)\n",
                      eye->x, eye->y, eye->z, view->GetCamera()->GetDirection()->x, view->GetCamera()->GetDirection()->y,
                      view->GetCamera()->GetDirection()->z, scenery, gSceneDraws - scenery, gSceneCalls, gSceneNoSolid);

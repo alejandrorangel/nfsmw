@@ -215,6 +215,18 @@ struct Frame3D {
     std::vector<Draw3D> reflection_draws;
     int reflection_mode = 0; // PortMetal3DSetReflection
     bool reflection_blur = false;
+    // IDI_PARTICLES_FX quads (PortMetal3DAddParticles), as triangles.
+    struct Particles {
+        id<MTLTexture> texture;
+        uint32_t flags;
+        float world[16];
+        uint32_t first, count; // vertices in particle_verts
+    };
+    std::vector<PortParticleVertex> particle_verts;
+    std::vector<Particles> particles;
+    // IDI_RAIN_DROP_FX drops (PortMetal3DSetRainDrops).
+    std::vector<PortRainDrop> drops;
+    id<MTLTexture> drop_displace;
 };
 static Frame3D g3DBuilding;
 static Frame3D g3DPublished;
@@ -253,6 +265,34 @@ void PortMetal3DBeginFrame(const float view_proj[16]) {
     g3DBuilding.reflection_draws.clear();
     g3DBuilding.reflection_mode = 0;
     g3DBuilding.reflection_blur = false;
+    g3DBuilding.particle_verts.clear();
+    g3DBuilding.particles.clear();
+    g3DBuilding.drops.clear();
+    g3DBuilding.drop_displace = nil;
+}
+
+void PortMetal3DAddParticles(void *texture, uint32_t flags, const float world[16], const PortParticleVertex *quads, int num_quads) {
+    if (num_quads <= 0) {
+        return;
+    }
+    Frame3D::Particles p;
+    p.texture = (__bridge id<MTLTexture>)texture;
+    p.flags = flags;
+    memcpy(p.world, world, sizeof(p.world));
+    p.first = (uint32_t)g3DBuilding.particle_verts.size();
+    p.count = (uint32_t)num_quads * 6;
+    static const int kOrder[6] = {0, 1, 2, 0, 2, 3};
+    for (int q = 0; q < num_quads; q++) {
+        for (int k : kOrder) {
+            g3DBuilding.particle_verts.push_back(quads[q * 4 + k]);
+        }
+    }
+    g3DBuilding.particles.push_back(p);
+}
+
+void PortMetal3DSetRainDrops(void *displace, const PortRainDrop *drops, int count) {
+    g3DBuilding.drop_displace = (__bridge id<MTLTexture>)displace;
+    g3DBuilding.drops.assign(drops, drops + count);
 }
 
 void PortMetal3DBeginReflection(const float view_proj[16]) {
@@ -1058,6 +1098,55 @@ fragment float4 overbright_add_fs(QuadOut in [[stage_in]], texture2d<float> src 
     return float4(src.sample(s, in.uv).rgb * intensity, 0);
 }
 
+// IDI_PARTICLES_FX technique 0 (vs #5; ps_1_1 #4: mul_x2 r0, t0, v0) with
+// the texture's alpha test (ALPHAREF 0x5F, sub_6C68B0).
+struct ParticleVertex { packed_float3 pos; uint color; packed_float2 uv; };
+struct ParticleConst { float4x4 mvp; uint alpha_test; uint pad[3]; };
+struct ParticleOut { float4 pos [[position]]; float2 uv; float4 color; };
+
+vertex ParticleOut particle_vs(uint vid [[vertex_id]], const device ParticleVertex *verts [[buffer(0)]],
+                               constant ParticleConst &c [[buffer(1)]]) {
+    ParticleVertex v = verts[vid];
+    ParticleOut o;
+    o.pos = c.mvp * float4(float3(v.pos), 1);
+    uint argb = v.color;
+    o.color = float4((argb >> 16) & 0xff, (argb >> 8) & 0xff, argb & 0xff, argb >> 24) / 255.0;
+    o.uv = float2(v.uv);
+    return o;
+}
+
+fragment float4 particle_fs(ParticleOut in [[stage_in]], texture2d<float> tex [[texture(0)]], sampler s [[sampler(0)]],
+                            constant ParticleConst &c [[buffer(0)]]) {
+    float4 out = saturate(2.0 * tex.sample(s, in.uv) * in.color);
+    if (c.alpha_test && out.a < (95.0 / 255.0)) {
+        discard_fragment();
+    }
+    return out;
+}
+
+// IDI_RAIN_DROP_FX (vs #1 passes clip-space corners; ps #0): the
+// displacement texture's g/b offset into the frame copy, alpha its a x
+// raindropalpha, colour 1.2 x the frame.
+struct DropConst { float4 quad; float4 offset; float alpha; float pad[3]; };
+struct DropOut { float4 pos [[position]]; float2 uv; };
+
+vertex DropOut drop_vs(uint vid [[vertex_id]], constant DropConst &c [[buffer(0)]]) {
+    // Triangle strip (X, Y) (X+s, Y) (X, Y+s) (X+s, Y+s), uv (0,0) (1,0) (0,1) (1,1).
+    float2 k = float2(vid & 1, vid >> 1);
+    DropOut o;
+    o.pos = float4(c.quad.xy + k * c.quad.z, 0, 1);
+    o.uv = k;
+    return o;
+}
+
+fragment float4 drop_fs(DropOut in [[stage_in]], texture2d<float> frame [[texture(0)]], texture2d<float> displace [[texture(1)]],
+                        constant DropConst &c [[buffer(0)]]) {
+    constexpr sampler s(filter::linear, address::clamp_to_edge);
+    float4 d = displace.sample(s, in.uv);
+    float2 uv = float2(d.g * c.offset.z + c.offset.x, d.b * c.offset.w + c.offset.y);
+    return saturate(float4(frame.sample(s, uv).rgb * 1.2, d.a * c.alpha));
+}
+
 fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear);
     float4 c = tex.sample(s, in.uv);
@@ -1111,6 +1200,11 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     // targets (on PC 0x982964/0x982968 again, after the treatment used them).
     id<MTLTexture> _obSource, _ob[2];
     id<MTLRenderPipelineState> _overbrightPipeline, _overbrightAddPipeline;
+    // IDI_PARTICLES_FX: [sample count 1, 2, 4, 8][opaque, alpha, additive], rgb writes.
+    id<MTLRenderPipelineState> _particlePSO[4][3];
+    // IDI_RAIN_DROP_FX and the frame copy it refracts.
+    id<MTLRenderPipelineState> _dropPipeline;
+    id<MTLTexture> _dropSource;
     // Dynamic environment cube (PC 0x982A30) and its depth (0x982A4C).
     id<MTLTexture> _envCube, _envDepth;
     id<MTLTexture> _blackCube; // bound when there is none
@@ -1245,6 +1339,19 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
             if (!_overbrightAddPipeline) {
                 NSLog(@"NFSMW: overbright add pipeline failed: %@", error);
             }
+            MTLRenderPipelineDescriptor *rd = [MTLRenderPipelineDescriptor new];
+            rd.vertexFunction = [lib newFunctionWithName:@"drop_vs"];
+            rd.fragmentFunction = [lib newFunctionWithName:@"drop_fs"];
+            rd.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+            rd.colorAttachments[0].blendingEnabled = YES;
+            rd.colorAttachments[0].sourceRGBBlendFactor = rd.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorSourceAlpha;
+            rd.colorAttachments[0].destinationRGBBlendFactor = rd.colorAttachments[0].destinationAlphaBlendFactor =
+                MTLBlendFactorOneMinusSourceAlpha;
+            rd.colorAttachments[0].writeMask = MTLColorWriteMaskRed | MTLColorWriteMaskGreen | MTLColorWriteMaskBlue; // COLORWRITEENABLE 7
+            _dropPipeline = [_device newRenderPipelineStateWithDescriptor:rd error:&error];
+            if (!_dropPipeline) {
+                NSLog(@"NFSMW: rain drop pipeline failed: %@", error);
+            }
         }
         // PC 0x6C5EE9: texture filtering 0 linear min/mag with point mips,
         // 1 linear mips, 2 anisotropic minification (caps MaxAnisotropy).
@@ -1327,6 +1434,119 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         }
     }
     return _meshPSO[si][mode][mask];
+}
+
+// The IDI_PARTICLES_FX pipeline for a blend mode in the current pass.
+- (id<MTLRenderPipelineState>)particlePipeline:(int)mode {
+    int si = _passSamples >= 8 ? 3 : _passSamples >= 4 ? 2 : _passSamples >= 2 ? 1 : 0;
+    if (_particlePSO[si][mode] == nil && _lib) {
+        MTLRenderPipelineDescriptor *md = [MTLRenderPipelineDescriptor new];
+        md.vertexFunction = [_lib newFunctionWithName:@"particle_vs"];
+        md.fragmentFunction = [_lib newFunctionWithName:@"particle_fs"];
+        md.colorAttachments[0].pixelFormat = _colorFormat;
+        md.depthAttachmentPixelFormat = _depthFormat;
+        md.stencilAttachmentPixelFormat = _depthFormat;
+        md.rasterSampleCount = (NSUInteger)(1 << si);
+        MTLRenderPipelineColorAttachmentDescriptor *c = md.colorAttachments[0];
+        c.blendingEnabled = mode != 0;
+        c.sourceRGBBlendFactor = c.sourceAlphaBlendFactor = MTLBlendFactorSourceAlpha;
+        c.destinationRGBBlendFactor = c.destinationAlphaBlendFactor = mode == 1 ? MTLBlendFactorOneMinusSourceAlpha : MTLBlendFactorOne;
+        c.writeMask = MTLColorWriteMaskRed | MTLColorWriteMaskGreen | MTLColorWriteMaskBlue; // COLORWRITEENABLE 7
+        NSError *error = nil;
+        _particlePSO[si][mode] = [_device newRenderPipelineStateWithDescriptor:md error:&error];
+        if (_particlePSO[si][mode] == nil) {
+            NSLog(@"NFSMW: particle pipeline %d/%d failed: %@", si, mode, error);
+        }
+    }
+    return _particlePSO[si][mode];
+}
+
+// The frame's IDI_PARTICLES_FX batches after the world: ZFUNC LESSEQUAL, no
+// depth writes (___eDisplayFrame sets ZWRITEENABLE 0 around them), each
+// batch with its texture's blending (sub_6C1010).
+- (void)drawParticles:(const Frame3D &)scene encoder:(id<MTLRenderCommandEncoder>)enc {
+    if (scene.particles.empty()) {
+        return;
+    }
+    id<MTLBuffer> vb = [_device newBufferWithBytes:scene.particle_verts.data()
+                                            length:scene.particle_verts.size() * sizeof(PortParticleVertex)
+                                           options:MTLResourceStorageModeShared];
+    [enc setCullMode:MTLCullModeNone];
+    [enc setDepthStencilState:_depthTest];
+    [enc setVertexBuffer:vb offset:0 atIndex:0];
+    for (const Frame3D::Particles &p : scene.particles) {
+        int mode = (p.flags & PORT_3D_ADDITIVE) ? 2 : (p.flags & PORT_3D_ALPHA_BLEND) ? 1 : 0;
+        id<MTLRenderPipelineState> pso = [self particlePipeline:mode];
+        if (pso == nil) {
+            continue;
+        }
+        struct {
+            float mvp[16];
+            uint32_t alpha_test;
+            uint32_t pad[3];
+        } c = {};
+        for (int i = 0; i < 4; i++) {
+            for (int j = 0; j < 4; j++) {
+                float sum = 0;
+                for (int k = 0; k < 4; k++) {
+                    sum += p.world[i * 4 + k] * scene.view_proj[k * 4 + j];
+                }
+                c.mvp[i * 4 + j] = sum;
+            }
+        }
+        c.alpha_test = (p.flags & PORT_3D_ALPHA_TEST) ? 1 : 0;
+        [enc setRenderPipelineState:pso];
+        [enc setVertexBytes:&c length:sizeof(c) atIndex:1];
+        [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
+        [enc setFragmentTexture:(p.texture ? p.texture : _white) atIndex:0];
+        [enc setFragmentSamplerState:_meshSamplers[gTextureFiltering.load() % 3] atIndex:0];
+        [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:p.first vertexCount:p.count];
+    }
+}
+
+// sub_6D4620: the frame copied (sub_6D2CD0 into the other target), then
+// each drop drawn over it from the copy.
+- (void)drawRainDrops:(const Frame3D &)scene commandBuffer:(id<MTLCommandBuffer>)cmd {
+    if (scene.drops.empty() || !scene.drop_displace || !_dropPipeline) {
+        return;
+    }
+    if (!_dropSource || _dropSource.width != _sceneColor.width || _dropSource.height != _sceneColor.height) {
+        MTLTextureDescriptor *cd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                                                                      width:_sceneColor.width
+                                                                                     height:_sceneColor.height
+                                                                                  mipmapped:NO];
+        cd.usage = MTLTextureUsageShaderRead;
+        cd.storageMode = MTLStorageModePrivate;
+        _dropSource = [_device newTextureWithDescriptor:cd];
+    }
+    id<MTLBlitCommandEncoder> blit = [cmd blitCommandEncoder];
+    [blit copyFromTexture:_sceneColor toTexture:_dropSource];
+    [blit endEncoding];
+    MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+    rp.colorAttachments[0].texture = _sceneColor;
+    rp.colorAttachments[0].loadAction = MTLLoadActionLoad;
+    rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+    id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rp];
+    enc.label = @"Rain drops";
+    [enc setRenderPipelineState:_dropPipeline];
+    [enc setFragmentTexture:_dropSource atIndex:0];
+    [enc setFragmentTexture:scene.drop_displace atIndex:1];
+    for (const PortRainDrop &d : scene.drops) {
+        // raindropoffset = (x - s/4, y + s/4, s, -s); the quad from (2x - 1, 1 - 2y).
+        struct {
+            float quad[4];
+            float offset[4];
+            float alpha;
+            float pad[3];
+        } c = {{2.0f * d.x - 1.0f, 1.0f - 2.0f * d.y, d.size, 0},
+               {d.x - 0.25f * d.size, d.y + 0.25f * d.size, d.size, -d.size},
+               d.alpha,
+               {0, 0, 0}};
+        [enc setVertexBytes:&c length:sizeof(c) atIndex:0];
+        [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
+        [enc drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+    }
+    [enc endEncoding];
 }
 
 // This frame's EnvMapTex, or nil (shader fallback).
@@ -1886,6 +2106,7 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
     _passMask = 1;
     _passMainScene = true;
     [self drawScene:scene encoder:enc view:view];
+    [self drawParticles:scene encoder:enc];
     _passSamples = 1;
     _passMask = 0;
     _passMainScene = false;
@@ -1921,6 +2142,9 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
             [self filter:_ob[1] into:_ob[0] taps:kBlurV count:4 mode:0 commandBuffer:cmd];
         }
     }
+    // ___eDisplayFrame 0x6DF7DF: the drops after the bloom sources were
+    // taken (sub_6DBEC0), before the treatment.
+    [self drawRainDrops:scene commandBuffer:cmd];
 }
 
 // PC sub_6D53D0: the treatment from the offscreen frame into the drawable.

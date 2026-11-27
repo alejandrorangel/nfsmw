@@ -104,6 +104,7 @@ add_library(nfsmw_platform OBJECT
     src/Platform/TextInputNative.cpp
     src/Game/SelectCarCameraMover.cpp
     src/Game/CameraDriveNative.cpp
+    src/Game/RainNative.cpp
     src/Game/ICENative.cpp
     src/Game/USpline.cpp
     src/Game/StringToNumberNative.cpp

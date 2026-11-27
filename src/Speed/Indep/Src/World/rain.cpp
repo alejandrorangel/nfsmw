@@ -208,6 +208,7 @@ Rain::Rain(eView *view, RainType StartType) {
     this->IsValidRainCurtainPos = CT_INACTIVE;
 }
 
+#if !defined(EA_PORT_NATIVE) // port/src/Game/RainNative.cpp
 void Rain::Init(RainType type, float percent) {
     TempInits();
 
@@ -256,6 +257,7 @@ void Rain::Init(RainType type, float percent) {
     }
 #endif
 }
+#endif
 
 // STRIPPED
 Rain::~Rain() {}
@@ -277,14 +279,18 @@ static const int TimeTestRain = 3;
 static const float TimeTestFactor = 1.4f;
 static const float DistanceTestFactor = 50.0f;
 
+#if !defined(EA_PORT_NATIVE) // port/src/Game/RainNative.cpp
 // STRIPPED
 float GetDesiredRainIntensity(float x, float y) {}
+#endif
 
 static const uint32 CloudsPlease = 0;
 static const uint32 NoCloudsPlease = 0;
 
+#if !defined(EA_PORT_NATIVE) // port/src/Game/RainNative.cpp
 // STRIPPED
 float GetDesiredCloudyness(float x, float y) {}
+#endif
 
 // STRIPPED
 float WorldWeatherTime() {}
@@ -353,8 +359,10 @@ int32 ONEpNoRainConnexion = 0;
 float cameraMod = 1.0f;
 static const float lookbackoffset = 10.0f;
 
+#if !defined(EA_PORT_NATIVE) // port/src/Game/RainNative.cpp
 // STRIPPED
 void Rain::Update() {}
+#endif
 
 int windAngType = 4;
 float windAng = 0.0f;
@@ -395,12 +403,14 @@ ParameterAccessorBlendByDistance WindAccessor[2] = {"Wind", "Wind"};
 
 float PrevailingMult = 0.01f;
 
+#if !defined(EA_PORT_NATIVE) // port/src/Game/RainNative.cpp
 // STRIPPED
 void Rain::Wind(float time) {
     static ChangingStatus windState = CHANGE;
     static float changetime = 0.0f;
     int idIndex;
 }
+#endif
 
 // STRIPPED
 void Rain::Reset() {}
@@ -412,8 +422,10 @@ float precipBoundD = 10.0f;
 // STRIPPED
 void Rain::Seed(RainPointsDef *rainpoints, bVector3 *CameraPosition, bVector3 *CameraDirection) {}
 
+#if !defined(EA_PORT_NATIVE) // port/src/Game/RainNative.cpp
 // STRIPPED
 void Rain::SetRainIntensity(float percent) {}
+#endif
 
 // STRIPPED
 void Rain::Change(RainType type, float percent) {}
@@ -431,21 +443,29 @@ float py2 = 1.0f;
 float px3 = -1.0f;
 float py3 = 1.0f;
 
+#if !defined(EA_PORT_NATIVE) // port/src/Game/RainNative.cpp
 void Rain::Render() {}
+#endif
 
+#if !defined(EA_PORT_NATIVE) // port/src/Game/RainNative.cpp
 // STRIPPED
 OnScreenRain::OnScreenRain() {}
+#endif
 
 float DripSpeed = 0.2f;
 float SpeedMod = 0.0001f;
 float DropShapeSpeedChange = 0.0025f;
 int OverRide = 0;
 
+#if !defined(EA_PORT_NATIVE) // port/src/Game/RainNative.cpp
 // STRIPPED
 void OnScreenRain::Update(eView *view) {}
+#endif
 
+#if !defined(EA_PORT_NATIVE) // port/src/Game/RainNative.cpp
 // STRIPPED
 void OnScreenRain::GetData(int index, float *x, float *y, float *decay, float *size, int *dripShape) {}
+#endif
 
 float RAINbias = 0.0f;
 float SNOWbias = 0.0f;
@@ -455,7 +475,9 @@ float FOGbias = 0.0f;
 
 static const int WatchRain = 0;
 
+#if !defined(EA_PORT_NATIVE) // port/src/Game/RainNative.cpp
 void Rain::UpdateAndRender() {}
+#endif
 
 ParameterAccessorBlendByDistance FogAccessor[2] = {"Normal Fog", "Normal Fog"};
 ParameterAccessorBlendByDistance RainFogAccessor[2] = {"Rain Fog", "Rain Fog"};
@@ -480,4 +502,6 @@ int AmIinATunnel(eView *view, int CheckOverPass) {
     return view->Precipitation->inTunnel;
 }
 
+#if !defined(EA_PORT_NATIVE) // port/src/Game/RainNative.cpp
 int AmIinATunnelSlow(eView *view, int CheckOverPass) {}
+#endif

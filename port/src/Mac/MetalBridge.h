@@ -208,6 +208,32 @@ void PortMetal3DEndReflection();
 // second 320x240 target 0x982A74).
 void PortMetal3DSetReflection(int mode, bool blur);
 
+// IDI_PARTICLES_FX quads (technique 0: texture x vertex colour x 2, ZFUNC
+// LESSEQUAL, rgb writes), drawn after the main view's world, without depth
+// writes (___eDisplayFrame 0x6DF539 around Rain::UpdateAndRender). Each quad
+// is 4 corners (triangles 0-1-2, 0-2-3) in the space world maps to world
+// space; color is a D3DCOLOR (0xAARRGGBB). flags: PORT_3D_ALPHA_BLEND /
+// _ADDITIVE / _ALPHA_TEST from the texture (sub_6C68B0). Rain::Render's
+// streaks (batch 0x9877CC) go through here.
+struct PortParticleVertex {
+    float x, y, z;
+    uint32_t color;
+    float u, v;
+};
+void PortMetal3DAddParticles(void *texture, uint32_t flags, const float world[16], const PortParticleVertex *quads, int num_quads);
+
+// IDI_RAIN_DROP_FX (speed.exe 1.3 sub_6D4620): drops on the lens, drawn over
+// the frame before the visual treatment. Each is a size x size clip-space
+// square from (2x - 1, 1 - 2y) up and right, refracting a copy of the frame
+// through the RAINDROPPC displacement texture: frame uv = (x - size/4 +
+// d.g size, y + size/4 - d.b size), 1.2 x its colour, alpha d.a x alpha.
+struct PortRainDrop {
+    float x, y;  // 0..1 from the top left
+    float size;  // OnScreenRain Size x 0.12
+    float alpha; // RAINDROPALPHA: timer / Maxtimer x 3
+};
+void PortMetal3DSetRainDrops(void *displace, const PortRainDrop *drops, int count);
+
 // PC Full Screen Anti-Aliasing (g_FSAALevel): 0 off, else the 3D scene is
 // rendered multisampled and resolved before the post chain. The PC slider's
 // levels are D3DMULTISAMPLE_NONMASKABLE quality levels (sub_6BFAB0: type 1,
