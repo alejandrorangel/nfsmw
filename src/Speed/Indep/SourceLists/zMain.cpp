@@ -69,6 +69,14 @@
 #include "Speed/Indep/Src/Generated/Events/ERequestEventInfoDialog.cpp"
 
 #include "Speed/Indep/Src/Generated/Events/EAwardUpgrade.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EAddSMS.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EShowSMS.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/ECellCall.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EReportMilestoneAtStake.cpp"
 #endif
 
 #include "Speed/Indep/Src/Input/Common/action.cpp"

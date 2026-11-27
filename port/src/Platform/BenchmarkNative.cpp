@@ -283,14 +283,27 @@ void SetHumanAI(bool on) {
     }
 }
 
-void CareerEventUpdate() {
+// Free roam: the SMS inbox and messages (GManager::UpdatePendingSMS opens
+// them when a text arrives) close with escape a second after they open.
+bool gEventEscape = false;
+int gControlFrame = 0;
+
+void FreeRoamScreens() {
     const char *control = ControlPackageName();
     if (gLastControlPackage != control) {
         gLastControlPackage = control;
+        gControlFrame = gBenchFrame;
         std::fprintf(stderr, "[benchmark] control: %s (frame %d)\n", control, gBenchFrame);
     }
+    const int in_control = gBenchFrame - gControlFrame;
+    gEventEscape = std::strncmp(control, "SMS_", 4) == 0 && in_control >= 60 && in_control % 60 < 6;
+}
+
+void CareerEventUpdate() {
+    const char *control = ControlPackageName();
     const bool racing = GRaceStatus::Exists() && GRaceStatus::Get().GetPlayMode() == GRaceStatus::kPlayMode_Racing;
     const bool hud = std::strstr(control, "HUD") != nullptr || *control == '\0';
+    const bool sms = std::strncmp(control, "SMS_", 4) == 0;
     const int since = gBenchFrame - gEventPhaseFrame;
     gEventPress = false;
     gEventLeft = false;
@@ -352,13 +365,13 @@ void CareerEventUpdate() {
         case kEvent_Racing:
             // The race AI drives (and enter on any screen that isn't the HUD:
             // the post race results)
-            gEventPress = !hud && since % 60 < 6;
+            gEventPress = !hud && !sms && since % 60 < 6;
             if (!racing) {
                 SetEventPhase(kEvent_PostRace);
             }
             break;
         case kEvent_PostRace:
-            gEventPress = !hud && since % 60 < 6;
+            gEventPress = !hud && !sms && since % 60 < 6;
             if (hud && !racing && TheGameFlowManager.IsInGame() && since > 120) {
                 std::fprintf(stderr, "[benchmark] career event %s: cash %d -> %d, completed %d\n", gEventRace->GetEventID(), gEventStartCash,
                              static_cast<int>(FEDatabase->GetCareerSettings()->GetCash()),
@@ -590,6 +603,9 @@ bool PortBenchmarkInput(PortInputState *state) {
     if (gEventLeft) {
         state->keys[PORT_KEY_LEFT] = 1.0f;
     }
+    if (gEventEscape) {
+        state->keys[PORT_KEY_ESCAPE] = 1.0f;
+    }
     return true;
 }
 
@@ -637,6 +653,9 @@ void PortBenchmarkEndFrame(uint64_t render_start_ns) {
         }
     } else {
         gBenchFrame++;
+        if (gScenario->free_roam) {
+            FreeRoamScreens();
+        }
         if (gScenario->career_event) {
             CareerEventUpdate();
         }

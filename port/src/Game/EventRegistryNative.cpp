@@ -70,6 +70,8 @@ int EShowRaceCountdown_MakeEvent_LuaBinding(lua_State *luaState);
 int EResetProps_MakeEvent_LuaBinding(lua_State *luaState);
 int ETerminateMusic_MakeEvent_LuaBinding(lua_State *luaState);
 int EEnterBin_MakeEvent_LuaBinding(lua_State *luaState);
+int EAddSMS_MakeEvent_LuaBinding(lua_State *luaState);
+int ECellCall_MakeEvent_LuaBinding(lua_State *luaState);
 
 namespace {
 
@@ -83,6 +85,8 @@ const LuaBindingEntry kLuaBindings[] = {
     {"EResetProps", EResetProps_MakeEvent_LuaBinding},
     {"ETerminateMusic", ETerminateMusic_MakeEvent_LuaBinding},
     {"EEnterBin", EEnterBin_MakeEvent_LuaBinding},
+    {"EAddSMS", EAddSMS_MakeEvent_LuaBinding},
+    {"ECellCall", ECellCall_MakeEvent_LuaBinding},
 };
 
 } // namespace

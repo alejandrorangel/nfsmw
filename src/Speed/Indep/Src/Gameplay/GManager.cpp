@@ -25,6 +25,15 @@
 #if defined(EA_PORT_NATIVE)
 #include "Speed/Indep/Src/Interfaces/Simables/ISimable.h"
 #include "Speed/Indep/Src/Generated/Events/EAutoSave.hpp"
+#include "Speed/Indep/Src/Generated/Events/ECellCall.hpp"
+#include "Speed/Indep/Src/Generated/Events/EShowSMS.hpp"
+#include "Speed/Indep/Src/Frontend/Database/FEDatabase.hpp"
+#include "Speed/Indep/Src/Frontend/FEManager.hpp"
+#include "Speed/Indep/Src/Frontend/MenuScreens/InGame/PhotoFinish.hpp"
+#include "Speed/Indep/Src/Interfaces/IFengHud.h"
+#include "Speed/Indep/Src/Interfaces/Simables/IVehicle.h"
+#include "Speed/Indep/Src/Misc/GameFlow.hpp"
+#include "Speed/Indep/Src/EAXSound/Stream/SpeechManager.hpp"
 #include "Speed/Indep/Src/Generated/Messages/MNotifyMilestoneProgress.h"
 #include "Speed/Indep/Src/Sim/Simulation.h"
 #include "Speed/Indep/Src/Generated/AttribSys/Classes/milestonetypes.h"
@@ -151,10 +160,11 @@ void GManager::InitializeVaults() {
     // The PC build then sets up the icons (0x320 bytes from FastMem), the
     // milestones, speed traps and bounty spawn points and the section icon
     // callback.
-    // TODO(port): milestones and bounty spawn points aren't ported yet.
 #if defined(EA_PORT_NATIVE)
     AllocateIcons();
+    AllocateMilestones();
     AllocateSpeedTraps();
+    FindBountySpawnPoints();
     // 0x5F8189: the zone icons, then the track marker ones (sub_5EF6D0).
     RefreshZoneIcons();
     RefreshTrackMarkerIcons();
@@ -713,8 +723,11 @@ void GManager::UpdateTimers(float dT) {
 // PC: 0x6036C0.
 void GManager::Update(float dT) {
     GRaceStatus::Get().Update(dT);
-    // TODO(port): UnspawnUselessCharacters, ServicePendingCharacters and
-    // UpdatePursuit (characters and the pursuit bookkeeping aren't ported).
+    // TODO(port): UnspawnUselessCharacters and ServicePendingCharacters
+    // (characters aren't spawned by the scripts yet).
+#if defined(EA_PORT_NATIVE)
+    UpdatePursuit();
+#endif
     UpdateTimers(dT);
 #if defined(EA_PORT_NATIVE)
     // NFSMW_DEBUG_SKIP_RACE=<place>[:<seconds>]: once the race clock passes
@@ -757,7 +770,7 @@ void GManager::Update(float dT) {
         }
     }
 #endif
-    // TODO(port): UpdatePendingSMS (SMS isn't ported).
+    UpdatePendingSMS();
     UpdateTriggerAvailability();
 #if defined(EA_PORT_NATIVE)
     UpdateIconVisibility();
@@ -1148,11 +1161,9 @@ void NotifyGameZonesChanged() {
 #endif
 
 #if defined(EA_PORT_NATIVE)
-// Milestone value tracking and the pursuit notifications. The milestone type
-// table (mMilestoneTypeInfo) and the milestones themselves aren't allocated
-// natively yet (AllocateMilestones/ResetMilestoneTrackingInfo aren't ported),
-// so these mostly find nothing; PC looks values up with find() and writes
-// through whatever it returns, natively an unknown value is ignored.
+// Milestone value tracking and the pursuit notifications. PC looks values up
+// with find() and writes through whatever it returns; natively an unknown
+// value is ignored.
 
 // PC: 0x5EDA20
 void GManager::TrackValue(const char *valueName, float value) {
@@ -1213,6 +1224,259 @@ void GManager::NotifyPursuitEnded(bool evaded) {
     }
     if (evaded && GRaceStatus::Get().GetPlayMode() == GRaceStatus::kPlayMode_Roaming) {
         new EAutoSave();
+    }
+}
+
+// PC: 0x5EDB50. A count goes up by one (from nothing, 1).
+void GManager::IncValue(const char *valueName) {
+    MilestoneInfoMap::iterator it = mMilestoneTypeInfo.find(Attrib::StringToKey(valueName));
+    if (it == mMilestoneTypeInfo.end()) {
+        return;
+    }
+    TrackValue(valueName, it->second.mLastKnownValue == -1.0f ? 1.0f : it->second.mLastKnownValue + 1.0f);
+}
+
+// PC: 0x5EDBC0
+float GManager::GetValue(const char *valueName) {
+    return GetValue(Attrib::StringToKey(valueName));
+}
+
+// PC: 0x5EDC60
+float GManager::GetBestValue(Attrib::Key valueKey) {
+    MilestoneInfoMap::iterator it = mMilestoneTypeInfo.find(valueKey);
+    return it != mMilestoneTypeInfo.end() ? it->second.mBestValue : 0.0f;
+}
+
+float GManager::GetBestValue(const char *valueName) {
+    return GetBestValue(Attrib::StringToKey(valueName));
+}
+
+bool GManager::GetIsBiggerValueBetter(Attrib::Key valueKey) {
+    MilestoneInfoMap::iterator it = mMilestoneTypeInfo.find(valueKey);
+    return it != mMilestoneTypeInfo.end() && (it->second.mFlags & 1) != 0;
+}
+
+// PC: 0x5F4BF0. One milestone per challenge collection (under 0x1D975142,
+// derived from the challenge template 0xA3D34781).
+void GManager::AllocateMilestones() {
+    Attrib::Gen::gameplay root(0x1D975142, 0, nullptr);
+    AttribKeyList keys;
+    GatherInstanceKeys(root, keys, 0xA3D34781);
+    mNumMilestones = static_cast<unsigned int>(keys.size());
+    mMilestones = mNumMilestones != 0 ? new GMilestone[mNumMilestones] : nullptr;
+    GMilestone *milestone = mMilestones;
+    for (AttribKeyList::iterator it = keys.begin(); it != keys.end(); ++it, ++milestone) {
+        milestone->Init(*it);
+    }
+}
+
+// PC: 0x5F4D40. Every milestone back to its challenge's (locked) state.
+void GManager::ResetMilestones() {
+    if (mNumMilestones == 0) {
+        return;
+    }
+    Attrib::Gen::gameplay root(0x1D975142, 0, nullptr);
+    AttribKeyList keys;
+    GatherInstanceKeys(root, keys, 0xA3D34781);
+    GMilestone *milestone = mMilestones;
+    for (AttribKeyList::iterator it = keys.begin(); it != keys.end() && milestone < mMilestones + mNumMilestones; ++it, ++milestone) {
+        milestone->Init(*it);
+    }
+}
+
+// PC: 0x5F4AD0. Up to 20 bounty spawn markers (under 0x3D48E303, derived from
+// 0xA7BCCF63).
+void GManager::FindBountySpawnPoints() {
+    Attrib::Gen::gameplay root(0x3D48E303, 0, nullptr);
+    AttribKeyList keys;
+    GatherInstanceKeys(root, keys, 0xA7BCCF63);
+    mNumBountySpawnPoints = 0;
+    for (AttribKeyList::iterator it = keys.begin(); it != keys.end(); ++it) {
+        mBountySpawnPoint[mNumBountySpawnPoints++] = *it;
+        if (mNumBountySpawnPoints > 19) {
+            break;
+        }
+    }
+}
+
+// PC: 0x5DDAF0 / 0x5DDB00 / 0x5E47C0.
+unsigned int GManager::GetNumBountySpawnMarkers() const {
+    return mNumBountySpawnPoints;
+}
+
+Attrib::Key GManager::GetBountySpawnMarker(unsigned int index) const {
+    return index < mNumBountySpawnPoints ? mBountySpawnPoint[index] : 0;
+}
+
+int GManager::GetBountySpawnMarkerTag(unsigned int index) const {
+    Attrib::Gen::gameplay marker(GetBountySpawnMarker(index), 0, nullptr);
+    const int *tag = static_cast<const int *>(marker.GetAttributePointer(0xDB89AB5C, 0));
+    return tag != nullptr ? *tag : 0;
+}
+
+// PC: 0x5DDA50
+GMilestone *GManager::GetMilestone(unsigned int index) {
+    return &mMilestones[index];
+}
+
+// PC: 0x5E46D0
+GMilestone *GManager::GetFirstMilestone(bool availOnly, unsigned int binNumber) {
+    return GetNextMilestone(mMilestones - 1, availOnly, binNumber);
+}
+
+// PC: 0x5DDA70. The next one (available or at stake, with availOnly) in the
+// bin (any bin for 0).
+GMilestone *GManager::GetNextMilestone(GMilestone *current, bool availOnly, unsigned int binNumber) {
+    for (GMilestone *milestone = current + 1; milestone < mMilestones + mNumMilestones; milestone++) {
+        if (availOnly && !milestone->GetIsAvailable() && !milestone->GetIsDonePendingEscape()) {
+            continue;
+        }
+        if (binNumber == 0 || milestone->GetBinNumber() == binNumber) {
+            return milestone;
+        }
+    }
+    return nullptr;
+}
+
+// PC: 0x5E46F0. The bin's locked milestones become available.
+void GManager::EnableBinMilestones(unsigned int binNumber) {
+    for (GMilestone *milestone = GetFirstMilestone(false, binNumber); milestone != nullptr; milestone = GetNextMilestone(milestone, false, binNumber)) {
+        milestone->Unlock();
+    }
+}
+
+// PC: 0x6013F0. The pursuit's values for the milestones, and which of the
+// pursuit icons show: the pursuit breakers while chased, the hiding spots
+// while cooling down (in free roam, a challenge series race or an epic
+// pursuit).
+void GManager::UpdatePursuit() {
+    GRaceStatus &raceStatus = GRaceStatus::Get();
+    const bool roaming = raceStatus.GetPlayMode() == GRaceStatus::kPlayMode_Roaming;
+    IPursuit *pursuit = nullptr;
+    IPerpetrator *perp = nullptr;
+    GetPlayerPursuitInterfaces(pursuit, perp);
+    bool coolingDown = false;
+    if (pursuit != nullptr) {
+        TrackValue("cost_to_state_in_pursuit", static_cast<float>(static_cast<int>(pursuit->CalcTotalCostToState())));
+        coolingDown = pursuit->GetPursuitStatus() == PS_COOL_DOWN;
+    }
+    raceStatus.SetPlayerPursuitInCooldown(coolingDown);
+    if (perp != nullptr) {
+        TrackValue("cost_to_state", static_cast<float>(perp->GetCostToState()));
+        TrackValue("bounty_in_pursuit", static_cast<float>(perp->GetPendingRepPointsFromCopDestruction() + perp->GetPendingRepPointsNormal()));
+    }
+    GRaceParameters *parms = raceStatus.GetRaceParameters();
+    const bool challengeSeries = parms != nullptr && parms->GetIsChallengeSeriesRace();
+    const bool pursuitIcons = roaming || challengeSeries || (parms != nullptr && parms->GetIsEpicPursuitRace());
+    mHidingSpotIconsShown = (roaming || challengeSeries) && pursuit != nullptr && coolingDown;
+    mPursuitBreakerIconsShown = pursuitIcons && pursuit != nullptr && !coolingDown;
+}
+
+// ---------------------------------------------------------------------------
+// SMS: the career's text messages (and voiced cell calls), queued until the
+// player can be shown them.
+// ---------------------------------------------------------------------------
+
+// PC: 0x5F5120. The cell calls (10-14, 0x5F, 0x60) go out at once; any other
+// message not received yet is queued once.
+void GManager::AddSMS(int smsID) {
+    if ((smsID >= 10 && smsID <= 14) || smsID == 0x5F || smsID == 0x60) {
+        DispatchSMSMessage(smsID);
+        return;
+    }
+    SMSMessage *message = FEDatabase->GetCareerSettings()->GetSMSMessage(smsID);
+    if (message != nullptr && message->GetFlags() != 0) {
+        return;
+    }
+    for (PendingSMSList::iterator it = mPendingSMS.begin(); it != mPendingSMS.end(); ++it) {
+        if (*it == smsID) {
+            return;
+        }
+    }
+    mPendingSMS.push_back(smsID);
+}
+
+// PC: 0x5DDD20. A cell call not received yet: received (unread), sorted in,
+// and called in (ECellCall).
+void GManager::DispatchSMSMessage(int smsID) {
+    CareerSettings *career = FEDatabase->GetCareerSettings();
+    SMSMessage *message = career->GetSMSMessage(smsID);
+    if (message == nullptr || message->GetFlags() != 0) {
+        return;
+    }
+    message->Flags = 2;
+    message->SetSortOrder(career->GetSMSSortOrder());
+    new ECellCall(smsID);
+}
+
+// PC: 0x5EC160. Every queued message lands in the inbox (unread, sorted in);
+// the one to show is the first voiced one, otherwise the first queued.
+int GManager::PushSMSToInbox() {
+    CareerSettings *career = FEDatabase->GetCareerSettings();
+    int show = -1;
+    for (PendingSMSList::iterator it = mPendingSMS.begin(); it != mPendingSMS.end(); ++it) {
+        SMSMessage *message = career->GetSMSMessage(*it);
+        if (message == nullptr) {
+            continue;
+        }
+        if (message->IsVoice() && show == -1) {
+            show = *it;
+        }
+        message->Flags = 2;
+        message->SetSortOrder(career->GetSMSSortOrder());
+    }
+    if (show == -1 && !mPendingSMS.empty()) {
+        show = mPendingSMS.front();
+    }
+    mPendingSMS.clear();
+    return show;
+}
+
+// PC: 0x5EDFC0
+bool GManager::GetHasPendingSMS() const {
+    return !mPendingSMS.empty() && CanPlaySMS();
+}
+
+// PC: 0x5EC040. In free roam, in game, with nothing on screen (no NIS, photo
+// finish or pause), no cop speech, the HUD up, and the player's car neither
+// staging, loading, animating nor in a pursuit.
+bool GManager::CanPlaySMS() const {
+    if (Speech::Manager::SpeechDisabled() || TheGameFlowManager.GetState() != GAMEFLOW_STATE_RACING || INIS::Exists() || PhotoFinishScreen::mActive ||
+        !GRaceStatus::Exists() || GRaceStatus::Get().GetPlayMode() != GRaceStatus::kPlayMode_Roaming) {
+        return false;
+    }
+    if (!FEManager::IsOkayToRequestPauseSimulation(0, true, true) || Speech::Manager::IsCopSpeechPlaying(static_cast<SPCHType_1_EventID>(0xCC))) {
+        return false;
+    }
+    IPlayer *player = IPlayer::First(PLAYER_LOCAL);
+    ISimable *simable = player != nullptr ? player->GetSimable() : nullptr;
+    IHud *hud = player != nullptr ? player->GetHud() : nullptr;
+    if (simable == nullptr || hud == nullptr || !hud->IsHudVisible()) {
+        return false;
+    }
+    IVehicle *vehicle;
+    if (!simable->QueryInterface(&vehicle) || vehicle == nullptr || vehicle->IsAnimating() || vehicle->IsStaging() || vehicle->IsLoading()) {
+        return false;
+    }
+    IVehicleAI *ai = vehicle->GetAIVehiclePtr();
+    return ai != nullptr && ai->GetPursuit() == nullptr;
+}
+
+// PC: 0x5EDFE0. When the player can be shown them, the queued messages go to
+// the inbox, the inbox opens on one (EShowSMS) and the HUD shows the phone.
+void GManager::UpdatePendingSMS() {
+    if (mPendingSMS.empty() || !CanPlaySMS()) {
+        return;
+    }
+    int show = PushSMSToInbox();
+    if (show != -1) {
+        new EShowSMS(show);
+    }
+    IPlayer *player = IPlayer::First(PLAYER_ALL);
+    IHud *hud = player != nullptr ? player->GetHud() : nullptr;
+    IMenuZoneTrigger *izone;
+    if (hud != nullptr && hud->QueryInterface(&izone)) {
+        izone->RequestCingularLogo();
     }
 }
 
@@ -1439,10 +1703,6 @@ void GManager::LoadMilestoneInfo(MilestoneTypeInfo *savedInfo, unsigned int coun
     }
 }
 
-// PC: 0x5F4D40 resets every milestone from its challenge collection.
-// TODO(port): the milestones aren't allocated natively (AllocateMilestones),
-// so there are none to reset.
-void GManager::ResetMilestones() {}
 
 // PC: inlined into SaveGameplayData.
 unsigned int GManager::SaveMilestones(GMilestone *dest) {

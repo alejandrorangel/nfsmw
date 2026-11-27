@@ -18,6 +18,7 @@
 #include "Speed/Indep/Src/Gameplay/GCharacter.cpp"
 #include "Speed/Indep/Src/Gameplay/GSpeedTrap.cpp"
 #include "Speed/Indep/Src/Gameplay/GIcon.cpp"
+#include "Speed/Indep/Src/Gameplay/GMilestone.cpp"
 #endif
 #if defined(EA_PORT_NATIVE)
 #include "Speed/Indep/Src/Lua/LuaRuntime.cpp"
