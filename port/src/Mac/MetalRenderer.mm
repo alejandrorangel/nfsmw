@@ -173,6 +173,7 @@ struct Frame3D {
     bool treatment = false; // apply the visual treatment (vt) to this frame
     PortVisualTreatment vt;
     id<MTLTexture> gain_map;
+    PortWorldFog fog = {};
 };
 static Frame3D g3DBuilding;
 static Frame3D g3DPublished;
@@ -189,6 +190,15 @@ void PortMetal3DBeginFrame(const float view_proj[16]) {
     g3DBuilding.overlay = false;
     g3DBuilding.treatment = false;
     g3DBuilding.gain_map = nil;
+    g3DBuilding.fog = {};
+}
+
+void PortMetal3DSetFog(const PortWorldFog *fog) {
+    static const bool off = getenv("NFSMW_NO_FOG") != nullptr;
+    g3DBuilding.fog = {};
+    if (fog && !off) {
+        g3DBuilding.fog = *fog;
+    }
 }
 
 void PortMetal3DSetTreatment(const PortVisualTreatment *treatment) {
@@ -272,7 +282,39 @@ fragment float4 fe_fs(FEOut in [[stage_in]], texture2d<float> tex [[texture(0)]]
 
 // 3D meshes. Vertices are pulled from the raw 36-byte PC layout.
 struct MeshConst { float4x4 mvp; float4x4 world; uint stride; uint shade; uint effect; uint pad; float4 eye; };
-struct MeshOut { float4 pos [[position]]; float2 uv; float4 color; float3 normal; float3 world_pos; float3 local_normal; float3 local_pos; };
+struct MeshOut { float4 pos [[position]]; float2 uv; float4 color; float3 normal; float3 world_pos; float3 local_normal; float3 local_pos;
+                 float3 extinction; float3 inscatter; };
+
+// PortWorldFog (MetalBridge.h).
+struct WorldFog {
+    float4 br_plus_bm, one_over_brbm, const1, const2, const3, light_dir;
+    float fog_value;
+    uint enabled;
+};
+
+// Effects with the PC scattering terms (IDI_WORLD/WORLDREFLECT/WORLDNORMALMAP/
+// GLOSSYWINDOW/TREE_FX); WORLDBONE, CAR, WORLDMIN, WORLDNOFOG and WORLDPRELIT
+// have none.
+bool FoggedEffect(uint effect) {
+    return effect == 0 || effect == 1 || effect == 3 || effect == 5 || effect == 6;
+}
+
+// IDI_WORLD_FX vs (e.g. shader #13): s = clamp(|v - eye| * FogValue, 0, 2500),
+// cos = L . normalize(eye - v), E = exp(-s * (Br + Bm)), in-scatter =
+// saturate((Const_1 (1 + cos^2) + Const_2 Const_3.x (Const_3.y + Const_3.z
+// cos)^-1.5) / (Br + Bm) * (1 - E) * Const_3.w). PC works in model space
+// (LocalEyePos, LocalLightVec); world space is the same for rigid transforms.
+void Scatter(float3 world_pos, float3 eye, constant WorldFog &f, thread float3 &extinction, thread float3 &inscatter) {
+    float3 to_eye = eye - world_pos;
+    float dist = length(to_eye);
+    float cos_t = dist > 0 ? dot(f.light_dir.xyz, to_eye / dist) : 0;
+    float s = clamp(dist * f.fog_value, 0.0, 2500.0);
+    float3 e = exp(-s * f.br_plus_bm.xyz);
+    float mie = f.const3.x * pow(max(f.const3.y + f.const3.z * cos_t, 1e-6), -1.5);
+    float3 in = (f.const1.xyz * (1 + cos_t * cos_t) + f.const2.xyz * mie) * f.one_over_brbm.xyz * (1 - e) * f.const3.w;
+    extinction = min(e, 1.0);
+    inscatter = saturate(in);
+}
 
 // Model-space lights for the car effect (eDynamicLightContext).
 struct Lights {
@@ -287,7 +329,8 @@ struct Material {
     float envmap_min, envmap_range, envmap_power, specular_power;
 };
 
-vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffer(0)]], constant MeshConst &c [[buffer(1)]]) {
+vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffer(0)]], constant MeshConst &c [[buffer(1)]],
+                       constant WorldFog &fog [[buffer(2)]]) {
     const device float *v = verts + vid * (c.stride / 4);
     float4 p = float4(v[0], v[1], v[2], 1);
     MeshOut o;
@@ -300,6 +343,11 @@ vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffe
     uint argb = as_type<uint>(v[6]);
     o.color = float4((argb >> 16) & 0xff, (argb >> 8) & 0xff, argb & 0xff, argb >> 24) / 255.0;
     o.uv = float2(v[7], v[8]);
+    o.extinction = 1;
+    o.inscatter = 0;
+    if (fog.enabled && FoggedEffect(c.effect)) {
+        Scatter(o.world_pos, c.eye.xyz, fog, o.extinction, o.inscatter);
+    }
     return o;
 }
 
@@ -356,8 +404,10 @@ fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(
         out = CarShade(in, t, c, m, l, (c.shade & 4) != 0);
     } else {
         // PC WORLD / WORLDPRELIT: 2 x texture x vertex colour (rgb),
-        // texture alpha x vertex alpha.
-        out = float4(saturate(2.0 * t.rgb * in.color.rgb), t.a * in.color.a);
+        // texture alpha x vertex alpha. The fogged WORLD effects attenuate
+        // the vertex colour (oD0 = E x ambient x colour) and add the
+        // in-scatter after the x2 (ps: mad_x2 ..., add r0, r0, t2).
+        out = float4(saturate(2.0 * t.rgb * in.color.rgb * in.extinction + in.inscatter), t.a * in.color.a);
     }
     if ((c.shade & 2) && out.a < 0.5) {
         discard_fragment();
@@ -593,6 +643,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 [enc setDepthStencilState:(mode == 0 ? _depthWrite : _depthTest)];
                 [enc setVertexBuffer:d.vertex_buffer offset:0 atIndex:0];
                 [enc setVertexBytes:&c length:sizeof(c) atIndex:1];
+                [enc setVertexBytes:&scene.fog length:sizeof(scene.fog) atIndex:2];
                 [enc setFragmentTexture:(d.texture ? d.texture : _white) atIndex:0];
                 [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
                 [enc setFragmentBytes:d.material length:sizeof(d.material) atIndex:1];

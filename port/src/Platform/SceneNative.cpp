@@ -18,6 +18,8 @@
 #include "Speed/Indep/Src/World/Scenery.hpp"
 #include "Speed/Indep/Src/Gameplay/GRaceDatabase.h"
 #include "Speed/Indep/Src/Ecstasy/eMath.hpp"
+#include "Speed/Indep/Src/Generated/AttribSys/Classes/effects.h"
+#include "Speed/Indep/Src/Misc/Timer.hpp"
 #include "Speed/Indep/bWare/Inc/bWare.hpp"
 
 #include "../Mac/MetalBridge.h"
@@ -253,6 +255,99 @@ void RenderFrontEndCars(eView *view, int reflection); // CarRender.cpp
 
 namespace {
 
+// speed.exe 1.3's TimeOfDay (TimeOfDayPointer, built by 0x770D70): sun
+// speed +0x0 (1), direction +0x4 (-1), position +0x8 (0.45), and the two
+// angles +0xC (3.28) and +0x10 (0.5). sub_769360, called every frame by
+// ___eDisplayFrame, moves the position and stores the normalised sun
+// direction at +0x180 (the world effect's LocalLightVec, in model space).
+struct TimeOfDaySun {
+    float speed = 1.0f;
+    int direction = -1;
+    float position = 0.45f;
+    float angle_a = 3.28f;
+    float angle_b = 0.5f;
+};
+TimeOfDaySun gSun;
+
+V3 TickSunDirection() {
+    // Online races take the position from the server (sub_735A30); not here.
+    float lo = TheGameFlowManager.GetState() == GAMEFLOW_STATE_IN_FRONTEND ? 0.35f : 0.05f;
+    TimeOfDaySun &t = gSun;
+    t.position += RealTimeElapsed * (1.0f / 60.0f) * static_cast<float>(t.direction) * t.speed * 0.05f;
+    if (!(t.position >= lo)) {
+        t.position = lo;
+        t.direction = -t.direction;
+    } else if (t.position > 1.0f - lo) {
+        t.position = 1.0f - lo;
+        t.direction = -t.direction;
+    }
+    float p = std::fmin(std::fmax(t.position, lo), 1.0f - lo);
+    float a = (p - 0.5f) * 3.1415927f;
+    float b = t.angle_a;
+    float c = t.angle_b;
+    // bSin(x + pi/2) = cos(x); the 100000 scale is normalised away.
+    V3 sun = {std::sin(a) * std::cos(b) + std::sin(b) * std::sin(c) * std::cos(a), std::sin(c) * std::cos(b) * std::cos(a) + std::sin(a) * std::sin(b),
+              std::cos(c) * std::cos(a)};
+    return Normalize(sun);
+}
+
+// sub_6D6CF0 (called by ___eDisplayFrame before the views draw): the world
+// effects' scattering constants from the 'effects' collection 0xCE3B435B
+// (byte 0x901934, which would take them from the TimeOfDay, is never set).
+// Rayleigh and Mie strengths map from 0..100 onto 0.0001..0.01 (globals
+// 0x901938/0x90193C).
+void SetWorldFog(V3 sun) {
+    Attrib::Gen::effects fx(0xce3b435b, 0, nullptr);
+    const float lo = 0.0001f, range = 0.01f - 0.0001f;
+    float bm_multiply = fx.BmMultiply() * 0.01f;
+    float br_multiply = fx.BrMultiply() * 0.01f;
+    const UMath::Vector4 &bm_colour = fx.ConstantBm();
+    const UMath::Vector4 &br_colour = fx.ConstantBr();
+    float g = fx.FogG();
+    float inscatter = fx.InScatterMulitply();
+    bool enable = fx.FogEnable();
+    float mie = bm_multiply > 0.0f ? bm_multiply * range + lo : 0.0f; // else dbl_8942E0 (0)
+    float rayleigh = br_multiply * range + lo;
+    float br[3] = {rayleigh * br_colour.x, rayleigh * br_colour.y, rayleigh * br_colour.z};
+    float bm[3] = {mie * bm_colour.x, mie * bm_colour.y, mie * bm_colour.z};
+
+    PortWorldFog f = {};
+    f.enabled = enable ? 1 : 0;
+    if (enable) {
+        for (int i = 0; i < 3; i++) {
+            f.br_plus_bm[i] = br[i] + bm[i];
+            f.one_over_brbm[i] = f.br_plus_bm[i] != 0.0f ? 1.0f / f.br_plus_bm[i] : 0.0f;
+            f.const1[i] = br[i] * 0.059683103f; // 3/(16 pi), 0x8AFB5C
+            f.const2[i] = bm[i] * 0.079577468f; // 1/(4 pi), 0x8AFB58
+        }
+    }
+    f.const3[0] = (1.0f - g) * (1.0f - g);
+    f.const3[1] = g * g + 1.0f;
+    f.const3[2] = g * -2.0f;
+    f.const3[3] = enable ? inscatter : 0.0f;
+    f.fog_value = 1.0f; // FOGVALUE: 1 unless the TimeOfDay source is used
+    f.light_dir[0] = sun.x;
+    f.light_dir[1] = sun.y;
+    f.light_dir[2] = sun.z;
+    static const bool trace = std::getenv("NFSMW_TRACE_FOG") != nullptr;
+    static int frame;
+    if (trace && frame++ % 300 == 0) {
+        std::fprintf(stderr,
+                     "[fog] enable %d BrMul %.3f BmMul %.3f Br (%.3f %.3f %.3f %.3f) Bm (%.3f %.3f %.3f %.3f) g %.3f inscatter %.3f sun (%.3f %.3f %.3f) pos %.3f\n",
+                     enable, fx.BrMultiply(), fx.BmMultiply(), br_colour.x, br_colour.y, br_colour.z, br_colour.w, bm_colour.x, bm_colour.y, bm_colour.z,
+                     bm_colour.w, g, inscatter, sun.x, sun.y, sun.z, gSun.position);
+    }
+    PortMetal3DSetFog(&f);
+}
+
+void SetupFrameLighting() {
+    SetWorldFog(TickSunDirection());
+}
+
+} // namespace
+
+namespace {
+
 // The view's camera: world -> camera (D3D-style, camera y down) times a
 // projection whose field of view is horizontal at 4:3 and kept vertical for
 // wider windows (Hor+), into Metal clip space.
@@ -370,6 +465,7 @@ bool RenderFrontEndScene() {
         return false;
     }
     PortMetal3DBeginFrame(view_proj);
+    SetupFrameLighting();
     SetViewClip(view, view_proj);
     {
         bVector3 *eye = view->GetCamera()->GetPosition();
@@ -589,6 +685,7 @@ bool RenderWorldScene(int frame) {
         return false;
     }
     PortMetal3DBeginFrame(view_proj);
+    SetupFrameLighting();
     SetViewClip(view, view_proj);
     bVector3 *eye = view->GetCamera()->GetPosition();
     float e[3] = {eye->x, eye->y, eye->z};

@@ -91,6 +91,25 @@ struct PortVisualTreatment {
 // Applies the treatment to this 3D frame (call after PortMetal3DBeginFrame).
 void PortMetal3DSetTreatment(const PortVisualTreatment *treatment);
 
+// PC world atmospheric scattering (IDI_WORLD_FX family vertex shaders:
+// extinction and Rayleigh + Henyey-Greenstein Mie in-scattering), with the
+// constants speed.exe 1.3 sub_6D6CF0 sets each frame from the 'effects'
+// attributes, and the sun direction (TimeOfDay +0x180, sub_769360) that
+// becomes LocalLightVec. Vectors are xyz plus padding.
+struct PortWorldFog {
+    float br_plus_bm[4];    // Fog_Br_Plus_Bm
+    float one_over_brbm[4]; // Fog_One_Over_BrBm
+    float const1[4];        // Fog_Const_1: Br * 3/(16 pi)
+    float const2[4];        // Fog_Const_2: Bm * 1/(4 pi)
+    float const3[4];        // Fog_Const_3: (1-g)^2, 1+g^2, -2g, in-scatter scale
+    float light_dir[4];     // world-space direction to the sun
+    float fog_value;        // FogValue (distance scale)
+    uint32_t enabled;
+    float pad[2];
+};
+// Scattering for this 3D frame (call after PortMetal3DBeginFrame; null = off).
+void PortMetal3DSetFog(const PortWorldFog *fog);
+
 // GPU buffers for model data (retained; release with PortMetalReleaseBuffer).
 void *PortMetalCreateBuffer(const void *data, size_t length, const char *label);
 void PortMetalReleaseBuffer(void *buffer);
