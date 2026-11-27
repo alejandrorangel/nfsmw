@@ -33,4 +33,8 @@ void PortBenchmarkEndFrame(uint64_t render_start_ns);
 void PortMacBenchmarkSetupView(void *mtk_view);      // main thread: the game's MTKView
 void PortMacBenchmarkDrawFrame(int frame, const char *png_path); // game thread: draw this frame now
 bool PortMacBenchmarkGPUTime(int frame, double *ms); // after PortMacBenchmarkFinish
+bool PortMacBenchmarkEncodeTime(int frame, double *ms); // the main thread's draw; after PortMacBenchmarkFinish
+// Game thread, before it publishes a frame: waits until the renderer has
+// taken the last one (it is encoded while the next one is built).
+void PortMacBenchmarkBeforePublish();
 void PortMacBenchmarkFinish();                       // waits for the GPU and the PNG writes

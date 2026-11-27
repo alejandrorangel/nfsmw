@@ -2,6 +2,7 @@
 
 #include "MetalBridge.h"
 #import "BenchmarkMac.h"
+#include "../Platform/Benchmark.h"
 #include "MetalPrelitBridge.h"
 
 #include <atomic>
@@ -531,6 +532,9 @@ void PortMetal3DAdd(const Port3DDraw *draw) {
 }
 
 int PortMetalFEEndFrame() {
+    if (PortBenchmarkActive()) {
+        PortMacBenchmarkBeforePublish(); // the benchmark draws every frame
+    }
     std::lock_guard<std::mutex> guard(gFELock);
     std::swap(gFEPublished, gFEBuilding);
     std::swap(g3DPublished, g3DBuilding);
@@ -2690,6 +2694,9 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
 }
 
 - (void)drawInMTKView:(MTKView *)view {
+    if (PortMacBenchmarkSkipDraw(view)) {
+        return;
+    }
     _drawableHeight = view.drawableSize.height;
     // NFSMW_BENCHMARK draws into an offscreen target instead of the drawable.
     MTLRenderPassDescriptor *pass = PortMacBenchmarkRenderPass(view);
@@ -2713,6 +2720,7 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
         }
         PortMetalPrelitTakeFrame((__bridge void *)_device);
     }
+    PortMacBenchmarkFrameTaken(view);
     const Frame3D &scene = _scene;
     gViewAspect = (float)(view.drawableSize.width / view.drawableSize.height);
     pass.depthAttachment.clearDepth = 1.0;

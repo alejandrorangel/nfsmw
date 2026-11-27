@@ -137,13 +137,18 @@ SkipFE switches (or to the main menu), the race AI drives the player's car
 (`AIVehicleHuman::SetAiControl`), every frame is exactly one 1/60 s sim tick,
 the random seed is fixed, file I/O completes synchronously (so what is loaded
 by a frame never depends on the disk), the real keyboard/mouse/pad and saves
-(profiles) are off, and frames are drawn offscreen in lockstep with no pacing
-or vsync (every 15th frame is copied to the window). Two runs give
-pixel-identical screenshots. After the scenario's frames (3600, a minute of
-game time, from the moment the race is on) it writes `<scenario>.csv`
-(per frame: `frame_ms` wall, `game_ms` game loop, `render_ms` render build,
-`present_ms` main-thread encode, `gpu_ms`, active `cars`) and
-`<scenario>_<frame>.png` to `$NFSMW_BENCHMARK_OUT`, and exits.
+(profiles) are off, and every frame is drawn offscreen, in order, with no
+pacing or vsync (every 15th frame is copied to the window). As in play, the
+main thread encodes a frame while the game thread builds the next one (the
+game waits only to publish a frame before the last one was taken);
+`NFSMW_BENCHMARK_SERIAL=1` (`benchmark.py --serial`) waits for each encode
+instead, the old lockstep. Two runs give pixel-identical screenshots. After
+the scenario's frames (3600, a minute of game time, from the moment the race
+is on) it writes `<scenario>.csv` (per frame: `frame_ms` wall, `game_ms` game
+loop, `render_ms` render build, `present_ms` the hand-off, `encode_ms` the
+main thread's encode, `gpu_ms`, active `cars`; build + encode is what a
+lockstep frame costs) and `<scenario>_<frame>.png` to `$NFSMW_BENCHMARK_OUT`,
+and exits.
 
 | scenario | what |
 |---|---|

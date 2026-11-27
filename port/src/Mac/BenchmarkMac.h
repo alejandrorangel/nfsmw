@@ -11,3 +11,8 @@ MTLRenderPassDescriptor *PortMacBenchmarkRenderPass(MTKView *view);
 // and now and then a copy to the window. Returns false when the benchmark is
 // off (the caller presents the drawable).
 bool PortMacBenchmarkEndDraw(id<MTLCommandBuffer> cmd, MTKView *view);
+// After the renderer has taken the published frame (under the frame lock).
+void PortMacBenchmarkFrameTaken(MTKView *view);
+// A draw the benchmark didn't ask for (AppKit's, e.g. at a resize): left out,
+// so it can't take a frame before the draw meant for it.
+bool PortMacBenchmarkSkipDraw(MTKView *view);

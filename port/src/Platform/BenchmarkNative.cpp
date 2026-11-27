@@ -17,12 +17,14 @@
 // time (Main.cpp's loop passes PortBenchmarkFixedFrameMs to MainLoop and
 // Scheduler::Run takes a fixed step), the random seed is fixed, the real
 // keyboard/mouse/pad are ignored, there's no frame pacing and no vsync, and
-// each frame is presented in lockstep with the game loop (BenchmarkMac.mm),
-// so a run is always the same frames, drawn as fast as the machine can.
+// every frame the game builds is drawn, in order (BenchmarkMac.mm: encoded on
+// the main thread while the game builds the next one, as in normal play), so
+// a run is always the same frames, drawn as fast as the machine can.
 //
 // Counting starts when the race is on (game flow RACING) or the main menu is
 // up; after the scenario's frames it writes <scenario>.csv (per frame: wall
-// time, the game loop, the render build, the present, the GPU) and the
+// time, the game loop, the render build, the present (the wait to hand the
+// frame over), the main thread's encode, the GPU) and the
 // screenshots <scenario>_<frame>.png to $NFSMW_BENCHMARK_OUT (default: the
 // current directory at launch), prints a summary and exits.
 //
@@ -30,7 +32,8 @@
 // NFSMW_BENCHMARK_RACE=<event id>, NFSMW_BENCHMARK_CAR=<vehicle>,
 // NFSMW_BENCHMARK_OPPONENTS=<n>, NFSMW_BENCHMARK_TRAFFIC=<0..100>,
 // NFSMW_BENCHMARK_TIMEOUT=<s> (real seconds to reach the start, 180),
-// NFSMW_BENCHMARK_VSYNC=1.
+// NFSMW_BENCHMARK_VSYNC=1, NFSMW_BENCHMARK_SERIAL=1 (the game thread waits
+// for each frame's encode: the frame is game + build + encode).
 
 #include "Benchmark.h"
 
@@ -1004,14 +1007,15 @@ double Percentile(std::vector<double> v, double fraction) {
     int max_cars = 0;
     if (f) {
         std::fprintf(f, "# scenario %s race %s car %s frames %d\n", gScenario->name, gRace.c_str(), gCar.c_str(), gFrames);
-        std::fprintf(f, "frame,frame_ms,game_ms,render_ms,present_ms,gpu_ms,cars,screenshot\n");
+        std::fprintf(f, "frame,frame_ms,game_ms,render_ms,present_ms,encode_ms,gpu_ms,cars,screenshot\n");
     }
     for (const FrameRecord &r : gRecords) {
         if (r.frame <= 0) {
             continue;
         }
-        double gpu = 0;
+        double gpu = 0, encode = 0;
         PortMacBenchmarkGPUTime(r.frame, &gpu);
+        PortMacBenchmarkEncodeTime(r.frame, &encode);
         // The first frame's wall time includes the load before it.
         if (r.frame > 1) {
             frame_ms.push_back(r.frame_ms);
@@ -1019,7 +1023,8 @@ double Percentile(std::vector<double> v, double fraction) {
         }
         max_cars = std::max(max_cars, r.cars);
         if (f) {
-            std::fprintf(f, "%d,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d\n", r.frame, r.frame_ms, r.game_ms, r.render_ms, r.present_ms, gpu, r.cars,
+            std::fprintf(f, "%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d\n", r.frame, r.frame_ms, r.game_ms, r.render_ms, r.present_ms, encode,
+                         gpu, r.cars,
                          r.shot ? 1 : 0);
         }
     }

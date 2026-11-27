@@ -1,6 +1,11 @@
 // Mac side of the benchmark mode (Platform/BenchmarkNative.cpp): the game
-// thread draws each frame itself, in lockstep (the MTKView's own timer is
-// paused). Frames go to an offscreen target the drawable's size: a window's
+// thread has each frame drawn itself (the MTKView's own timer is paused).
+// The main thread encodes frame N while the game thread builds frame N+1, as
+// in normal play: the game thread waits only before it publishes N+1, until
+// the renderer has taken N, so every frame is drawn exactly once, in order.
+// NFSMW_BENCHMARK_SERIAL=1 waits for each frame's encode instead (the old
+// lockstep: the frame is then build + encode). Frames go to an offscreen
+// target the drawable's size: a window's
 // drawables come back at the display's refresh even with the display sync
 // off, which would cap the frame rate at two frames a refresh. Every
 // NFSMW_BENCHMARK_PRESENT'th frame (15 by default; 1 presents every frame,
@@ -14,6 +19,7 @@
 
 #include "../Platform/Benchmark.h"
 
+#include <condition_variable>
 #include <cstdlib>
 #include <mutex>
 #include <string>
@@ -21,7 +27,16 @@
 
 static MTKView *gBenchView;
 static std::mutex gBenchLock;
-static std::vector<double> gGPUms; // by benchmark frame
+static std::vector<double> gGPUms;    // by benchmark frame
+static std::vector<double> gEncodeMs; // by benchmark frame: the main thread's draw
+static bool gSerial;
+// Frames handed to the main thread that the renderer hasn't taken yet (the
+// game thread publishes the next one only when this is 0).
+static std::mutex gTakeLock;
+static std::condition_variable gTakeCond;
+static int gUntaken;
+static bool gTaken;  // main thread: this draw has taken its frame
+static bool gInDraw; // main thread: drawing a frame the game thread handed over
 static int gPendingFrame;
 static int gDrawCount;
 static int gPresentEvery = 15;
@@ -43,23 +58,75 @@ void PortMacBenchmarkSetupView(void *mtk_view) {
     if (const char *every = getenv("NFSMW_BENCHMARK_PRESENT")) {
         gPresentEvery = atoi(every);
     }
+    if (const char *serial = getenv("NFSMW_BENCHMARK_SERIAL")) {
+        gSerial = atoi(serial) != 0;
+    }
     gBenchGroup = dispatch_group_create();
     gInFlight = dispatch_semaphore_create(2);
+}
+
+static void FrameTaken() {
+    gTaken = true;
+    std::lock_guard<std::mutex> guard(gTakeLock);
+    gUntaken--;
+    gTakeCond.notify_all();
+}
+
+void PortMacBenchmarkFrameTaken(MTKView *view) {
+    if (gBenchView != nil && view == gBenchView && gInDraw && !gTaken) {
+        FrameTaken();
+    }
+}
+
+bool PortMacBenchmarkSkipDraw(MTKView *view) {
+    return gBenchView != nil && view == gBenchView && !gInDraw;
+}
+
+void PortMacBenchmarkBeforePublish() {
+    std::unique_lock<std::mutex> lock(gTakeLock);
+    gTakeCond.wait(lock, [] { return gUntaken == 0; });
 }
 
 void PortMacBenchmarkDrawFrame(int frame, const char *png_path) {
     if (gBenchView == nil) {
         return;
     }
-    gPendingFrame = frame;
-    gPendingPNG = png_path ? png_path : "";
+    std::string png = png_path ? png_path : "";
     dispatch_semaphore_wait(gInFlight, DISPATCH_TIME_FOREVER);
-    gEncoded = false;
-    dispatch_sync(dispatch_get_main_queue(), ^{
+    {
+        std::lock_guard<std::mutex> guard(gTakeLock);
+        gUntaken++;
+    }
+    dispatch_group_enter(gBenchGroup);
+    void (^draw)(void) = ^{
+      gPendingFrame = frame;
+      gPendingPNG = png;
+      gEncoded = false;
+      gTaken = false;
+      gInDraw = true;
+      uint64_t start = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
       [gBenchView draw];
-    });
-    if (!gEncoded) {
-        dispatch_semaphore_signal(gInFlight); // nothing drawn (no size yet)
+      double ms = (clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - start) / 1e6;
+      gInDraw = false;
+      if (!gTaken) {
+          FrameTaken(); // nothing drawn (no size yet)
+      }
+      if (!gEncoded) {
+          dispatch_semaphore_signal(gInFlight);
+      }
+      if (frame > 0) {
+          std::lock_guard<std::mutex> guard(gBenchLock);
+          if (gEncodeMs.size() <= static_cast<size_t>(frame)) {
+              gEncodeMs.resize(frame + 1, 0.0);
+          }
+          gEncodeMs[frame] = ms;
+      }
+      dispatch_group_leave(gBenchGroup);
+    };
+    if (gSerial) {
+        dispatch_sync(dispatch_get_main_queue(), draw);
+    } else {
+        dispatch_async(dispatch_get_main_queue(), draw);
     }
 }
 
@@ -182,6 +249,15 @@ bool PortMacBenchmarkGPUTime(int frame, double *ms) {
         return false;
     }
     *ms = gGPUms[frame];
+    return true;
+}
+
+bool PortMacBenchmarkEncodeTime(int frame, double *ms) {
+    std::lock_guard<std::mutex> guard(gBenchLock);
+    if (frame < 0 || static_cast<size_t>(frame) >= gEncodeMs.size()) {
+        return false;
+    }
+    *ms = gEncodeMs[frame];
     return true;
 }
 

@@ -12,8 +12,13 @@ NFSMW_BENCHMARK=<scenario> boots straight into a fixed race (or the main menu), 
 player's car and runs every frame as exactly one 1/60 s sim tick with a fixed seed and synchronous file
 loading, drawing offscreen as fast as the machine can (no pacing, no vsync). A run is always the same
 frames: the screenshots of two runs are pixel-identical, so --compare tells rendering changes apart from
-noise. The game writes a CSV of per-frame times (wall, game loop, render build, present, GPU) and the
-screenshots, then exits.
+noise. The game writes a CSV of per-frame times (wall, game loop, render build, present, encode, GPU) and
+the screenshots, then exits.
+
+As in normal play, the main thread encodes a frame while the game thread builds the next one, so the
+frame time is about the longer of the two (or the GPU's). The build and encode columns are the medians of
+each on its own; --serial runs the old lockstep (NFSMW_BENCHMARK_SERIAL=1: the game waits for each
+encode), whose frame is their sum.
 
 Times are wall time per frame with the first frame (the load before it) left out. The median leaves out
 the hitches that swing the average fps. Other programs, the Mac warming up and other games running
@@ -135,6 +140,8 @@ def run(binary, data, scenario, options, out_dir, args):
         extra['NFSMW_BENCHMARK_FRAMES'] = str(args.frames)
     if args.shots is not None:
         extra['NFSMW_BENCHMARK_SHOTS'] = args.shots
+    if args.serial:
+        extra['NFSMW_BENCHMARK_SERIAL'] = '1'
     if args.vsync:
         extra['NFSMW_BENCHMARK_VSYNC'] = '1'
         extra['NFSMW_BENCHMARK_PRESENT'] = '1'
@@ -163,10 +170,12 @@ def run(binary, data, scenario, options, out_dir, args):
     times = [float(r['frame_ms']) for r in rows if int(r['frame']) > 1]
     if not times:
         return None
-    gpu = [float(r['gpu_ms']) for r in rows if int(r['frame']) > 1]
+    def column(name):
+        return statistics.median(float(r.get(name) or 0) for r in rows if int(r['frame']) > 1)
     cars = max(int(r.get('cars') or 0) for r in rows)
     return {'median': statistics.median(times), 'p90': percentile(times, 0.9), 'p99': percentile(times, 0.99),
-            'fps': len(times) / (sum(times) / 1000.0), 'gpu': statistics.median(gpu), 'frames': len(rows), 'cars': cars,
+            'fps': len(times) / (sum(times) / 1000.0), 'gpu': column('gpu_ms'), 'build': column('render_ms'),
+            'encode': column('encode_ms'), 'frames': len(rows), 'cars': cars,
             'wall': time.time() - started, 'load': load,
             'shots': sorted(f for f in os.listdir(out_dir) if f.endswith('.png'))}
 
@@ -260,6 +269,7 @@ def main():
     parser.add_argument('--shots', help="the frames to screenshot, comma separated, the scenario's by default; '' for none")
     parser.add_argument('--screenshots', metavar='DIR', help="keep the first run's screenshots in DIR/<setting>/ (DIR/ without --vary)")
     parser.add_argument('--keep', metavar='DIR', help='keep every run (CSV, log, screenshots, options) in DIR')
+    parser.add_argument('--serial', action='store_true', help='the game thread waits for each frame\'s encode (the frame is build + encode)')
     parser.add_argument('--vsync', action='store_true', help='present every frame with the display sync on (the frame rate is the display\'s)')
     parser.add_argument('--timeout', type=int, default=300, help='seconds a run may take, 300 by default')
     parser.add_argument('--env', action='append', default=[], metavar='NAME=VALUE',
@@ -349,9 +359,9 @@ def benchmark(args, work):
                         result['diff'] = worst
                         note = '  screenshots ' + ('identical' if worst == 0 else 'DIFFER (max %d)' % worst)
                     results.setdefault(key, []).append(result)
-                    print('  run %d %-20s median %6.3f ms  p90 %6.3f  p99 %6.3f  avg %6.1f fps  gpu %5.3f  (%d frames, %d cars, %.0f s, load %.1f)%s'
-                          % (i + 1, label, result['median'], result['p90'], result['p99'], result['fps'], result['gpu'],
-                             result['frames'], result['cars'], result['wall'], result['load'], note))
+                    print('  run %d %-20s median %6.3f ms  p90 %6.3f  p99 %6.3f  avg %6.1f fps  build %5.3f  encode %5.3f  gpu %5.3f  (%d frames, %d cars, %.0f s, load %.1f)%s'
+                          % (i + 1, label, result['median'], result['p90'], result['p99'], result['fps'], result['build'], result['encode'],
+                             result['gpu'], result['frames'], result['cars'], result['wall'], result['load'], note))
                     shutil.rmtree(out, ignore_errors=True)
     except KeyboardInterrupt:
         print('\nStopped')
@@ -359,7 +369,8 @@ def benchmark(args, work):
 
     if not results:
         return 1
-    print('\n%-10s %-20s %9s %8s %8s %9s %8s %8s %5s' % ('scenario', 'setting', 'median ms', 'p90', 'p99', 'avg fps', 'gpu ms', 'spread', 'runs'))
+    print('\n%-10s %-20s %9s %8s %8s %9s %8s %8s %8s %8s %5s' % ('scenario', 'setting', 'median ms', 'p90', 'p99', 'avg fps', 'build ms',
+                                                              'encode ms', 'gpu ms', 'spread', 'runs'))
     noisy = []
     for (scenario, label), runs in results.items():
         medians = [r['median'] for r in runs]
@@ -367,9 +378,10 @@ def benchmark(args, work):
         spread = (max(medians) - min(medians)) / middle * 100 if len(medians) > 1 else 0
         if spread > 5:
             noisy.append('%s %s' % (scenario, label))
-        print('%-10s %-20s %9.3f %8.3f %8.3f %9.1f %8.3f %7.1f%% %5d'
+        print('%-10s %-20s %9.3f %8.3f %8.3f %9.1f %8.3f %8.3f %8.3f %7.1f%% %5d'
               % (scenario, label or '-', middle, statistics.median(r['p90'] for r in runs), statistics.median(r['p99'] for r in runs),
-                 statistics.median(r['fps'] for r in runs), statistics.median(r['gpu'] for r in runs), spread, len(runs)))
+                 statistics.median(r['fps'] for r in runs), statistics.median(r['build'] for r in runs),
+                 statistics.median(r['encode'] for r in runs), statistics.median(r['gpu'] for r in runs), spread, len(runs)))
     if noisy:
         print('\nWarning: the runs of %s are more than 5%% apart; something else is using the machine '
               '(load average now %.1f), run again or with more -n.' % (', '.join(noisy), os.getloadavg()[0]))
