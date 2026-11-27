@@ -381,6 +381,28 @@ void PortRenderSkids(eView *view) {
     RenderClans(view);
 }
 
+// ___eDisplayFrame's flares in the other views, with 0x9017E4 set, under
+// IDI_WORLDPRELIT_FX: the road reflection (view 4, 0x6DE57B:
+// eRenderWorldLightFlares type 2, RenderVehicleFlares(view, 1, 0),
+// eRenderLightFlarePool) and each env-map face (0x6DE7F4: type 1, the pool,
+// RenderVehicleFlares(view, 0, 1)), into that view's prelit part.
+void PortRenderViewFlares(eView *view, int part) {
+    if (gPCGraphicsOptions.Unknown34 == 0) {
+        return;
+    }
+    PortMetalPrelitSetPart(part);
+    if (part == PORT_PRELIT_PART_REFLECTION) {
+        eRenderWorldLightFlares(view, FLARE_REFLECT);
+        RenderVehicleFlares(view, 1, 0);
+        eRenderLightFlarePool(view);
+    } else {
+        eRenderWorldLightFlares(view, FLARE_ENV);
+        eRenderLightFlarePool(view);
+        RenderVehicleFlares(view, 0, 1);
+    }
+    PortMetalPrelitSetPart(0);
+}
+
 void PortRenderWorldEffects(eView *view) {
     // (ePreDisplay, at the start of the frame, added the sun's flares to the
     // pool and read the flare attributes: FERenderMetal.cpp.)

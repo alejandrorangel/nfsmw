@@ -29,6 +29,7 @@
 #include "Speed/Indep/bWare/Inc/bWare.hpp"
 
 #include "../Mac/MetalBridge.h"
+#include "../Mac/MetalPrelitBridge.h"
 #include "ParticlesNative.h"
 #include "ScreenEffectsNative.h"
 
@@ -1265,15 +1266,16 @@ bool RenderWorldScene(int frame) {
         // level; above Road Reflection Detail 1, when wet, the scenery
         // (stuff flags 8: not the 0x80 instances) and the cars mirrored
         // (sub_750B10(view 4, 1)); at detail 3 in a race the target is
-        // blurred (sub_6D4960). TODO(port): the light flares PC also draws
-        // there (eRenderWorldLightFlares type 2, RenderVehicleFlares,
-        // eRenderLightFlarePool) aren't ported.
+        // blurred (sub_6D4960), then the light flares are drawn into it
+        // (eRenderWorldLightFlares type 2, RenderVehicleFlares,
+        // eRenderLightFlarePool).
         PortMetal3DBeginReflection(view_proj);
         StuffSkyLayer(reflection_view, SKY_LAYER_REFLECTION);
         if (road_reflection > 1 && wet) {
             gWorldCullInfo.StuffScenery(reflection_view, 8);
             VehicleRenderConn::RenderAll(reflection_view, 1);
         }
+        PortRenderViewFlares(reflection_view, PORT_PRELIT_PART_REFLECTION);
         PortMetal3DEndReflection();
         PortMetal3DSetReflection(1, road_reflection == 3 && wet);
         reflection_draws = gSceneDraws;
@@ -1285,8 +1287,8 @@ bool RenderWorldScene(int frame) {
     if (envmap) {
         // ___eDisplayFrame 0x6DE675: each active face gets the sky and the
         // scenery (0x6DE7A4): stuff flags 0 with Car Reflection Detail
-        // (0x9017BC) on, else 0x1000 at Shadow Detail < 2, else none (the
-        // light flares the PC also draws here are not ported yet).
+        // (0x9017BC) on, else 0x1000 at Shadow Detail < 2, else none; then
+        // its light flares.
         const int reflection_detail = gPCGraphicsOptions.CarEnvironmentMapUpdateData;
         for (int i = 0; i < 6; i++) {
             eView *face = envmap->Views[i];
@@ -1302,6 +1304,7 @@ bool RenderWorldScene(int frame) {
                 } else if (shadow_detail < 2) {
                     gWorldCullInfo.StuffScenery(face, 0x1000);
                 }
+                PortRenderViewFlares(face, PORT_PRELIT_PART_ENV_FACE + i);
                 PortMetal3DEndEnvFace();
             }
         }

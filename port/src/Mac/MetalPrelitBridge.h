@@ -38,8 +38,12 @@ void PortMetalPrelitBeginFrame();
 void PortMetalPrelitAddQuads(void *texture, PortPrelitBlend blend, uint32_t flags, const PortPrelitVertex *vertices, uint32_t num_quads);
 // Quads added from now on are in this part of the frame: 0 (the start) up
 // to the motion blur, 1 after it (PortMetal3DSetMotionBlur), 2 the X360
-// flares (PortMetal3DBeginX360Flares).
+// flares (PortMetal3DBeginX360Flares), 3 the road reflection's flares, 4 + i
+// env-map face i's flares.
+enum { PORT_PRELIT_PART_REFLECTION = 3, PORT_PRELIT_PART_ENV_FACE = 4 };
 void PortMetalPrelitSetPart(int part);
+// Render thread: whether the published frame has quads in this part.
+bool PortMetalPrelitHasPart(int part);
 // Publishes the building frame (PortMetalFEEndFrame calls it).
 void PortMetalPrelitPublish();
 // Render thread: draws the published frame into encoder (an

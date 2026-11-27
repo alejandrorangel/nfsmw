@@ -203,6 +203,16 @@ void PortMetalPrelitAddQuads(void *texture, PortPrelitBlend blend, uint32_t flag
     f.batches.back().count += num_quads * 6;
 }
 
+bool PortMetalPrelitHasPart(int part) {
+    std::lock_guard<std::mutex> guard(gLock);
+    for (const Batch &b : gPublished.batches) {
+        if (b.part == part) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void PortMetalPrelitPublish() {
     std::lock_guard<std::mutex> guard(gLock);
     std::swap(gPublished, gBuilding);
@@ -215,7 +225,7 @@ void PortMetalPrelitDraw(void *encoder, void *device, const float view_proj[16],
     {
         std::lock_guard<std::mutex> guard(gLock);
         for (const Batch &b : gPublished.batches) {
-            if (part < 0 ? b.part != 2 : b.part == part) {
+            if (part < 0 ? b.part <= 1 : b.part == part) {
                 batches.push_back(b);
             }
         }

@@ -1730,6 +1730,10 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         _drawingEnvFace = true;
         [self drawDraws:f.draws viewProj:f.view_proj eye:f.eye fog:scene.fog envMap:nil width:size height:size encoder:enc];
         _drawingEnvFace = false;
+        // ___eDisplayFrame 0x6DE7F4: the face's world (type 1), pool and car
+        // flares under IDI_WORLDPRELIT_FX.
+        PortMetalPrelitDraw((__bridge void *)enc, (__bridge void *)_device, f.view_proj, 1, (int)_colorFormat, (int)_depthFormat,
+                            PORT_PRELIT_PART_ENV_FACE + face);
         [enc endEncoding];
         _envFacesDrawn |= 1u << face;
     }
@@ -2313,7 +2317,7 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
                                                                                      height:h
                                                                                   mipmapped:NO];
         dd.usage = MTLTextureUsageRenderTarget;
-        dd.storageMode = MTLStorageModeMemoryless;
+        dd.storageMode = MTLStorageModePrivate; // kept for the flares after the blur
         _reflDepth = [_device newTextureWithDescriptor:dd];
         _reflValid = false;
     }
@@ -2327,7 +2331,7 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
         rp.depthAttachment.texture = _reflDepth;
         rp.depthAttachment.loadAction = MTLLoadActionClear;
         rp.depthAttachment.clearDepth = 1.0;
-        rp.depthAttachment.storeAction = MTLStoreActionDontCare;
+        rp.depthAttachment.storeAction = MTLStoreActionStore;
         rp.stencilAttachment.texture = _reflDepth;
         rp.stencilAttachment.loadAction = MTLLoadActionClear;
         rp.stencilAttachment.storeAction = MTLStoreActionDontCare;
@@ -2347,6 +2351,23 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
     if (scene.reflection_blur && _filterPipeline) {
         [self filter:_reflColor into:_reflBlur taps:kBlurH count:4 mode:0 commandBuffer:cmd];
         [self filter:_reflBlur into:_reflColor taps:kBlurV count:4 mode:0 commandBuffer:cmd];
+    }
+    if (scene.reflection_active && PortMetalPrelitHasPart(PORT_PRELIT_PART_REFLECTION)) {
+        // ___eDisplayFrame 0x6DE57B: after the blur, under IDI_WORLDPRELIT_FX,
+        // the world (type 2), car and pool flares into the reflection.
+        MTLRenderPassDescriptor *fp = [MTLRenderPassDescriptor renderPassDescriptor];
+        fp.colorAttachments[0].texture = _reflColor;
+        fp.colorAttachments[0].loadAction = MTLLoadActionLoad;
+        fp.colorAttachments[0].storeAction = MTLStoreActionStore;
+        fp.depthAttachment.texture = fp.stencilAttachment.texture = _reflDepth;
+        fp.depthAttachment.loadAction = fp.stencilAttachment.loadAction = MTLLoadActionLoad;
+        fp.depthAttachment.storeAction = fp.stencilAttachment.storeAction = MTLStoreActionDontCare;
+        id<MTLRenderCommandEncoder> fe = [cmd renderCommandEncoderWithDescriptor:fp];
+        fe.label = @"Road reflection flares";
+        [fe setViewport:(MTLViewport){0, 0, (double)w, (double)h, 0, 1}];
+        PortMetalPrelitDraw((__bridge void *)fe, (__bridge void *)_device, scene.reflection_view_proj, 1, (int)_colorFormat, (int)_depthFormat,
+                            PORT_PRELIT_PART_REFLECTION);
+        [fe endEncoding];
     }
     _reflBound = _reflColor;
 }

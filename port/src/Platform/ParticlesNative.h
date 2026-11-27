@@ -10,3 +10,6 @@ void PortRenderSkids(eView *view);
 // After the cars and the scene: 0x6DF2A3 the light flares (when enabled),
 // 0x6DF472 the particles (g_ParticleSystemEnable, IDI_PARTICLES_FX).
 void PortRenderWorldEffects(eView *view);
+// The light flares of the road reflection / an env-map face, into prelit
+// part (MetalPrelitBridge.h PORT_PRELIT_PART_*).
+void PortRenderViewFlares(eView *view, int part);
