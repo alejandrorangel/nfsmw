@@ -148,6 +148,13 @@ eSolidPlatInfo *LoadMesh(bChunk *mesh, const char *solid_name) {
         bMemCpy(out.AABBMax, g + 0x0C, 12);
         bMemCpy(out.TextureSlots, g + 0x18, 6);
         out.Effect = static_cast<uint16>(Read<uint32>(g + 0x30));
+        {
+            static const bool trace = std::getenv("NFSMW_TRACE_SOLID_EFFECTS") != nullptr;
+            static int seen[64];
+            if (trace && out.Effect < 64 && seen[out.Effect]++ < 6) {
+                std::fprintf(stderr, "[solidfx] effect %u in %s group %d (stride? flags 0x%x)\n", out.Effect, solid_name, i, out.Flags);
+            }
+        }
         out.Flags = Read<uint32>(g + 0x38);
         out.NumVertices = Read<uint32>(g + 0x3C);
         out.FirstIndex = Read<uint32>(g + 0x44);

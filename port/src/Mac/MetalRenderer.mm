@@ -79,6 +79,10 @@ void *PortMetalCreateBuffer(const void *data, size_t length, const char *label) 
     return (__bridge_retained void *)buffer;
 }
 
+const void *PortMetalBufferContents(void *buffer) {
+    return buffer ? [(__bridge id<MTLBuffer>)buffer contents] : nullptr;
+}
+
 void PortMetalReleaseBuffer(void *buffer) {
     if (buffer) {
         id<MTLBuffer> b = (__bridge_transfer id<MTLBuffer>)buffer;
@@ -1047,8 +1051,12 @@ vertex ShadowOut shadow_vs(uint vid [[vertex_id]], const device float *verts [[b
     const device float *v = verts + vid * (c.stride / 4);
     ShadowOut o;
     o.pos = c.mvp * float4(v[0], v[1], v[2], 1);
-    o.uv = float2(v[7], v[8]);
-    o.alpha = float(as_type<uint>(v[6]) >> 24) / 255.0;
+    o.uv = 0;
+    o.alpha = 1;
+    if (c.alpha_test) { // (shadow-map meshes are positions only)
+        o.uv = float2(v[7], v[8]);
+        o.alpha = float(as_type<uint>(v[6]) >> 24) / 255.0;
+    }
     return o;
 }
 

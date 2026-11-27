@@ -41,6 +41,7 @@
 
 TextureInfo *PortSolidTexture(eSolid *solid, int index); // SolidNative.cpp
 void PortRainDropsFrame();                                 // RainNative.cpp
+void PortRenderShadowMapMeshes();                          // ShadowMapMeshNative.cpp
 extern bTList<FrontEndRenderingCar> FrontEndRenderingCarList; // CarRender.cpp
 extern bTList<eLightMaterial> LightMaterialList;               // eLight.cpp
 
@@ -1310,15 +1311,17 @@ bool RenderWorldScene(int frame) {
     int shadow_draws = 0;
     if (shadow_view) {
         // sub_6E44C0: the world models, the scenery (stuff flags 0x2000 at
-        // Shadow Detail 1, else 0x200; 0x8FAECC = 1) and the cars (the view
-        // anchor's, then every other loaded one: all of them).
-        // TODO(port): the shadow-map meshes (sub_6D7F70, list 0x982D10,
-        // IDI_SHADOW_MAP_MESH_FX) and the caster test against the narrower
-        // frustum and its sweep along the light (sub_6D7A40) are not ported.
+        // Shadow Detail 1, else 0x200; 0x8FAECC = 1), the cars (the view
+        // anchor's, then every other loaded one: all of them) and the
+        // sections' shadow-map meshes (0x6E535B, sub_6D7F70;
+        // ShadowMapMeshNative.cpp). TODO(port): the caster test against the
+        // narrower frustum and its sweep along the light (sub_6D7A40) is not
+        // ported.
         PortMetal3DBeginShadow(shadow_proj, shadow_detail);
         RenderWorldModels(shadow_view, 0);
         gWorldCullInfo.StuffScenery(shadow_view, shadow_detail == 1 ? 0x2000 : 0x200);
         VehicleRenderConn::RenderAll(shadow_view, 0);
+        PortRenderShadowMapMeshes();
         PortMetal3DEndShadow();
         PortMetal3DSetShadowTransform(shadow_texture, gTunnelShadowFade);
         shadow_draws = gSceneDraws;
