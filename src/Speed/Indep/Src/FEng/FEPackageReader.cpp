@@ -835,7 +835,9 @@ bool FEPackageReader::ReadScriptTags(FETag *pTag, u32 Length) {
 
                 for (u32 i = 0; i < KeyLongs; i++) {
                     reinterpret_cast<u32 *>(&pTrack->BaseKey.Val)[i] = pTag->Getu32(i + 1);
-                    i++;
+#if !defined(EA_PORT_NATIVE)
+                    i++; // decomp artefact: copies every other value (y of a vector, g/a of a colour)
+#endif
                 }
 
                 break;
