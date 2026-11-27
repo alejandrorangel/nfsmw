@@ -159,6 +159,26 @@ target_compile_options(nfsmw PRIVATE -fobjc-arc)
 if(NFSMW_PORT_CHECK_MISSING_RETURN)
     target_link_options(nfsmw PRIVATE $<$<CONFIG:Debug>:-fsanitize=return>)
 endif()
+# The renderer's per-frame CPU work (frame build, culling, Metal encoding)
+# is optimized even in Debug: at -O0 it took about half of a race frame.
+# Only code that draws: it changes no game state, so the frames are the
+# same at either level (the benchmark's screenshots are identical). The
+# decompiled game code and the platform code the simulation reads (math,
+# camera, game shims) stay at -O0: at -O2 the game hangs loading the attrib
+# vaults (undefined behaviour in decompiled code), and -O2's sin/cos ->
+# sincos and similar libm rewrites move the simulation by an ulp.
+option(NFSMW_PORT_OPTIMIZE_RENDERER "Build the renderer at -O2 in Debug too" ON)
+if(NFSMW_PORT_OPTIMIZE_RENDERER)
+    set_source_files_properties(
+        src/Mac/MetalRenderer.mm src/Mac/MetalPrelit.mm src/Mac/BenchmarkMac.mm
+        src/Platform/SceneNative.cpp src/Platform/SolidNative.cpp src/Platform/ViewsNative.cpp
+        src/Platform/TexturePackNative.cpp src/Platform/TexturePlatMetal.cpp src/Platform/FERenderMetal.cpp
+        src/Platform/RealFontNative.cpp src/Platform/EnvMapNative.cpp src/Platform/VisualTreatmentNative.cpp
+        src/Platform/ParticlesNative.cpp src/Platform/LightFlaresNative.cpp src/Platform/ScreenEffectsNative.cpp
+        src/Platform/ShadowMapMeshNative.cpp
+        TARGET_DIRECTORY nfsmw nfsmw_platform
+        PROPERTIES COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O2>")
+endif()
 target_link_libraries(nfsmw PRIVATE
     "-framework Cocoa"
     "-framework Metal"
