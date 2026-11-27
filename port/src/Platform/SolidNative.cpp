@@ -324,3 +324,34 @@ TextureInfo *PortSolidTexture(eSolid *solid, int index) {
     }
     return entry.pTextureInfo;
 }
+
+// PC eSolidNotifyTextureLoading (0x506EF0) keeps every solid list's texture
+// fix-up lists in sync as texture packs load and unload. Natively a solid's
+// texture entries are resolved lazily (PortSolidTexture), so on unload it is
+// enough to forget every entry that points into the unloading pack (or at the
+// one texture being unloaded); the next draw re-resolves it. Without this a
+// solid kept a dangling TextureInfo after its streamed pack went away.
+extern bTList<eSolidListHeader> SolidListHeaderList; // eSolid.cpp
+
+void eSolidNotifyTextureLoading(TexturePack *texture_pack, TextureInfo *texture_info, bool loading) {
+    if (loading) {
+        return;
+    }
+    for (eSolidListHeader *header = SolidListHeaderList.GetHead(); header != SolidListHeaderList.EndOfList(); header = header->GetNext()) {
+        if (header->SolidIndexEntryTable == nullptr) {
+            continue;
+        }
+        for (int i = 0; i < header->NumSolids; i++) {
+            eSolid *solid = header->SolidIndexEntryTable[i].Solid;
+            if (solid == nullptr || solid->pTextureTable == nullptr) {
+                continue;
+            }
+            for (int t = 0; t < solid->NumTextureTableEntries; t++) {
+                TextureInfo *&entry = solid->pTextureTable[t].pTextureInfo;
+                if (entry != nullptr && (entry == texture_info || (texture_pack != nullptr && entry->pTexturePack == texture_pack))) {
+                    entry = nullptr;
+                }
+            }
+        }
+    }
+}
