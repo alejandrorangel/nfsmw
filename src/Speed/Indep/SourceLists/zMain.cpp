@@ -39,6 +39,14 @@
 #include "Speed/Indep/Src/Generated/Events/ERestartRace.cpp"
 
 #include "Speed/Indep/Src/Generated/Events/EQuitToFE.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EFadeScreenOn.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EFadeScreenOff.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/ESndGameState.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/ECinematicMoment.cpp"
 #endif
 
 #include "Speed/Indep/Src/Input/Common/action.cpp"
