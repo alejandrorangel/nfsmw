@@ -38,6 +38,7 @@
 #if defined(EA_PORT_NATIVE)
 #include "Speed/Indep/Src/Generated/Messages/MControlPathfinder.h"
 #include "Speed/Indep/Src/Input/PCInputBindings.h"
+#include <new>
 #endif
 
 extern int g_MaxSongs;
@@ -48,6 +49,15 @@ extern Attrib::Key DriveConfigs[5][2];
 cFrontendDatabase *FEDatabase;
 
 #if defined(EA_PORT_NATIVE)
+// A profile in zeroed memory, as fresh PC heap memory is: the car stable's
+// unused bytes are part of the default stable hash (iDefaultStableHash) every
+// profile is checked against, so they have to be the same every run.
+static UserProfile *PortNewZeroedUserProfile(const char *name) {
+    void *mem = operator new(sizeof(UserProfile), name, 0);
+    bMemSet(mem, 0, sizeof(UserProfile));
+    return ::new (mem) UserProfile();
+}
+
 // The PC profile's cOnlineSettings block (0x57FFB0 / 0x580080); there are no
 // online settings natively, so the saved bytes are only kept.
 static uint8 gPortOnlineSettingsSave[0x36];
@@ -829,7 +839,11 @@ cFrontendDatabase::cFrontendDatabase()
     for (int i = 0; i < 2; i++) {
         CurrentUserProfiles[i] = nullptr;
     }
+#if defined(EA_PORT_NATIVE)
+    CurrentUserProfiles[0] = PortNewZeroedUserProfile("Player 1 UserProfile");
+#else
     CurrentUserProfiles[0] = new ("Player 1 UserProfile", 0) UserProfile();
+#endif
 }
 
 // UNSOLVED (regswap)
@@ -953,7 +967,11 @@ uint32 cFrontendDatabase::GetDefaultCar() {
 
 void cFrontendDatabase::CreateMultiplayerProfile(int player) {
     if (CurrentUserProfiles[player] == nullptr) {
+#if defined(EA_PORT_NATIVE)
+        CurrentUserProfiles[player] = PortNewZeroedUserProfile("FEDatabase UserProfile");
+#else
         CurrentUserProfiles[player] = new ("FEDatabase UserProfile", 0) UserProfile;
+#endif
         CurrentUserProfiles[player]->Default(player, true);
     }
 }

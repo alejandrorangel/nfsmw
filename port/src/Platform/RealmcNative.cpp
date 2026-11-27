@@ -23,6 +23,7 @@
 
 #include "realmemcard/memcard_interface.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -35,7 +36,9 @@
 #include <string>
 #include <sys/mount.h>
 #include <sys/stat.h>
+#include <strings.h>
 #include <unistd.h>
+#include <vector>
 
 // ---------------------------------------------------------------------------
 // RealCore LOCALE (PC: LOCALE_create 0x7F0FD8, LOCALE_setstate 0x7F0EF2,
@@ -297,54 +300,43 @@ uint32_t ConvertTime(time_t t) {
 }
 
 // The _findfirst/_findnext iterator (0x7F4137 / 0x7F4275), over the entries of
-// a directory that match a wildcard.
+// a directory that match a wildcard. Windows lists NTFS directories in name
+// order, so the names are sorted (case-insensitively) to list profiles alike.
 struct FindIterator {
-    DIR *mDir = nullptr;
+    bool mStarted = false;
+    std::vector<std::string> mNames;
+    std::size_t mNext = 0;
     std::string mDirPath;
-    std::string mPattern;
     std::string mName;
     CardStatus mStatus = STATUS_FILE_NOT_FOUND;
     EntryInfo mInfo;
     bool mIsDir = false;
 
-    ~FindIterator() {
-        Close();
-    }
-    void Close() {
-        if (mDir != nullptr) {
-            closedir(mDir);
-            mDir = nullptr;
-        }
-    }
     // Returns false (mStatus = STATUS_FILE_NOT_FOUND) when there are no more.
     bool Next(const char *path) {
-        if (mDir == nullptr) {
+        if (!mStarted) {
+            mStarted = true;
             std::string p(path);
             std::size_t slash = p.find_last_of('/');
             mDirPath = slash == std::string::npos ? "." : p.substr(0, slash);
-            mPattern = slash == std::string::npos ? p : p.substr(slash + 1);
-            mDir = opendir(mDirPath.c_str());
-            if (mDir == nullptr) {
-                mStatus = STATUS_FILE_NOT_FOUND;
-                return false;
+            const std::string pattern = slash == std::string::npos ? p : p.substr(slash + 1);
+            if (DIR *dir = opendir(mDirPath.c_str())) {
+                while (struct dirent *de = readdir(dir)) {
+                    if (fnmatch(pattern.c_str(), de->d_name, FNM_CASEFOLD) == 0) {
+                        mNames.push_back(de->d_name);
+                    }
+                }
+                closedir(dir);
             }
+            std::sort(mNames.begin(), mNames.end(), [](const std::string &a, const std::string &b) { return strcasecmp(a.c_str(), b.c_str()) < 0; });
         }
-        for (;;) {
-            struct dirent *de = readdir(mDir);
-            if (de == nullptr) {
-                Close();
-                mStatus = STATUS_FILE_NOT_FOUND;
-                return false;
-            }
-            if (fnmatch(mPattern.c_str(), de->d_name, FNM_CASEFOLD) != 0) {
-                continue;
-            }
+        while (mNext < mNames.size()) {
+            mName = mNames[mNext++];
             struct stat st;
-            const std::string full = mDirPath + "/" + de->d_name;
+            const std::string full = mDirPath + "/" + mName;
             if (stat(full.c_str(), &st) != 0) {
                 continue;
             }
-            mName = de->d_name;
             mIsDir = S_ISDIR(st.st_mode);
             mStatus = STATUS_OK;
             mInfo.Clear();
@@ -362,6 +354,8 @@ struct FindIterator {
             mInfo.mTime.mLastAccessed = ConvertTime(st.st_atimespec.tv_sec);
             return true;
         }
+        mStatus = STATUS_FILE_NOT_FOUND;
+        return false;
     }
 };
 

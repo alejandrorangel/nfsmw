@@ -4,6 +4,7 @@
 // events: gEventKeyOrderTable (0x8A5418, event IDs in Eytzinger order) and
 // gMakeEventCallbacks (0x8F5F40). Only a few events are reconstructed so far;
 // this table lists those. Unknown IDs return null and callers skip them.
+#include "Speed/Indep/Src/Generated/Events/EAutoSave.hpp"
 #include "Speed/Indep/Src/Generated/Events/EEnterBin.hpp"
 #include "Speed/Indep/Src/Generated/Events/EFadeScreenOff.hpp"
 #include "Speed/Indep/Src/Generated/Events/EFadeScreenOn.hpp"
@@ -31,6 +32,7 @@ const EventEntry kEvents[] = {
     {0x396E0F75, ELoadingScreenOff_MakeEvent_Callback},
     {0x75B0D22B, ESndGameState_MakeEvent_Callback},
     {0x2AF7332B, EEnterBin_MakeEvent_Callback},
+    {0x2EC2700D, EAutoSave_MakeEvent_Callback},
     // TODO(port): ECinematicMoment (0x7D2B68BD) needs its name pointers
     // resolved from the event data first.
 };
