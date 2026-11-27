@@ -1,4 +1,6 @@
 #include "Speed/Indep/Src/Physics/Bounds.h"
+#include "Speed/Indep/Src/Physics/Behaviors/RigidBody.h"
+#include "Speed/Indep/Src/Physics/Dynamics/Articulation.h"
 #include "Speed/Indep/Libs/Support/Utility/FastMem.h"
 #include "Speed/Indep/Libs/Support/Utility/UMath.h"
 #include "Speed/Indep/Libs/Support/Utility/UStandard.h"
@@ -286,6 +288,128 @@ bool Collection::AddNode(IBoundable *irbc, const Bounds *geom, const SimSurface 
 // speed.exe 1.3: 0x6813B0
 const Collection *Lookup(UCrc32 object_name_hash) {
     return TheCollections.Find(object_name_hash);
+}
+
+// speed.exe 1.3: 0x6718F0
+// Joins two bodies at matching joint nodes of their collision geometry: the
+// female node (kBounds_Joint_Female) on ifemale and the male node
+// (kBounds_Joint_Male) on imale. Constraint children of the female node are
+// paired with the male node's post children of the same name.
+bool CreateJoint(IBoundable *ifemale, UCrc32 femalenode_name, IBoundable *imale, UCrc32 malenode_name, UMath::Vector3 *out_female,
+                 UMath::Vector3 *out_male, unsigned int joint_flags) {
+    const Bounds *female_root = ifemale->GetGeometryNode();
+    const Bounds *male_root = imale->GetGeometryNode();
+    if (!female_root || !male_root) {
+        return false;
+    }
+    IDynamicsEntity *female_entity;
+    if (!ifemale->QueryInterface(&female_entity)) {
+        return false;
+    }
+    IDynamicsEntity *male_entity;
+    if (!imale->QueryInterface(&male_entity)) {
+        return false;
+    }
+
+    for (unsigned int i = 0; i < male_root->fNumChildren; i++) {
+        const Bounds *male_node = male_root->GetChild(i);
+        if (male_node->fNameHash != malenode_name || !(male_node->fFlags & kBounds_Joint_Male)) {
+            continue;
+        }
+
+        const Bounds *female_node = nullptr;
+        for (unsigned int j = 0; j < female_root->fNumChildren; j++) {
+            const Bounds *node = female_root->GetChild(j);
+            if (node->fNameHash == femalenode_name && (node->fFlags & kBounds_Joint_Female)) {
+                female_node = node;
+                break;
+            }
+        }
+        if (!female_node) {
+            return false;
+        }
+
+        UMath::Vector3 male_arm;
+        UMath::Vector3 female_arm;
+        male_node->fPosition.Decompress(male_arm);
+        female_node->fPosition.Decompress(female_arm);
+        if (out_female) {
+            *out_female = female_arm;
+        }
+        if (out_male) {
+            *out_male = male_arm;
+        }
+
+        Dynamics::IEntity *female = female_entity;
+        Dynamics::IEntity *male = male_entity;
+        Dynamics::Articulation::HJOINT hJoint =
+            Dynamics::Articulation::Create(female, female_arm, male, male_arm, static_cast<Dynamics::Articulation::eJointFlags>(joint_flags));
+        if (!hJoint) {
+            return false;
+        }
+
+        // geometry space (z up) to body space (y up); a static in speed.exe (0x92C718)
+        UMath::Matrix4 zup;
+        zup.v0 = UMath::Vector4Make(1.0f, 0.0f, 0.0f, 0.0f);
+        zup.v1 = UMath::Vector4Make(0.0f, 0.0f, -1.0f, 0.0f);
+        zup.v2 = UMath::Vector4Make(0.0f, 1.0f, 0.0f, 0.0f);
+        zup.v3 = UMath::Vector4Make(0.0f, 0.0f, 0.0f, 1.0f);
+
+        for (unsigned int c = 0; c < female_node->fNumChildren; c++) {
+            const Bounds *constraint = female_node->GetChild(c);
+            if (!(constraint->fFlags & (kBounds_Constraint_Conical | kBounds_Constraint_Prismatic))) {
+                continue;
+            }
+            for (unsigned int p = 0; p < male_node->fNumChildren; p++) {
+                const Bounds *post = male_node->GetChild(p);
+                if (!(post->fFlags & kBounds_Male_Post) || post->fNameHash != constraint->fNameHash) {
+                    continue;
+                }
+
+                UMath::Vector3 cdim;
+                constraint->GetHalfDimensions(cdim);
+
+                UMath::Vector4 q0;
+                UMath::Vector4 q1;
+                UMath::Vector4 q;
+                constraint->GetOrientation(q0);
+                female_node->GetOrientation(q1);
+                VU0_qmul(q0, q1, q);
+                UMath::Matrix4 local;
+                UMath::Matrix4 orient;
+                UMath::QuaternionToMatrix4(q, local);
+                UMath::Mult(zup, local, orient);
+
+                UMath::Vector3 pdim;
+                post->GetHalfDimensions(pdim);
+                post->GetOrientation(q0);
+                male_node->GetOrientation(q1);
+                VU0_qmul(q0, q1, q);
+                UMath::Matrix4 postorient;
+                UMath::QuaternionToMatrix4(q, local);
+                UMath::Mult(zup, local, postorient);
+
+                Dynamics::Articulation::eConstraint type;
+                if (constraint->fFlags & kBounds_Constraint_Conical) {
+                    type = Dynamics::Articulation::CONICAL;
+                } else if (constraint->fFlags & kBounds_Constraint_Prismatic) {
+                    type = Dynamics::Articulation::PRISMATIC;
+                } else {
+                    break;
+                }
+                float length = pdim.y + pdim.y;
+                UMath::Vector3 postvec;
+                postvec.x = postorient.v2.x * length;
+                postvec.y = postorient.v2.y * length;
+                postvec.z = postorient.v2.z * length;
+                float theta = VU0_Atan2(cdim.x, cdim.y + cdim.y) * 360.0f;
+                Dynamics::Articulation::Constrain(hJoint, female, orient, theta, theta, postvec, type);
+                break;
+            }
+        }
+        return true;
+    }
+    return false;
 }
 
 #if defined(EA_PORT_NATIVE)

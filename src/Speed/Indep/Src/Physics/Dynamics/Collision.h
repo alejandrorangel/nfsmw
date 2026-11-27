@@ -65,6 +65,11 @@ class Geometry {
     void Move(const UMath::Vector3 &deltaP);
 
   private:
+    static bool BoxVsBox(const Geometry *GeometryA, const Geometry *GeometryB, Geometry *result);
+    static bool SphereVsBox(const Geometry *sphereA, const Geometry *boxB, Geometry *result);
+    static bool SphereVsSphere(const Geometry *a, const Geometry *b, Geometry *result);
+    static bool BoxVsSphere(const Geometry *boxA, const Geometry *sphereB, Geometry *result);
+
     UMath::Vector4 mPosition;         // offset 0x0, size 0x10
     UMath::Vector4 mNormal[3];        // offset 0x10, size 0x30
     UMath::Vector4 mExtent[3];        // offset 0x40, size 0x30
@@ -100,6 +105,8 @@ struct Friction {
         mUs *= scale;
     }
 
+    State GetForce(const UVector3 &P, float impulse, const UVector3 &n, UVector3 &Ff) const;
+
     float mUk; // offset 0x0, size 0x4
     float mUs; // offset 0x4, size 0x4
 };
@@ -113,6 +120,11 @@ struct Plane {
     Friction friction; // offset 0x18, size 0x8
 };
 
+// total size: 0x10
+struct Joint {
+    UVector3 fulcrum; // offset 0x0, size 0xC
+};
+
 // total size: 0x114
 class Moment {
   public:
@@ -124,8 +136,8 @@ class Moment {
     void SetCG(const UMath::Vector3 &cg);
     bool React(const Plane &plane, int nSteps);
     bool React(Moment &other, const Plane &plane, int nSteps);
-    bool React(Moment &other, const struct Joint &joint, int nSteps);
-    bool React(const struct Joint &joint, int nSteps);
+    bool React(Moment &other, const Joint &joint, int nSteps);
+    bool React(const Joint &joint, int nSteps);
 
     const Inertia::Tensor &GetInertia() const {
         return mInertiaP;
@@ -203,6 +215,12 @@ class Moment {
     void SetFixedCG(bool b) {
         mFixedCG = b;
     }
+
+  protected:
+    void ResolveForce(const UVector3 &F, const UVector3 &R, const UMath::Matrix4 &Ic, UVector3 &dV, UVector3 &dW) const;
+    void GetMomentumArm(const UMath::Vector3 &point, UVector3 &R) const;
+    void GetPrincipalTensor(UMath::Matrix4 &Ic) const;
+    void GetParallelTensor(const UVector3 &R, UMath::Matrix4 &Ic) const;
 
   private:
     UMath::Matrix4 mOrientation;      // offset 0x0, size 0x40
