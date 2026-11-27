@@ -125,6 +125,11 @@ void eDisplayFrame() {
     // (eFrameMalloc), which matrices for this frame's draws came from.
     void eSwapFrameMallocBuffers();
     eSwapFrameMallocBuffers();
+    // eDisplayFrame 0x6E764B: the frame ends by advancing eFrameCounter
+    // (Main_AnimateFrame services the render conns once per frame; car render
+    // conns compare it against their last render frame).
+    extern uint32 eFrameCounter;
+    eFrameCounter++;
     PaceFrame();
 
     if (std::getenv("NFSMW_TRACE_FLOW") && frame % 60 == 0) {

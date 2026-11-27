@@ -3876,7 +3876,7 @@ int make_chain(float **V, int n, int (*cmp)(const void *, const void *)) {
 
     s = 1;
 
-    qsort(V, n, 4, cmp);
+    qsort(V, n, sizeof(float *), cmp); // element = pointer (4 on 32-bit)
     for (i = 2; i < n; i++) {
         for (j = s; j >= 1 && !ccw(V, j - 1, j, i); j--) {
         }
