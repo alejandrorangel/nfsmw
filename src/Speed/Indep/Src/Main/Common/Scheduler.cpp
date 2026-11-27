@@ -253,17 +253,25 @@ float Scheduler::Run(bool full_speed) {
     float elapsed = time_delta_seconds > 0.0f ? time_delta_seconds : 0.0f;
 #if defined(EA_PORT_NATIVE)
     // On PC the loop is locked to vsync, so each frame runs a steady number
-    // of sim ticks. Natively frames are paced to a 60 Hz grid by sleeping,
-    // whose wake-up jitter around one step tipped the tick bank into 0- and
-    // 2-tick frames (visible judder). Snap a frame that is within a quarter
-    // step of a whole number of steps to exactly that many.
-    if (!full_speed) {
-        float steps = elapsed / fTimeStep;
-        float whole = static_cast<float>(static_cast<int>(steps + 0.5f));
-        if (whole >= 1.0f && bAbs(steps - whole) < 0.25f) {
-            elapsed = whole * fTimeStep;
-            mTickBank = 0.0f;
+    // of sim ticks. Natively frames are paced to a 60 Hz grid by sleeping;
+    // jitter (and a long frame followed by a short catch-up one) tipped the
+    // tick bank into 0- and 2-tick frames -- visible judder. Run one tick per
+    // paced frame and keep the drift between sim time and real time in a
+    // separate bank; only when real time is a whole step ahead/behind does a
+    // frame run two ticks / none, so the sim still tracks real time.
+    if (!full_speed && elapsed > 0.0f && elapsed < 3.0f * fTimeStep) {
+        static float drift = 0.0f;
+        drift += elapsed - fTimeStep;
+        float ticks = 1.0f;
+        if (drift >= fTimeStep) {
+            ticks = 2.0f;
+            drift -= fTimeStep;
+        } else if (drift <= -fTimeStep) {
+            ticks = 0.0f;
+            drift += fTimeStep;
         }
+        elapsed = ticks * fTimeStep;
+        mTickBank = 0.0f;
     }
 #endif
     mTime += elapsed;
