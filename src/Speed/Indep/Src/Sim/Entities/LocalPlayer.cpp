@@ -175,7 +175,12 @@ bool LocalPlayer::CanDoGameBreaker() {
     }
     ISimable *isimable = static_cast<IEntity *>(this)->GetSimable();
     IVehicle *ivehicle;
+#if defined(EA_PORT_NATIVE)
+    // speed.exe 1.3 0x6EDCA6: no breaker while an NIS (0x9885C8) plays.
+    if (!isimable || INIS::Exists() || !isimable->QueryInterface(&ivehicle)) {
+#else
     if (!isimable || !INIS::Exists() || !isimable->QueryInterface(&ivehicle)) {
+#endif
         return false;
     }
     float speed_mph = MPS2MPH(ivehicle->GetSpeedometer());
