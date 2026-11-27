@@ -374,11 +374,23 @@ void HudResourceManager::LoadingCompleteCallback() {
 
 void HudResourceManager::LoadedCustomHudTexturePackCallback() {
     int hud_num = mCustIndex;
+#if defined(EA_PLATFORM_WIN32)
+    // PC (speed.exe 1.3 @ 0x595CC0): the HUDS_Custom_NN packs hold TACH_FILL_NN,
+    // TURBO_LINES_NN, TACH_NEEDLE_NN and TURBO_NEEDLE_NN (the names the
+    // customize screen also uses); the console CUSTOMHUD_* names aren't in them,
+    // so the tach needle and fill would draw with the default texture.
+    mCustomizeHUDTexTextureResources[0] = FEngHashString("TACH_FILL_%2.2d", hud_num);
+    mCustomizeHUDTexTextureResources[1] = mTachLinesHash;
+    mCustomizeHUDTexTextureResources[2] = FEngHashString("TURBO_LINES_%2.2d", hud_num);
+    mCustomizeHUDTexTextureResources[3] = FEngHashString("TACH_NEEDLE_%2.2d", hud_num);
+    mCustomizeHUDTexTextureResources[4] = FEngHashString("TURBO_NEEDLE_%2.2d", hud_num);
+#else
     mCustomizeHUDTexTextureResources[0] = FEngHashString("CUSTOMHUD_TACH_%2.2d", hud_num);
     mCustomizeHUDTexTextureResources[1] = mTachLinesHash;
     mCustomizeHUDTexTextureResources[2] = FEngHashString("CUSTOMHUD_SPEEDO_%2.2d", hud_num);
     mCustomizeHUDTexTextureResources[3] = FEngHashString("CUSTOMHUD_RPMNEEDLE_%2.2d", hud_num);
     mCustomizeHUDTexTextureResources[4] = FEngHashString("CUSTOMHUD_SPEEDNEEDLE_%2.2d", hud_num);
+#endif
     eLoadStreamingTexture(mCustomizeHUDTexTextureResources, 5, LoadedCustomHudTexturesCallbackBridge, reinterpret_cast<uintptr_t>(this),
                           BMEMORY_MAIN_POOL);
 }
