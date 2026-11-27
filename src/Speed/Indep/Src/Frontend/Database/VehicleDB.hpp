@@ -275,10 +275,14 @@ class FECareerRecord {
 
     void TweakBounty(uint32 bounty) {} // Decl: 422
 #if defined(EA_PORT_NATIVE)
-    // PC: inlined in Game_AwardPlayerBounty (0x6122BB): the sum is divided
-    // by the constant at 0x8F5A4C (5) as speed.exe 1.3 does.
+    // PC: inlined in Game_AwardPlayerBounty (0x6122BB). speed.exe 1.3
+    // divides the sum by *off_8F5A50 (unk_8F5A4C, 5 in the file), but that
+    // divisor is the copy protection's: GManager::Init (0x5FA430) hands
+    // off_8F5A50 to the protection's obfuscated triggers (sub_5F8E30), which
+    // presumably make it 1 on a genuine install (a cracked one would keep
+    // dividing the bounty by 5). Natively the bounty is just added.
     void AwardBounty(int bounty) {
-        Bounty = static_cast<uint32>(Bounty + bounty) / 5u;
+        Bounty += bounty;
     }
 #endif
 
