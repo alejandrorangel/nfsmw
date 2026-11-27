@@ -1283,9 +1283,18 @@ void Game_NavigatePlayerTo(GRuntimeInstance *from, GRuntimeInstance *to, float d
 // PC: 0x605420. TODO(port): MNotifyFinished for career activities.
 void Game_NotifyFinished(GRuntimeInstance *activity) {}
 
-// PC: 0x612490.
+// PC: 0x612490. True with SkipFE, the skip-intro switch, no local player,
+// or once the player's career has done its intro (the D-Day flow's drive to
+// the safehouse, which keeps the cops off).
 bool Game_SkipCareerIntro() {
-    return false;
+    if (SkipFE != 0 || static_cast<unsigned char>(SkipCareerIntro) == 1) {
+        return true;
+    }
+    IPlayer *player = IPlayer::First(PLAYER_LOCAL);
+    if (player == nullptr) {
+        return true;
+    }
+    return FEDatabase->GetMultiplayerProfile(player->GetSettingsIndex())->GetCareer()->HasDoneCareerIntro();
 }
 
 // PC: 0x6054A0. Any real chance of rain makes it rain; otherwise the
