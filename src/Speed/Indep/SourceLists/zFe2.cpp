@@ -86,6 +86,9 @@
 #include "Speed/Indep/Src/Frontend/MenuScreens/InGame/uiSixDaysLater.cpp"
 
 #include "Speed/Indep/Src/Frontend/MenuScreens/Loading/FEBootFlowManager.cpp"
+#if defined(EA_PLATFORM_WIN32)
+#include "Speed/Indep/Src/Frontend/MenuScreens/Loading/FEDiscErrorPC.cpp"
+#endif
 
 #include "Speed/Indep/Src/Frontend/MenuScreens/Loading/FESplashScreen.cpp"
 

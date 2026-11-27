@@ -53,6 +53,10 @@
 #include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/options/uiCredits.hpp"
 #include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/options/uiEATraxJukebox.hpp"
 #include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/options/uiOptionsController.hpp"
+#if defined(EA_PLATFORM_WIN32)
+#include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/options/uiOptionsPCController.hpp"
+#include "Speed/Indep/Src/Frontend/MenuScreens/Loading/FEDiscErrorPC.hpp"
+#endif
 #include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/options/uiOptionsScreen.hpp"
 #include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/quickrace/uiQRBrief.hpp"
 #include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/quickrace/uiQRCarSelect.hpp"
@@ -387,9 +391,21 @@ static MenuScreen *CreateLoadingControllerScreen(ScreenConstructorData *sd) {
     return new ("LoadingControllerScreen") LoadingControllerScreen(sd);
 }
 
+#if defined(EA_PLATFORM_WIN32)
+// 0x571D00
+static MenuScreen *CreatePausePCController(ScreenConstructorData *sd) {
+    return new ("UIOptionsPCController", 0) UIOptionsPCController(sd);
+}
+
+// 0x59AB80
+static MenuScreen *CreateDiscErrorPC(ScreenConstructorData *sd) {
+    return new ("DiscErrorPCScreen", 0) DiscErrorPCScreen(sd);
+}
+#else
 static MenuScreen *CreateOptionsControllerScreen(ScreenConstructorData *sd) {
     return new ("UIOptionsController", 0) UIOptionsController(sd);
 }
+#endif
 
 // total size: 0xC
 // Decl: 93
@@ -428,6 +444,7 @@ static ScreenFactoryDatum ScreenFactoryData[] = {
     {"Pause_Options.fng", CreateOptionsScreen},
 #if defined(EA_PLATFORM_WIN32)
     {"Pause_PCDisplayOptions.fng", CreateOptionsScreen},
+    {"Pause_PC_Controller.fng", CreatePausePCController},
 #endif
     {"HUD_SingleRace.fng", nullptr},
     {"HUD_Drag.fng", nullptr},
@@ -528,6 +545,9 @@ static ScreenFactoryDatum ScreenFactoryData[] = {
     {"Loading_Tips.fng", CreateLoadingTipsScreen},
     {"loading_boot.fng", nullptr},
     {"LS_LangSelect.fng", CreateLanguageSelectScreen},
+#if defined(EA_PLATFORM_WIN32)
+    {"Options_PC_Controller.fng", CreatePausePCController},
+#endif
 #if !defined(EA_PLATFORM_WIN32)
     // The PC table (0x8F4320) has no screens for these; it loads them as
     // plain packages (LoadingScreen's ctor 0x58EF50 has no callers).
@@ -536,8 +556,10 @@ static ScreenFactoryDatum ScreenFactoryData[] = {
     {"Loading_Controller.fng", CreateLoadingControllerScreen},
     {"WS_Loading_Controller.fng", CreateLoadingControllerScreen},
 #endif
+#if !defined(EA_PLATFORM_WIN32)
     {"UI_OptionsController.fng", CreateOptionsControllerScreen},
     {"Pause_Controller.fng", CreateOptionsControllerScreen},
+#endif
     {"PostRace_Results.fng", CreatePostRaceResultsScreen},
     {"BUSTED_OVERLAY.fng", CreateBustedOverlayScreen},
     {"PostBusted.fng", CreatePostRacePursuitScreen},
@@ -545,6 +567,9 @@ static ScreenFactoryDatum ScreenFactoryData[] = {
     {"InGamePhotoMaster.fng", PhotoFinishScreen::Create},
     {"PostRace_Pursuit.fng", CreatePostRacePursuitScreen},
     {"PostRace_MilestoneRewards.fng", CreatePostRaceMilestonesScreen},
+#if defined(EA_PLATFORM_WIN32)
+    {"DiscErrorPC.fng", CreateDiscErrorPC},
+#endif
     {"MC_ProfileManager.fng", CreateUIProfileManager},
     {"MC_Deleteprofile.fng", CreateUIDeleteProfile},
     {"MC_Bootup.fng", CreateMemCardBootScreen},

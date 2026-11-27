@@ -6,6 +6,10 @@
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterface.hpp"
 #include "Speed/Indep/Src/EAXSound/EAXSOund.hpp"
 #include "Speed/Indep/Src/Frontend/FECarViewer.hpp"
+#if defined(EA_PLATFORM_WIN32)
+#include "Speed/Indep/Src/Frontend/MenuScreens/Loading/FEDiscErrorPC.hpp"
+#include "Speed/Indep/Src/Misc/bFile.hpp"
+#endif
 
 #if defined(EA_PLATFORM_WIN32)
 // speed.exe 1.3 boot flows (0x8F3C58..0x8F3CD0): PC save-profile screens
@@ -101,6 +105,12 @@ BootFlowManager::BootFlowManager() {
         }
     }
     CurrentScreen = BootFlowScreens.GetHead();
+#if defined(EA_PLATFORM_WIN32)
+    // PC 0x58E9C0: no disc error screen when the disc is found.
+    if (bStrICmp("DiscErrorPC.fng", CurrentScreen->Name) == 0 && (PCCheckGameDisc() || bFileExists("foobar"))) {
+        CurrentScreen = CurrentScreen->GetNext();
+    }
+#endif
     FEManager::Get()->SetFirstScreen(CurrentScreen->Name, 0, 0);
 }
 
