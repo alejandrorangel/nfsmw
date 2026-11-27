@@ -2038,6 +2038,8 @@ struct CarMemoryInfo {
         return 0;
 #elif defined(EA_PLATFORM_XENON)
         return 2; // TODO
+#elif defined(EA_PLATFORM_WIN32)
+        return 3; // speed.exe 1.3: CarInfo_GetResourceCost reads Sizes[3]
 #endif
     }
 };

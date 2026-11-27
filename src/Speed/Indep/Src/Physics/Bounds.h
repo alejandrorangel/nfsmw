@@ -72,7 +72,7 @@ struct Bounds {
     float fRadius;           // offset 0x20, size 0x4
     UCrc32 fSurface;         // offset 0x24, size 0x4
     UCrc32 fNameHash;        // offset 0x28, size 0x4
-    Collection *fCollection; // offset 0x2C, size 0x4
+    PORT_PTR32(Collection) fCollection; // offset 0x2C, size 0x4 (loaded in place)
 
     void GetOrientation(UMath::Vector4 &to) const {
         this->fOrientation.Decompress(to);
@@ -108,7 +108,7 @@ struct PCloudHeader {
 struct PCloud {
     int fNumVerts;          // offset 0x0, size 0x4
     int fPad[2];            // offset 0x4, size 0x8
-    UMath::Vector4 *fPList; // offset 0xC, size 0x4
+    PORT_PTR32(UMath::Vector4) fPList; // offset 0xC, size 0x4 (loaded in place)
 };
 
 class IBoundable : public UTL::COM::IUnknown {
@@ -130,6 +130,11 @@ struct Collection : public BoundsHeader {
 
     Bounds *const GetBounds(UCrc32 hash_name) const;
     bool AddTo(IBoundable *irbc, const Bounds *root, const SimSurface &defsurface, bool parsechildren) const;
+    const PCloud *GetPointCloud(const Bounds *geom) const;
+    void Init();
+
+  private:
+    bool AddNode(IBoundable *irbc, const Bounds *geom, const SimSurface &defsurface, bool child) const;
 };
 
 inline const Bounds *Bounds::GetChild(unsigned int idx) const {

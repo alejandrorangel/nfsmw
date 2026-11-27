@@ -237,8 +237,13 @@ template <typename T, typename Tag> class Container {
   public:
     class Elements {
       public:
+#if defined(EA_PORT_NATIVE)
+        Elements() {}
+        ~Elements() {}
+#else
         Elements();
         ~Elements();
+#endif
     };
 
   private:

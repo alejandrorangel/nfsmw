@@ -55,19 +55,29 @@ class Behavior : public Sim::Object, public UTL::COM::Factory<const BehaviorPara
         // TODO right place?
     }
 
+    void Pause(bool pause);
+
   protected:
-    virtual void OnTaskSimulate(float dT);
+    friend class PhysicsObject;
+
+    virtual void OnTaskSimulate(float dT) {}
 
     virtual void OnBehaviorChange(const UCrc32 &mechanic) {}
 
-    virtual void OnPause();
-    virtual void OnUnPause();
+    virtual void OnPause() {}
+    virtual void OnUnPause() {}
 
     Behavior(const BehaviorParams &params, unsigned int num_interfaces);
 
     ~Behavior() override {
+#if defined(EA_PORT_NATIVE)
+        if (this->mProfile) {
+            Sim::Profile::Release(this->mProfile);
+        }
+#else
         // TODO
         Sim::Profile::Release(nullptr);
+#endif
     }
 
   private:

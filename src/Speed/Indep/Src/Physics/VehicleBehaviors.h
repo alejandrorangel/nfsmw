@@ -5,6 +5,21 @@
 
 // total size: 0x38
 struct RBComplexParams : public Sim::Param {
+    RBComplexParams(const UMath::Vector3 &initPos, const UMath::Vector3 &initVel, const UMath::Vector3 &initAngVel, const UMath::Matrix4 &initMat,
+                    float initMass, const UMath::Vector3 &initMoment, const UMath::Vector3 &dimension, bool active,
+                    const CollisionGeometry::Bounds *geoms, unsigned int collisionMask)
+        : Sim::Param(UCrc32(0xa6b47fac), this), //
+          finitPos(initPos),                    //
+          finitVel(initVel),                    //
+          finitAngVel(initAngVel),              //
+          finitMat(initMat),                    //
+          finitMass(initMass),                  //
+          finitMoment(initMoment),              //
+          fdimension(dimension),                //
+          factive(active),                      //
+          fgeoms(geoms),                        //
+          fCollisionMask(collisionMask) {}
+
     static UCrc32 TypeName() {
         static UCrc32 value = "RBComplexParams";
         return value;
@@ -40,7 +55,13 @@ struct RBSimpleParams : public Sim::Param {
 // total size: 0x10
 struct SuspensionParams : public Sim::Param {
     // TODO
+#if defined(EA_PORT_NATIVE)
+    // speed.exe 1.3 (PVehicle::LoadBehaviors): named UCRC32_BASE, data = itself,
+    // which is what every behaviour's Fetch expects
+    SuspensionParams() : Sim::Param(UCrc32(0xa6b47fac), this) {}
+#else
     SuspensionParams() : Sim::Param(TypeName(), static_cast<SuspensionParams *>(nullptr)) {}
+#endif
 
     // DECLARE_SIM_PARAM, but why does that one have SuspensionParams::TypeName?
     static UCrc32 TypeName() {
@@ -51,7 +72,13 @@ struct SuspensionParams : public Sim::Param {
 
 // total size: 0x10
 struct EngineParams : public Sim::Param {
+#if defined(EA_PORT_NATIVE)
+    // speed.exe 1.3 (PVehicle::LoadBehaviors): named UCRC32_BASE, data = itself,
+    // which is what every behaviour's Fetch expects
+    EngineParams() : Sim::Param(UCrc32(0xa6b47fac), this) {}
+#else
     EngineParams() : Sim::Param(TypeName(), static_cast<EngineParams *>(nullptr)) {}
+#endif
 
     static UCrc32 TypeName() {
         static UCrc32 value = "EngineParams";
@@ -61,7 +88,13 @@ struct EngineParams : public Sim::Param {
 
 // total size: 0x10
 struct DamageParams : public Sim::Param {
+#if defined(EA_PORT_NATIVE)
+    // speed.exe 1.3 (PVehicle::LoadBehaviors): named UCRC32_BASE, data = itself,
+    // which is what every behaviour's Fetch expects
+    DamageParams() : Sim::Param(UCrc32(0xa6b47fac), this) {}
+#else
     DamageParams() : Sim::Param(TypeName(), static_cast<DamageParams *>(nullptr)) {}
+#endif
 
     static UCrc32 TypeName() {
         static UCrc32 value = "DamageParams";

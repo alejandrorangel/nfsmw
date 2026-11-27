@@ -126,7 +126,12 @@ Sim::eUserMode CalculateSimMode() {
 }
 
 // Decl: 349
+#if defined(EA_PLATFORM_WIN32)
+// speed.exe 1.3: 0x8F7EF0 (KB). PC cars need ~6.4 MB each (CarMemoryInfoTable).
+int CarLoaderPoolSizes[2] = {50000, 1750};
+#else
 int CarLoaderPoolSizes[2] = {3500, 1750};
+#endif
 
 void GetBuildVersionName(char *build_version_name) {
 #ifdef DEBUG
@@ -1199,11 +1204,20 @@ void LoadGlobalChunks() {
     void GenerateMissingCarParts(); // Decl: 3472
 
     GenerateMissingCarParts();
+#if defined(EA_PLATFORM_WIN32)
+    // speed.exe 1.3 @ 0x664A2E: the PC streams the track out of a far bigger pool
+    int size = 0x7ef4000;
+#else
     int size = 0x4cf400;
+#endif
     int car_loader_size = CarLoaderPoolSizes[0] * 0x400;
     if (EmergencySaveMemory != 0) {
         car_loader_size -= 0x40000;
+#if defined(EA_PLATFORM_WIN32)
+        size = 0x7eb4000;
+#else
         size = 0x48f400;
+#endif
     }
     TheTrackStreamer.InitMemoryPool(size + car_loader_size);
 

@@ -653,7 +653,14 @@ template <typename T> class TAttrib : public Attribute {
     TAttrib(const Attribute &src) : Attribute(src) {}
     ~TAttrib() {}
 
+#if defined(EA_PORT_NATIVE)
+    // Never defined in the decomp (link stubs returned a null reference).
+    const TypeOf &Get(unsigned int index) const {
+        return Attribute::Get<TypeOf>(index);
+    }
+#else
     const TypeOf &Get(unsigned int index) const;
+#endif
     // TODO
     bool Set(unsigned int index, const TypeOf &input) {}
 };

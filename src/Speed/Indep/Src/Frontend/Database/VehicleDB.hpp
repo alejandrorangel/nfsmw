@@ -114,6 +114,14 @@ class FECustomizationRecord {
         Tunings[type].Value[id] = value;
     }
 
+    const Physics::Tunings &GetActiveTunings() const {
+        return Tunings[ActiveTuning];
+    }
+
+    Physics::Tunings &GetActiveTunings() {
+        return Tunings[ActiveTuning];
+    }
+
     float GetTuning(Physics::Tunings::Path id) const { // Decl: 277
         return Tunings[ActiveTuning].Value[id];
     }
