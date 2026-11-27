@@ -1935,6 +1935,11 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
             id<MTLTexture> textures[4]; // 0, 2, 3 (1 is the list's)
             const Draw3D *car_consts;   // whose material / lights / envmap are bound
             bool sky_bound;             // the sky's fragment constants and textures
+            // The MeshConst fields mesh_fs reads (shade, effect, pad, eye,
+            // the shadow ones; not the matrices) of the constants bound for
+            // the fragment stage, valid when has_fragment.
+            bool has_fragment;
+            uint32_t fragment[12];
         } bound = {};
         auto bindPipeline = [&](id<MTLRenderPipelineState> p) {
             if (p != bound.pipeline) {
@@ -2087,7 +2092,16 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 bindTexture(d.texture ? d.texture : _white, 0);
                 bindTexture(d.texture2 ? d.texture2 : _black, 2);
                 bindTexture(d.texture3 ? d.texture3 : _black, 3);
-                [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
+                uint32_t fragment[12];
+                memcpy(&fragment[0], &c.shade, sizeof(uint32_t) * 3); // shade, effect, pad
+                memcpy(&fragment[3], c.eye, sizeof(c.eye));
+                memcpy(&fragment[7], &c.inv_shadow, sizeof(uint32_t) * 4); // inv_shadow .. shadow_texel
+                fragment[11] = 0;
+                if (!bound.has_fragment || memcmp(fragment, bound.fragment, sizeof(fragment)) != 0) {
+                    [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
+                    memcpy(bound.fragment, fragment, sizeof(fragment));
+                    bound.has_fragment = true;
+                }
                 // The car effect's vertex constants (IDI_CAR_FX vs #11/#9/...).
                 if (bound.car_consts == nullptr || memcmp(bound.car_consts->material, d.material, sizeof(d.material)) != 0 ||
                     memcmp(bound.car_consts->lights, d.lights, sizeof(d.lights)) != 0 ||
@@ -2124,6 +2138,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                                        indexBuffer:d.index_buffer
                                  indexBufferOffset:d.first_index * 2];
                     }
+                    bound.has_fragment = false; // pad differs
                 }
             }
         }
