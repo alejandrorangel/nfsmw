@@ -119,6 +119,11 @@ QuickGame::QuickGame(Sim::Param params)
             foundIntroNIS = true;
         }
     }
+#if defined(EA_PORT_NATIVE)
+    // TODO(port): NIS scenes (EAGL4 animation) aren't supported natively; the
+    // intro NIS is what re-enables zone switching, so stream from the start.
+    foundIntroNIS = false;
+#endif
     if (foundIntroNIS) {
         TheTrackStreamer.DisableZoneSwitching();
     } else {

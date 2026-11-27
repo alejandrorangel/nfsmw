@@ -21,6 +21,38 @@
 
 int LoaderSceneryGroup(bChunk *chunk);
 int UnloaderSceneryGroup(bChunk *chunk);
+#if defined(EA_PORT_NATIVE)
+#include <map>
+// The section header chunk holds a 32-bit list node and pointers but is linked
+// and filled in place. Natively each section gets a native header (copied from
+// the disk record's plain fields); it survives chunk moves (unload + reload of
+// the same section) and is freed on a real unload (PortFreeSectionHeader).
+static std::map<int, ScenerySectionHeader *> gPortSectionHeaders;
+
+static ScenerySectionHeader *PortNativeSectionHeader(void *disk) {
+    const int32 *d = static_cast<const int32 *>(disk);
+    int section_number = d[3]; // disk +0xC
+    auto it = gPortSectionHeaders.find(section_number);
+    if (it != gPortSectionHeaders.end()) {
+        return it->second;
+    }
+    ScenerySectionHeader *h = static_cast<ScenerySectionHeader *>(bMalloc(sizeof(ScenerySectionHeader), "ScenerySectionHeader (native)", 0, 0));
+    bMemSet(h, 0, sizeof(*h));
+    h->ChunksLoaded = d[2];
+    h->SectionNumber = d[3];
+    h->NumPolygonsInMemory = d[4];
+    h->NumPolygonsInWorld = d[5];
+    h->ViewsVisibleThisFrame = d[14];
+    gPortSectionHeaders[section_number] = h;
+    return h;
+}
+
+static void PortFreeSectionHeader(ScenerySectionHeader *h) {
+    gPortSectionHeaders.erase(h->SectionNumber);
+    bFree(h);
+}
+#endif
+
 int LoaderScenery(bChunk *chunk);
 int UnloaderScenery(bChunk *chunk);
 ScenerySectionHeader *GetScenerySectionHeader(int section_number);
@@ -283,7 +315,11 @@ int LoaderScenery(bChunk *chunk) {
 
         for (bChunk *chunk = first_chunk; chunk != last_chunk; chunk = chunk->GetNext()) {
             if (chunk->GetID() == BCHUNK_SCENERY_SECTION_HEADER) {
+#if defined(EA_PORT_NATIVE)
+                section_header = PortNativeSectionHeader(chunk->GetAlignedData(16));
+#else
                 section_header = reinterpret_cast<ScenerySectionHeader *>(chunk->GetAlignedData(16));
+#endif
                 if (!section_header->ChunksLoaded) {
                     bPlatEndianSwap(&section_header->SectionNumber);
                     bPlatEndianSwap(&section_header->NumPolygonsInMemory);
@@ -488,7 +524,11 @@ int UnloaderScenery(bChunk *chunk) {
     }
 
     if (chunk->GetID() == BCHUNK_SCENERY_SECTION) {
+#if defined(EA_PORT_NATIVE)
+        ScenerySectionHeader *section_header = PortNativeSectionHeader(chunk->GetFirstChunk()->GetAlignedData(16));
+#else
         ScenerySectionHeader *section_header = reinterpret_cast<ScenerySectionHeader *>(chunk->GetFirstChunk()->GetAlignedData(16));
+#endif
         VisibleSectionUserInfo *user_info = TheVisibleSectionManager.GetUserInfo(section_header->SectionNumber);
         user_info->pScenerySectionHeader = nullptr;
         TheVisibleSectionManager.UnallocateUserInfo(section_header->SectionNumber);
@@ -521,6 +561,9 @@ int UnloaderScenery(bChunk *chunk) {
             if (SectionDisconnectionCallback != nullptr) {
                 SectionDisconnectionCallback(section_header);
             }
+#if defined(EA_PORT_NATIVE)
+            PortFreeSectionHeader(section_header);
+#endif
         }
 
         return 1;

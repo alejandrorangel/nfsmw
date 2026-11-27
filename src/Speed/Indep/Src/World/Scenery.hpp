@@ -143,7 +143,7 @@ struct ModelHeirarchy {
     struct Node {
         UCrc32 mNodeName;   // offset 0x0, size 0x4
         uint32 mModelHash;  // offset 0x4, size 0x4
-        eModel *mModel;     // offset 0x8, size 0x4
+        PORT_PTR32(eModel) mModel; // offset 0x8, size 0x4 (in place)
         uint8 mFlags;       // offset 0xC, size 0x1
         uint8 mParent;      // offset 0xD, size 0x1
         uint8 mNumChildren; // offset 0xE, size 0x1
@@ -170,12 +170,17 @@ struct ModelHeirarchy {
 struct SceneryInfo {
     char DebugName[24];         // offset 0x0, size 0x18
     uint32 NameHash[4];         // offset 0x18, size 0x10
-    eModel *pModel[4];          // offset 0x28, size 0x10
+    PORT_PTR32(eModel) pModel[4]; // offset 0x28, size 0x10 (in place)
     float Radius;               // offset 0x38, size 0x4
     uint32 MeshChecksum;        // offset 0x3C, size 0x4
     uint32 mHeirarchyNameHash;  // offset 0x40, size 0x4
-    ModelHeirarchy *mHeirarchy; // offset 0x44, size 0x4
+    PORT_PTR32(ModelHeirarchy) mHeirarchy; // offset 0x44, size 0x4
 };
+
+#if defined(EA_PORT_NATIVE)
+static_assert(sizeof(SceneryInfo) == 0x48, "SceneryInfo is read in place");
+static_assert(sizeof(ModelHeirarchy::Node) == 0x10, "ModelHeirarchy::Node is read in place");
+#endif
 
 class tPrecullerInfo {
   public:
