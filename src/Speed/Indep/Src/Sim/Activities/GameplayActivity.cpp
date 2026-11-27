@@ -41,9 +41,16 @@ GameplayActivity::GameplayActivity(Sim::Param params) : Sim::Activity(0) {
     LuaPostOffice::Init();
     LuaBindery::Init();
     LuaAttributes::Init();
-    LuaBindery::Get().BindToGameCode(LuaRuntime::Get().GetState());
-    LuaAttributes::Get().BindAccessors(LuaRuntime::Get().GetState());
-    LuaRuntime::Get().TakeResetSnapshot();
+#if defined(EA_PORT_NATIVE)
+    // TODO(port): the Lua glue (LuaRuntime/LuaBindery/LuaAttributes/LuaPostOffice,
+    // LuaGameHooks) is not decompiled; Init() is a link stub, so there is no runtime.
+    if (LuaRuntime::Exists())
+#endif
+    {
+        LuaBindery::Get().BindToGameCode(LuaRuntime::Get().GetState());
+        LuaAttributes::Get().BindAccessors(LuaRuntime::Get().GetState());
+        LuaRuntime::Get().TakeResetSnapshot();
+    }
     GManager::Get().BeginGameplay();
 }
 
@@ -75,3 +82,9 @@ bool GameplayActivity::OnTask(HSIMTASK task, float dT) {
     }
     return false;
 }
+
+#if defined(EA_PORT_NATIVE)
+// QuickGame creates "GameplayActivity" through the activity factory (race kernel
+// state RACESTATE_LOADING_ACTIVITIES); the decomp has no registration for it.
+BIND_ACTIVITY_FACTORY(GameplayActivity);
+#endif

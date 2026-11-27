@@ -32,6 +32,11 @@ class LuaRuntime {
     static LuaRuntime &Get() {
         return *mObj;
     }
+#if defined(EA_PORT_NATIVE)
+    static bool Exists() {
+        return mObj != nullptr;
+    }
+#endif
 
     lua_State *GetState() {
         return mState;

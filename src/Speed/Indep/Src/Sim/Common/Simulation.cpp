@@ -659,6 +659,12 @@ static void PauseFFB(IPlayer *player) {
 static void ClearInput(IPlayer *player) {
     if (player && player->IsLocal()) {
         ISimable *isimable = player->GetSimable();
+#if defined(EA_PORT_NATIVE)
+        // TODO(port): no player car until PVehicle exists (see QuickGame::CreateCars).
+        if (!isimable) {
+            return;
+        }
+#endif
 
         IInput *iinput;
         if (isimable->QueryInterface(&iinput)) {

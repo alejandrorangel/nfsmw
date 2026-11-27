@@ -482,6 +482,12 @@ void QuickGame::CreateCars(const UMath::Vector3 &startLoc) {
     ISimable *icar = UTL::COM::Factory<Sim::Param, ISimable, UCrc32>::CreateInstance(
         UCrc32("PVehicle"),
         VehicleParams(this, DRIVER_HUMAN, player_1.Key, initialVec, initialPos, player_1.Flags, player_1.Customization, player_1.Performance));
+    // TODO(port): PVehicle / PhysicsObject / Behavior (Physics/Common/*.cpp) are not
+    // decompiled yet, so there is no "PVehicle" simable factory and no car spawns.
+    // The PC dereferences unconditionally; skip so the race kernel keeps loading.
+    if (!icar) {
+        return;
+    }
     icar->Attach(IPlayer::First(PLAYER_LOCAL));
     IPerpetrator *perpetrator;
     if (icar->QueryInterface(&perpetrator)) {

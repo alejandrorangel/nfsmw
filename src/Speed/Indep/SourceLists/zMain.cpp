@@ -7,6 +7,12 @@
 
 #include "Speed/Indep/Src/Generated/Events/ESimulate.cpp"
 
+#if defined(EA_PORT_NATIVE)
+#include "Speed/Indep/Src/Generated/Events/ECommitAudioAssets.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/ECommitRenderAssets.cpp"
+#endif
+
 #include "Speed/Indep/Src/Input/Common/action.cpp"
 
 #include "Speed/Indep/Src/Input/Common/actionqueue.cpp"
