@@ -26,6 +26,16 @@
 #include "Speed/Indep/Src/Interfaces/Simables/ISimable.h"
 #include "Speed/Indep/Src/Generated/Events/EAutoSave.hpp"
 #include "Speed/Indep/Src/Generated/Events/ECellCall.hpp"
+#include "Speed/Indep/Src/Generated/Events/EFadeScreenOff.hpp"
+#include "Speed/Indep/Src/Generated/Events/EFadeScreenOn.hpp"
+#include "Speed/Indep/Src/Gameplay/GMarker.h"
+#include "Speed/Indep/Src/Interfaces/SimActivities/ICopMgr.h"
+#include "Speed/Indep/Src/Interfaces/SimActivities/ITrafficMgr.h"
+#include "Speed/Indep/Src/World/TrackInfo.hpp"
+#include "Speed/Indep/bWare/Inc/bPrintf.hpp"
+
+void World_RestoreProps();
+void GPS_Disengage();
 #include "Speed/Indep/Src/Generated/Events/EShowSMS.hpp"
 #include "Speed/Indep/Src/Frontend/Database/FEDatabase.hpp"
 #include "Speed/Indep/Src/Frontend/FEManager.hpp"
@@ -1370,6 +1380,145 @@ void GManager::UpdatePursuit() {
     const bool pursuitIcons = roaming || challengeSeries || (parms != nullptr && parms->GetIsEpicPursuitRace());
     mHidingSpotIconsShown = (roaming || challengeSeries) && pursuit != nullptr && coolingDown;
     mPursuitBreakerIconsShown = pursuitIcons && pursuit != nullptr && !coolingDown;
+}
+
+// ---------------------------------------------------------------------------
+// Respawning and warping in free roam.
+// ---------------------------------------------------------------------------
+
+// PC: 0x5E4CF0. The override marker if there is one, otherwise the free roam
+// start (from the safehouse, or the last one); without either, the track's
+// career start marker ("career_start_<track>").
+Attrib::Key GManager::GetRespawnMarker() {
+    Attrib::Gen::gameplay overrideMarker(mOverrideFreeRoamStartMarker, 0, nullptr);
+    if (overrideMarker.IsValid()) {
+        return mOverrideFreeRoamStartMarker;
+    }
+    Attrib::Key marker = mStartFreeRoamFromSafeHouse ? mFreeRoamFromSafeHouseStartMarker : mFreeRoamStartMarker;
+    Attrib::Gen::gameplay startMarker(marker, 0, nullptr);
+    if (!startMarker.IsValid()) {
+        char name[32];
+        bSPrintf(name, "career_start_%s", TrackInfo::GetLoadedTrackInfo() != nullptr ? TrackInfo::GetLoadedTrackInfo()->RegionName : "");
+        marker = Attrib::StringToLowerCaseKey(name);
+        mFreeRoamStartMarker = marker;
+    }
+    return marker;
+}
+
+// PC: 0x5E4DF0. The respawn marker's position and heading (as GMarker reads
+// them: vault (x, y, z) -> sim (-y, z, x), Rotation in degrees).
+void GManager::GetRespawnLocation(UMath::Vector3 &startLoc, UMath::Vector3 &initialVec) {
+    Attrib::Gen::gameplay marker(GetRespawnMarker(), 0, nullptr);
+    const UMath::Vector3 &pos = marker.Position();
+    startLoc.x = -pos.y;
+    startLoc.y = pos.z;
+    startLoc.z = pos.x;
+    UMath::Matrix4 rotMat = UMath::Matrix4::kIdentity;
+    initialVec = UMath::Vector3Make(0.0f, 0.0f, 1.0f);
+    UMath::MultYRot(rotMat, marker.Rotation() * (-1.0f / 360.0f), rotMat);
+    UMath::Rotate(initialVec, rotMat, initialVec);
+}
+
+// PC: 0x5EBC80. In free roam (and not warping already): fade, stream the
+// world in at the marker and park the player's car there (deactivated) until
+// NotifyWorldService finds the world loaded.
+bool GManager::WarpToMarker(Attrib::Key markerKey, bool startPursuit) {
+    if (!GRaceStatus::Exists() || GRaceStatus::Get().GetPlayMode() != GRaceStatus::kPlayMode_Roaming || mWarping) {
+        return false;
+    }
+    GRuntimeInstance *instance = FindInstance(markerKey);
+    if (instance == nullptr || instance->GetType() != kGameplayObjType_Marker) {
+        return false;
+    }
+    GMarker *marker = static_cast<GMarker *>(instance);
+    new EFadeScreenOn(false);
+    // TODO(port): PC also clears a track streamer flag (byte 0x9AAC81).
+    Sim::SetStream(marker->GetPosition(), false);
+    IPlayer *player = IPlayer::First(PLAYER_LOCAL);
+    IVehicle *vehicle;
+    if (player != nullptr && player->GetSimable() != nullptr && player->GetSimable()->QueryInterface(&vehicle)) {
+        vehicle->SetVehicleOnGround(marker->GetPosition(), marker->GetDirection());
+        vehicle->Deactivate();
+    }
+    mWarpStartPursuit = startPursuit;
+    mWarpTargetMarker = markerKey;
+    mWarping = true;
+    return true;
+}
+
+// PC: 0x5EBB10 (from the world's service each frame). A warp whose world has
+// loaded puts the car down again (and, for a pursuit warp, clears the area
+// and starts the cops at heat 1), then fades back in.
+void GManager::NotifyWorldService() {
+    if (!mWarping || TheTrackStreamer.IsLoadingInProgress()) {
+        return;
+    }
+    if (mWarpTargetMarker != 0) {
+        GRuntimeInstance *instance = FindInstance(mWarpTargetMarker);
+        IPlayer *player = IPlayer::First(PLAYER_ALL);
+        IVehicle *vehicle;
+        if (instance != nullptr && instance->GetType() == kGameplayObjType_Marker && player != nullptr && player->GetSimable() != nullptr &&
+            player->GetSimable()->QueryInterface(&vehicle)) {
+            GMarker *marker = static_cast<GMarker *>(instance);
+            vehicle->SetVehicleOnGround(marker->GetPosition(), marker->GetDirection());
+            vehicle->Activate();
+        }
+        mWarpTargetMarker = 0;
+        if (mWarpStartPursuit) {
+            World_RestoreProps();
+            GPS_Disengage();
+            if (ITrafficMgr::Exists()) {
+                ITrafficMgr::Get()->FlushAllTraffic(true);
+            }
+            if (ICopMgr::Exists()) {
+                ICopMgr::Get()->ResetCopsForRestart(true);
+                ICopMgr::Get()->LockoutCops(false);
+                ICopMgr::Get()->PursueAtHeatLevel(1);
+            }
+        }
+    }
+    if (mWarpStartPursuit) {
+        if (ICopMgr::Exists() && !ICopMgr::Get()->PlayerPursuitHasCop()) {
+            ICopMgr::Get()->PursueAtHeatLevel(1);
+            return;
+        }
+        mWarpStartPursuit = false;
+    }
+    mWarping = false;
+    new EFadeScreenOff(0x161A918);
+}
+
+// PC: 0x5F77F0. Every bin's running activity saves its vars and stops.
+void GManager::SuspendAllBinActivities() {
+    for (unsigned int i = 0; i < GRaceDatabase::Get().GetBinCount(); i++) {
+        GRaceBin *bin = GRaceDatabase::Get().GetBin(i);
+        GRuntimeInstance *instance = bin != nullptr ? FindInstance(bin->GetCollectionKey()) : nullptr;
+        if (instance != nullptr && instance->GetType() == kGameplayObjType_Activity && static_cast<GActivity *>(instance)->GetIsRunning()) {
+            static_cast<GActivity *>(instance)->SerializeVars(false);
+            static_cast<GActivity *>(instance)->Suspend();
+        }
+    }
+}
+
+// PC: 0x5FDCB0. In free roam, a race picked from the career menus (the rap
+// sheet's races, the rival) runs straight away: a race of another bin
+// changes the bin first, its vaults load and its activity starts.
+void GManager::StartRaceFromInGame(uint32 raceHash) {
+    GRaceParameters *parms = GRaceDatabase::Get().GetRaceFromHash(raceHash);
+    if (GRaceStatus::Get().GetPlayMode() != GRaceStatus::kPlayMode_Roaming || parms == nullptr) {
+        return;
+    }
+    GRaceBin *bin = GRaceStatus::Get().GetCurrentBin();
+    if (bin != nullptr && parms->GetParentVault() != bin->GetChildVault()) {
+        SuspendAllBinActivities();
+        GRaceStatus::Get().RefreshBinAfterRace();
+    }
+    parms->BlockUntilLoaded();
+    GActivity *activity = parms->GetActivity();
+    if (activity != nullptr) {
+        activity->Reset();
+        activity->Run();
+    }
 }
 
 // ---------------------------------------------------------------------------

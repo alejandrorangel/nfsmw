@@ -274,6 +274,13 @@ class FECareerRecord {
     }
 
     void TweakBounty(uint32 bounty) {} // Decl: 422
+#if defined(EA_PORT_NATIVE)
+    // PC: inlined in Game_AwardPlayerBounty (0x6122BB): the sum is divided
+    // by the constant at 0x8F5A4C (5) as speed.exe 1.3 does.
+    void AwardBounty(int bounty) {
+        Bounty = static_cast<uint32>(Bounty + bounty) / 5u;
+    }
+#endif
 
   private:
     uint32 Bounty;                         // offset 0x10, size 0x4, Decl: 425

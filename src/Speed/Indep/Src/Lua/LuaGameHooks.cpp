@@ -27,6 +27,8 @@
 #include "Speed/Indep/Src/Generated/Messages/MFlowReadyForOutro.h"
 #include "Speed/Indep/Src/Generated/Messages/MNotifyChallengePassed.h"
 #include "Speed/Indep/Src/Generated/Messages/MNotifySpeedTrap.h"
+#include "Speed/Indep/Src/Generated/Messages/MNotifyPlayerRep.h"
+#include "Speed/Indep/Src/Frontend/Database/VehicleDB.hpp"
 #include "Speed/Indep/Src/Frontend/FEngFrontend.hpp"
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterface.hpp"
 #include "Speed/Indep/Src/Frontend/HUD/FEPkg_Hud.hpp"
@@ -1387,12 +1389,44 @@ bool Game_DoSpecialSetup(GRuntimeInstance *activity) {
     return false;
 }
 
-// PC: 0x612300. TODO(port): the career bounty.
-int Game_GetPlayerBounty() {
-    return 0;
+namespace {
+
+// The first player's car stable, when that player is local and has one.
+FEPlayerCarDB *FirstPlayerStable(IPlayer *&player) {
+    player = FirstPlayer();
+    ISimable *simable = player != nullptr ? player->GetSimable() : nullptr;
+    if (simable == nullptr || !simable->IsPlayer() || simable->GetPlayer() == nullptr) {
+        return nullptr;
+    }
+    return FEDatabase->GetPlayerCarStable(simable->GetPlayer()->GetSettingsIndex());
 }
 
-void Game_AwardPlayerBounty(int bounty) {}
+} // namespace
+
+// PC: 0x612300. The career's bounty: every car's, and the sold ones'.
+int Game_GetPlayerBounty() {
+    IPlayer *player;
+    FEPlayerCarDB *stable = FirstPlayerStable(player);
+    return stable != nullptr ? static_cast<int>(stable->GetTotalBounty()) : 0;
+}
+
+// PC: 0x612220. Bounty (a milestone's) goes on the current car's career
+// record, then MNotifyPlayerRep with the new total.
+void Game_AwardPlayerBounty(int bounty) {
+    IPlayer *player;
+    FEPlayerCarDB *stable = FirstPlayerStable(player);
+    if (stable == nullptr) {
+        return;
+    }
+    int playerIndex = player->GetSimable()->GetPlayer()->GetSettingsIndex();
+    FECarRecord *car = stable->GetCarRecordByHandle(FEDatabase->GetUserProfile(playerIndex)->GetCareer()->GetCurrentCar());
+    FECareerRecord *career = car != nullptr ? stable->GetCareerRecordByHandle(car->CareerHandle) : nullptr;
+    if (career == nullptr) {
+        return;
+    }
+    career->AwardBounty(bounty);
+    MNotifyPlayerRep(player->GetSimable()->GetInstanceHandle(), static_cast<int>(stable->GetTotalBounty())).Post(UCrc32(UCRC32_Gameplay));
+}
 
 // PC: 0x605250 / 0x6052B0. TODO(port): career car lot / safe house jumps.
 void Game_JumpToCarLot() {
