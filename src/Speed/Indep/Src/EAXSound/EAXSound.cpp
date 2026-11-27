@@ -1476,7 +1476,11 @@ void EAXSound::ReStartRace(bool bIs321) {
 // STRIPPED
 void EAXSound::InitSndCars() {}
 
+#ifdef EA_PLATFORM_WIN32
+static const int kAudioMemPoolSize = 0x567000; // PC (speed.exe 0x4CC3A0): banks load whole into this pool
+#else
 static const int kAudioMemPoolSize = 1148 * 1024; // size: 0x4, Decl: 3759
+#endif
 
 void InitializeSoundDriver() {
     int size = 16 * 1024;

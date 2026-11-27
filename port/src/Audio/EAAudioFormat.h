@@ -23,6 +23,8 @@ struct PatchHeader {
     int loop_start = -1; // tag 0x86
     int loop_length = -1;// tag 0x87
     int data_offset = -1;// tag 0x88 (offset of the sample data in banks)
+    int data_offset2 = -1;// tag 0x89 (banks: second channel's data, stereo patches)
+    int volume = -1;     // tag 0x13 (banks: patch volume, 0..127)
 };
 
 // Parses tags from p (just after the 'PT\0\0'/'GSTR' marker and its 4 bytes
@@ -46,8 +48,8 @@ size_t DecodeXaR2(XaChannel &ch, const uint8_t *data, size_t size, int16_t *out,
 bool DecodeStream(const uint8_t *data, size_t size, PatchHeader *header, std::vector<int16_t> *pcm, size_t *consumed);
 
 // One sound of a BNKl sample bank (inside AEMS ABKC module banks). Data is
-// EA-XA R2, mono or channel-interleaved per SCDl-style layout (mono in the
-// PC banks seen so far); data_offset (tag 0x88) is from the BNKl start.
+// EA-XA R2, one frame stream per channel: data_offset (tag 0x88) and, for
+// stereo patches, data_offset2 (tag 0x89), both from the BNKl start.
 struct BankSound {
     PatchHeader header;
     const uint8_t *data = nullptr; // EA-XA frames

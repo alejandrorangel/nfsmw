@@ -60,6 +60,8 @@ size_t ParsePatchHeader(const uint8_t *p, size_t size, PatchHeader *out) {
             case 0x86: out->loop_start = static_cast<int>(value); break;
             case 0x87: out->loop_length = static_cast<int>(value); break;
             case 0x88: out->data_offset = static_cast<int>(value); break;
+            case 0x89: out->data_offset2 = static_cast<int>(value); break;
+            case 0x13: out->volume = static_cast<int>(value); break;
             default: break;
         }
     }

@@ -234,12 +234,12 @@ void NFSMixMap::PreProcessMixMap() {
             int numSFXCTLIDs;
             int num3DSFXCTLIDs;
 
-            pmmsthdr = reinterpret_cast<stMixMapStateHdr *>(*pStateOffsetTable + reinterpret_cast<int>(pmmhdr));
+            pmmsthdr = reinterpret_cast<stMixMapStateHdr *>(*pStateOffsetTable + reinterpret_cast<intptr_t>(pmmhdr));
             this->m_nStateMapCount += this->m_StateRefCount[n];
 
             pmctlhdr = nullptr;
             if (pmmsthdr->OffsetMixCtlData != -1) {
-                pmctlhdr = reinterpret_cast<stMixCtlHdr *>(pmmsthdr->OffsetMixCtlData + reinterpret_cast<int>(pmmsthdr));
+                pmctlhdr = reinterpret_cast<stMixCtlHdr *>(pmmsthdr->OffsetMixCtlData + reinterpret_cast<intptr_t>(pmmsthdr));
             }
 
             if (pmctlhdr == nullptr) {
@@ -248,7 +248,7 @@ void NFSMixMap::PreProcessMixMap() {
 
             if (pmmsthdr->OffsetMixCtlData != -1) {
                 int *InputIDs = static_cast<int *>(this->AllocateMemory(pmctlhdr->NumMixCtls << 2, "Temp MIXMAP ALLOC"));
-                stMixCtlHdr *pmctlhdr = reinterpret_cast<stMixCtlHdr *>(pmmsthdr->OffsetMixCtlData + reinterpret_cast<int>(pmmsthdr));
+                stMixCtlHdr *pmctlhdr = reinterpret_cast<stMixCtlHdr *>(pmmsthdr->OffsetMixCtlData + reinterpret_cast<intptr_t>(pmmsthdr));
                 stMixCtlParams *pctlparms = reinterpret_cast<stMixCtlParams *>(&pmctlhdr[1]);
 
                 this->m_MixCtlsAdded += this->m_StateRefCount[n] * pmctlhdr->NumMixCtls;
@@ -319,7 +319,7 @@ void NFSMixMap::PreProcessMixMap() {
             }
 
             if (pmmsthdr->Offset3DMixCtlData != -1) {
-                st3DMixCtlHdr *p3Dmctlhdr = reinterpret_cast<st3DMixCtlHdr *>(pmmsthdr->Offset3DMixCtlData + reinterpret_cast<int>(pmmsthdr));
+                st3DMixCtlHdr *p3Dmctlhdr = reinterpret_cast<st3DMixCtlHdr *>(pmmsthdr->Offset3DMixCtlData + reinterpret_cast<intptr_t>(pmmsthdr));
                 int num3d = p3Dmctlhdr->Num3DMixCtls & 0xFF;
                 int *p3DMixCtlData = reinterpret_cast<int *>(&p3Dmctlhdr[1]);
                 int nTotal3DCamStates = 0;
@@ -338,7 +338,7 @@ void NFSMixMap::PreProcessMixMap() {
             }
 
             if (pmmsthdr->OffsetEventCtlData != -1) {
-                stMixEventHdr *pevtctlhdr = reinterpret_cast<stMixEventHdr *>(pmmsthdr->OffsetEventCtlData + reinterpret_cast<int>(pmmsthdr));
+                stMixEventHdr *pevtctlhdr = reinterpret_cast<stMixEventHdr *>(pmmsthdr->OffsetEventCtlData + reinterpret_cast<intptr_t>(pmmsthdr));
                 stMixEvtParams *pevtctlparms = reinterpret_cast<stMixEvtParams *>(&pevtctlhdr[1]);
                 int ntotaladded = 0;
 
@@ -370,7 +370,7 @@ void NFSMixMap::PreProcessMixMap() {
             }
 
             if (pmmsthdr->OffsetSubMixData != -1) {
-                stMixChHdr *pmsubchhdr = reinterpret_cast<stMixChHdr *>(pmmsthdr->OffsetSubMixData + reinterpret_cast<int>(pmmsthdr));
+                stMixChHdr *pmsubchhdr = reinterpret_cast<stMixChHdr *>(pmmsthdr->OffsetSubMixData + reinterpret_cast<intptr_t>(pmmsthdr));
                 int *pSubChData = reinterpret_cast<int *>(&pmsubchhdr[1]);
 
                 this->m_SharedSubMixCount += pmsubchhdr->NumMixChannels;
@@ -402,7 +402,7 @@ void NFSMixMap::PreProcessMixMap() {
             }
 
             if (pmmsthdr->OffsetMasterMixData != -1) {
-                stMixChHdr *pmasterchhdr = reinterpret_cast<stMixChHdr *>(pmmsthdr->OffsetMasterMixData + reinterpret_cast<int>(pmmsthdr));
+                stMixChHdr *pmasterchhdr = reinterpret_cast<stMixChHdr *>(pmmsthdr->OffsetMasterMixData + reinterpret_cast<intptr_t>(pmmsthdr));
                 int *pMstChData = reinterpret_cast<int *>(&pmasterchhdr[1]);
 
                 this->m_nTotalUniqueMasterChannels += pmasterchhdr->NumUniqueSFXOBJs + (this->m_StateRefCount[n] * pmasterchhdr->NumUniqueSFXOBJs);
@@ -457,10 +457,10 @@ void NFSMixMap::AllocateMixerMemory() {
         this->m_pStateProcs[n] = nullptr;
     }
 
-    this->m_pMasterChannelInputs = static_cast<int *>(
+    this->m_pMasterChannelInputs = static_cast<DMixSlot *>(
         this->AllocateMemory(this->m_nTotalMasterChannelInputs * sizeof(*this->m_pMasterChannelInputs), "Master Channel Input Array Block"));
 
-    this->m_pSubChannelInputs = static_cast<int *>(
+    this->m_pSubChannelInputs = static_cast<DMixSlot *>(
         this->AllocateMemory(this->m_nTotalSubChannelInputs * sizeof(*this->m_pSubChannelInputs), "Sub Channel Input Array Block"));
 
     this->m_pMasterChannelOutputArrayBlock = static_cast<int *>(this->AllocateMemory(
@@ -710,13 +710,21 @@ int *NFSMixMap::AddScaleIDs(stMixCtlParams *pmixctl, int instance) {
 
         if (state != selfstate) {
             for (int m = 0; m < this->m_StateRefCount[state]; m++) {
+#if defined(EA_PORT_NATIVE)
+                this->m_pScalePtrArray[n + m + this->m_ScaleParamsIDCount] = reinterpret_cast<int *>(static_cast<intptr_t>(ID | (m << 11)));
+#else
                 int *pfill = reinterpret_cast<int *>(&this->m_pScalePtrArray[n + m + this->m_ScaleParamsIDCount]);
                 *pfill = ID | (m << 11);
+#endif
                 ntotaladded++;
             }
         } else {
+#if defined(EA_PORT_NATIVE)
+            this->m_pScalePtrArray[n + this->m_ScaleParamsIDCount] = reinterpret_cast<int *>(static_cast<intptr_t>(ID | (instance << 11)));
+#else
             int *pfill = reinterpret_cast<int *>(&this->m_pScalePtrArray[n + this->m_ScaleParamsIDCount]);
             *pfill = ID | (instance << 11);
+#endif
             ntotaladded++;
         }
     }
@@ -748,11 +756,11 @@ int *NFSMixMap::AddScaleIDs(stMixEvtParams *pevtmixctl, int instance) {
 
         if (state != selfstate) {
             for (int m = 0; m < this->m_StateRefCount[state]; m++) {
-                this->m_pScalePtrArray[this->m_ScaleParamsIDCount + n + m] = reinterpret_cast<int *>(ID | (m << 11));
+                this->m_pScalePtrArray[this->m_ScaleParamsIDCount + n + m] = reinterpret_cast<int *>(static_cast<intptr_t>(ID | (m << 11)));
                 ntotaladded++;
             }
         } else {
-            this->m_pScalePtrArray[this->m_ScaleParamsIDCount + n] = reinterpret_cast<int *>(ID | (instance << 11));
+            this->m_pScalePtrArray[this->m_ScaleParamsIDCount + n] = reinterpret_cast<int *>(static_cast<intptr_t>(ID | (instance << 11)));
             ntotaladded++;
         }
     }
@@ -803,14 +811,14 @@ int *NFSMixMap::GetMasterChannelOutputArrayPtr(int nNumChannels) {
     return pAddr;
 }
 
-int *NFSMixMap::GetMasterChannelInputPtr(int nsize) {
-    int *pAddr = &this->m_pMasterChannelInputs[this->m_CurrentMasterInputBlockOffset];
+DMixSlot *NFSMixMap::GetMasterChannelInputPtr(int nsize) {
+    DMixSlot *pAddr = &this->m_pMasterChannelInputs[this->m_CurrentMasterInputBlockOffset];
     this->m_CurrentMasterInputBlockOffset += nsize;
     return pAddr;
 }
 
-int *NFSMixMap::GetSubChannelInputPtr(int nsize) {
-    int *pAddr = &this->m_pSubChannelInputs[this->m_CurrentSubInputBlockOffset];
+DMixSlot *NFSMixMap::GetSubChannelInputPtr(int nsize) {
+    DMixSlot *pAddr = &this->m_pSubChannelInputs[this->m_CurrentSubInputBlockOffset];
     this->m_CurrentSubInputBlockOffset += nsize;
     return pAddr;
 }
@@ -893,15 +901,15 @@ void NFSMixMap::AllocateInputArrays() {
     int nid;
 
     for (ns = ntotaluniqueScaleID; ns < this->m_ScaleParamsAdded; ns++) {
-        int *psc = *reinterpret_cast<int **>(reinterpret_cast<char *>(this->m_pScalePtrArray) + (ns << 2));
+        int *psc = *reinterpret_cast<int **>(reinterpret_cast<char *>(this->m_pScalePtrArray) + (ns << DMIX_PTR_SHIFT));
         bool buniquescale = true;
-        nid = reinterpret_cast<unsigned int>(psc) & 0xE0FFFFF0;
-        unsigned int ntype = reinterpret_cast<unsigned int>(psc) & 0xE0000000;
+        nid = static_cast<unsigned int>(reinterpret_cast<uintptr_t>(psc)) & 0xE0FFFFF0;
+        unsigned int ntype = static_cast<unsigned int>(reinterpret_cast<uintptr_t>(psc)) & 0xE0000000;
 
         if ((ntype == 0x40000000) || (ntype == 0x60000000) || (ntype == 0x80000000)) {
             for (int m = 0; m < ns; m++) {
-                int *ptid = *reinterpret_cast<int **>(reinterpret_cast<char *>(this->m_pScalePtrArray) + (m << 2));
-                int ntestid = reinterpret_cast<unsigned int>(ptid) & 0xE0FFFFF0;
+                int *ptid = *reinterpret_cast<int **>(reinterpret_cast<char *>(this->m_pScalePtrArray) + (m << DMIX_PTR_SHIFT));
+                int ntestid = static_cast<unsigned int>(reinterpret_cast<uintptr_t>(ptid)) & 0xE0FFFFF0;
 
                 if (nid == ntestid) {
                     buniquescale = false;
@@ -951,8 +959,8 @@ void NFSMixMap::AllocateInputArrays() {
 
         if (bunique3d) {
             for (int s = 0; s < this->m_ScaleParamsAdded; s++) {
-                int *ptestsc = *reinterpret_cast<int **>(reinterpret_cast<char *>(this->m_pScalePtrArray) + (s << 2));
-                int nsid = reinterpret_cast<unsigned int>(ptestsc) & 0xE0FFFFF0;
+                int *ptestsc = *reinterpret_cast<int **>(reinterpret_cast<char *>(this->m_pScalePtrArray) + (s << DMIX_PTR_SHIFT));
+                int nsid = static_cast<unsigned int>(reinterpret_cast<uintptr_t>(ptestsc)) & 0xE0FFFFF0;
 
                 if (nsid == nID) {
                     bunique3d = false;
@@ -1001,8 +1009,8 @@ void NFSMixMap::AllocateInputArrays() {
 
                 if (buniqueevent) {
                     for (int s = 0; s < this->m_ScaleParamsAdded; s++) {
-                        int *ptestsc = *reinterpret_cast<int **>(reinterpret_cast<char *>(this->m_pScalePtrArray) + (s << 2));
-                        int nsid = reinterpret_cast<unsigned int>(ptestsc) & 0xE0FFFFF0;
+                        int *ptestsc = *reinterpret_cast<int **>(reinterpret_cast<char *>(this->m_pScalePtrArray) + (s << DMIX_PTR_SHIFT));
+                        int nsid = static_cast<unsigned int>(reinterpret_cast<uintptr_t>(ptestsc)) & 0xE0FFFFF0;
 
                         if (nsid == nID) {
                             buniqueevent = false;
@@ -1147,32 +1155,32 @@ void NFSMixMap::ConnectMixMap() {
     }
 
     for (k = 0; k < this->m_ScaleParamsAdded; k++) {
-        int sfxid = reinterpret_cast<int>(this->m_pScalePtrArray[k]);
+        int sfxid = static_cast<int>(reinterpret_cast<intptr_t>(this->m_pScalePtrArray[k]));
         this->m_pScalePtrArray[k] = this->GetObjectPtr(sfxid, false, false);
     }
 
     st3DMixCtlProc *p3DProc = this->m_p3DMixCtlProc;
     for (k = 0; k < this->m_3DMixCtlsAdded; k++, p3DProc++) {
-        int nID = reinterpret_cast<int>(p3DProc->p3DMixCtlData_U->pInputs);
+        int nID = static_cast<int>(reinterpret_cast<intptr_t>(p3DProc->p3DMixCtlData_U->pInputs));
         p3DProc->p3DMixCtlData_U->pInputs = this->GetObjectPtr(nID, false, false);
     }
 
     stEvtMixCtlProc *pEVP = this->m_pEvtMixCtlProc;
     for (k = 0; k < this->m_EventCtlsAdded; k++, pEVP++) {
-        int nID = reinterpret_cast<int>(pEVP->pData_U->pTriggerPtr);
+        int nID = static_cast<int>(reinterpret_cast<intptr_t>(pEVP->pData_U->pTriggerPtr));
         pEVP->pData_U->pTriggerPtr = this->GetObjectPtr(nID, false, false);
     }
 
     for (k = 0; k < this->m_nTotalSubChannelInputs; k++) {
-        int *newptr = this->m_pSubChannelInputs + k;
+        DMixSlot *newptr = this->m_pSubChannelInputs + k;
         int sfxid = *newptr;
-        *newptr = reinterpret_cast<int>(this->GetObjectPtr(sfxid, true, false));
+        *newptr = reinterpret_cast<DMixSlot>(this->GetObjectPtr(sfxid, true, false));
     }
 
     for (k = 0; k < this->m_nTotalMasterChannelInputs; k++) {
-        int *newptr = this->m_pMasterChannelInputs + k;
+        DMixSlot *newptr = this->m_pMasterChannelInputs + k;
         int sfxid = *newptr;
-        *newptr = reinterpret_cast<int>(this->GetObjectPtr(sfxid, true, true));
+        *newptr = reinterpret_cast<DMixSlot>(this->GetObjectPtr(sfxid, true, true));
     }
 }
 
@@ -1318,7 +1326,12 @@ void NFSMixMap::UpdateMasterChannels() {
         pMChD_S = pMChP->pMixChData_S;
 
         if (pMChD_U->pOutputs[0xF] & 1U) {
+#if defined(EA_PORT_NATIVE)
+            // the channel's base level is the high half (little-endian PC data, 0x4E318E)
+            pMChD_U->Output = static_cast<unsigned int>(pMChD_S->pMapParams->MixData) >> 16;
+#else
             pMChD_U->Output = *reinterpret_cast<short *>(&pMChD_S->pMapParams->MixData);
+#endif
             pMChD_U->Output &= 0xFFFF;
 
             if ((pMChD_U->Output & 0x8000) != 0) {

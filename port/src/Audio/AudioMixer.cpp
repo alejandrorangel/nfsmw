@@ -27,11 +27,52 @@ struct Voice {
 
 } // namespace
 
+// Debug recording of the mixed output (NFSMW_AUDIO_DUMP).
+struct WavDump {
+    FILE *file = nullptr;
+    uint32_t frames = 0;
+    int rate = 0;
+
+    void Header() {
+        auto le32 = [this](uint32_t v) { std::fwrite(&v, 4, 1, file); };
+        auto le16 = [this](uint16_t v) { std::fwrite(&v, 2, 1, file); };
+        std::fseek(file, 0, SEEK_SET);
+        std::fwrite("RIFF", 1, 4, file);
+        le32(36 + frames * 4);
+        std::fwrite("WAVEfmt ", 1, 8, file);
+        le32(16);
+        le16(1);
+        le16(2);
+        le32(rate);
+        le32(rate * 4);
+        le16(4);
+        le16(16);
+        std::fwrite("data", 1, 4, file);
+        le32(frames * 4);
+        std::fseek(file, 0, SEEK_END);
+    }
+
+    void Write(const float *out, size_t n) {
+        for (size_t i = 0; i < n * 2; i++) {
+            float v = std::clamp(out[i], -1.0f, 1.0f);
+            int16_t s = static_cast<int16_t>(v * 32767.0f);
+            std::fwrite(&s, 2, 1, file);
+        }
+        uint32_t before = frames;
+        frames += static_cast<uint32_t>(n);
+        if (frames / rate != before / rate) { // keep the header current, about once a second
+            Header();
+            std::fflush(file);
+        }
+    }
+};
+
 struct Mixer::Impl {
     mutable std::mutex mutex;
     std::vector<Voice> voices;
     VoiceId next_id = 1;
     float master = 1.0f;
+    WavDump dump;
 
     Voice *Find(VoiceId id) {
         for (Voice &v : voices) {
@@ -43,9 +84,22 @@ struct Mixer::Impl {
     }
 };
 
-Mixer::Mixer(int output_rate) : mImpl(new Impl), mOutputRate(output_rate) {}
+Mixer::Mixer(int output_rate) : mImpl(new Impl), mOutputRate(output_rate) {
+    if (const char *path = std::getenv("NFSMW_AUDIO_DUMP")) {
+        mImpl->dump.file = std::fopen(path, "wb");
+        mImpl->dump.rate = output_rate;
+        if (mImpl->dump.file != nullptr) {
+            mImpl->dump.Header();
+        }
+    }
+}
 
-Mixer::~Mixer() = default;
+Mixer::~Mixer() {
+    if (mImpl->dump.file != nullptr) {
+        mImpl->dump.Header();
+        std::fclose(mImpl->dump.file);
+    }
+}
 
 VoiceId Mixer::Play(SampleRef sample, float volume, float pan, float pitch, long loop_start, long loop_frames) {
     if (!sample || sample->Frames() == 0 || sample->channels < 1 || sample->channels > 2) {
@@ -86,6 +140,16 @@ bool Mixer::IsPlaying(VoiceId id) const {
         }
     }
     return false;
+}
+
+long Mixer::Position(VoiceId id) const {
+    std::lock_guard<std::mutex> lock(mImpl->mutex);
+    for (const Voice &v : mImpl->voices) {
+        if (v.id == id) {
+            return static_cast<long>(v.position);
+        }
+    }
+    return -1;
 }
 
 void Mixer::SetVolume(VoiceId id, float volume) {
@@ -156,6 +220,9 @@ void Mixer::Mix(float *out, size_t frames) {
     }
     auto &vs = mImpl->voices;
     vs.erase(std::remove_if(vs.begin(), vs.end(), [](const Voice &v) { return !v.sample; }), vs.end());
+    if (mImpl->dump.file != nullptr) {
+        mImpl->dump.Write(out, frames);
+    }
 }
 
 void RunAudioSelfTest() {

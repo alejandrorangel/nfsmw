@@ -263,7 +263,7 @@ void NFSMixMapState::CreateMasterMixChannels() {
                 // TODO 64 bit
                 // TODO fake match
                 pMMSD = reinterpret_cast<stMasterMixChProc *>(
-                            reinterpret_cast<unsigned int>(this->m_pFirstInstance->m_MixStateParams.pMasterMixChProcs) + (n << 3))
+                            reinterpret_cast<uintptr_t>(this->m_pFirstInstance->m_MixStateParams.pMasterMixChProcs) + (n << (DMIX_PTR_SHIFT + 1)))
                             ->pMixChData_S;
 
                 pMMCP = this->m_pNFSMixMap->GetNextMasterMixProc(true);
@@ -438,7 +438,7 @@ void NFSMixMapState::Create3DMixCtls() {
             if (this->m_ObjectIndex != 0) {
                 // TODO fake match
                 p3DSD = *reinterpret_cast<st3DMixCtlSharedData **>(reinterpret_cast<char *>(this->m_pFirstInstance->m_MixStateParams.p3DMixCtlProc) +
-                                                                   (n << 3));
+                                                                   (n << (DMIX_PTR_SHIFT + 1)));
             } else {
                 p3DSD = this->m_pNFSMixMap->GetNext3DMixCtlShared(true);
                 p3DSD->pMapParams = p3DMixCtlParams;
@@ -497,11 +497,15 @@ void NFSMixMapState::InitializeSubChannels() {
             }
         }
 
+#if defined(EA_PORT_NATIVE)
+        psbmxchproc->pMixChData_U->pInputs = this->m_pNFSMixMap->GetSubChannelInputPtr(numfixedinputs);
+#else
         pinputs = this->m_pNFSMixMap->GetSubChannelInputPtr(numfixedinputs);
         psbmxchproc->pMixChData_U->pInputs = pinputs;
+#endif
         psbmxchproc->pMixChData_S->NumInputs = numfixedinputs;
 
-        int *pstore = psbmxchproc->pMixChData_U->pInputs;
+        DMixSlot *pstore = psbmxchproc->pMixChData_U->pInputs;
         pinputs = &psbmxchproc->pMixChData_S->pMapParams[1].MIXCHID;
         j = 0;
 
@@ -567,8 +571,12 @@ void NFSMixMapState::InitializeMasterChannels() {
             }
         }
 
+#if defined(EA_PORT_NATIVE)
+        pmstmxchproc->pMixChData_U->pInputs = this->m_pNFSMixMap->GetMasterChannelInputPtr(numfixedinputs + num3DCtlConnections);
+#else
         pinputs = this->m_pNFSMixMap->GetMasterChannelInputPtr(numfixedinputs + num3DCtlConnections);
         pmstmxchproc->pMixChData_U->pInputs = pinputs;
+#endif
 
         if (num3DCtlConnections > 0) {
             pmstmxchproc->pMixChData_U->p3DData = reinterpret_cast<st3DMixCtlProc **>(pmstmxchproc->pMixChData_U->pInputs + numfixedinputs);
@@ -579,7 +587,7 @@ void NFSMixMapState::InitializeMasterChannels() {
         pmstmxchproc->pMixChData_S->NumInputs = numfixedinputs | (num3DCtlConnections << 16);
 
         {
-            int *pin = reinterpret_cast<int *>(pmstmxchproc->pMixChData_U->p3DData);
+            DMixSlot *pin = reinterpret_cast<DMixSlot *>(pmstmxchproc->pMixChData_U->p3DData);
 
             pinputs = &pmstmxchproc->pMixChData_S->pMapParams[1].MIXCHID;
 
@@ -595,7 +603,7 @@ void NFSMixMapState::InitializeMasterChannels() {
         int nChannelInstance;
         int j;
         int nchid;
-        int *pstore = pmstmxchproc->pMixChData_U->pInputs;
+        DMixSlot *pstore = pmstmxchproc->pMixChData_U->pInputs;
 
         for (j = 0; j < numfixedinputs; j++) {
             int chid = *pinputs++;

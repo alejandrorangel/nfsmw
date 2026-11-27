@@ -90,8 +90,8 @@ class NFSMixMap : public AudioMemBase {
     void SetupStateRefCountFromGame(int nstate, int ncopy);
     void SetupStateProcArrays();
 
-    int *GetMasterChannelInputPtr(int nsize);
-    int *GetSubChannelInputPtr(int nsize);
+    DMixSlot *GetMasterChannelInputPtr(int nsize);
+    DMixSlot *GetSubChannelInputPtr(int nsize);
     int *GetMasterChannelOutputArrayPtr(int nNumChannels);
     int *GetNextInputBlock(bool bincrement);
     int GetMapStateCopies(int nstate);
@@ -218,8 +218,8 @@ class NFSMixMap : public AudioMemBase {
 
     int m_CurrentMasterInputOffset; // offset 0x1A8, size 0x4, Decl: 308
     int m_CurrentSubInputOffset;    // offset 0x1AC, size 0x4, Decl: 309
-    int *m_pMasterChannelInputs;    // offset 0x1B0, size 0x4, Decl: 310
-    int *m_pSubChannelInputs;       // offset 0x1B4, size 0x4, Decl: 311
+    DMixSlot *m_pMasterChannelInputs; // offset 0x1B0, size 0x4, Decl: 310
+    DMixSlot *m_pSubChannelInputs;    // offset 0x1B4, size 0x4, Decl: 311
 
     int m_CurrentStateProcBlockOffset;        // offset 0x1B8, size 0x4, Decl: 319
     int m_CurrentEvtMixCtlPtrBlockOffset;     // offset 0x1BC, size 0x4, Decl: 320

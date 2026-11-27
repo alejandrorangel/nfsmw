@@ -13,7 +13,8 @@ extern int NFSMW_GameMain(int argc, char **argv);
 // bWare main memory pool. The original platform startup created it before
 // InitializeEverything(), which assumes pool 0 already exists.
 extern void bMemoryInit();
-// Game config switch (Misc/Config.cpp). Audio has no native backend yet.
+// Game config switch (Misc/Config.cpp). Sound is still opt-in (NFSMW_SOUND=1):
+// frontend sound effects play natively, music and in-game audio don't yet.
 extern int IsSoundEnabled;
 extern int IsMemcardEnabled; // save system: the decomp's layer is GameCube-specific
 // Keyboard events -> game input (InputMac.mm).
@@ -33,6 +34,9 @@ static void *GameThread(void *) {
         IsMemcardEnabled = 0; // no saves until the PC profile layer is ported
     }
     bMemoryInit();
+    if (IsSoundEnabled != 0) {
+        port_audio::StartAudioOutput();
+    }
     if (getenv("NFSMW_TEST_AUDIO") != nullptr && port_audio::StartAudioOutput()) {
         port_audio::RunAudioSelfTest();
     }

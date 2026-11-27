@@ -300,6 +300,14 @@ int EAXAemsManager::InitiateLoad() {
         return -1;
     }
 
+#if defined(EA_PORT_NATIVE)
+    // As in the PC build (speed.exe 0x4CFFA0): every AEMS bank is read whole
+    // into audio memory and added with SNDAEMS_addmodulebank in DataLoadCB.
+    if (this->m_pCurLoadSDLP->AssetDescription.eDataType != SDT_GENERIC_DATA) {
+        this->m_pCurLoadSDLP->AssetDescription.eDataType = SDT_AEMS_AUDIOMEM;
+    }
+    this->m_pCurLoadSDLP->MemLocation = TMP_ALLOC_AUDIO;
+#else
     if (this->m_pCurLoadSDLP->AssetDescription.eDataType < SDT_GENERIC_DATA) {
         if (this->m_pAsyncBuff == nullptr) {
             this->m_AsyncBuffLocation = TMP_ALLOC_AUDIO;
@@ -332,6 +340,7 @@ int EAXAemsManager::InitiateLoad() {
     } else {
         this->m_pCurLoadSDLP->MemLocation = TMP_ALLOC_AUDIO;
     }
+#endif
 
     QueuedFileParams queued_file_params;
     queued_file_params.Priority = QueuedFileDefaultPriority - 2;
@@ -580,6 +589,14 @@ void *EAXAemsManager::AsyncResidentAllocCB(int size) {
 }
 
 void *EAXAemsManager::ResidentAllocCB(void *pbank, int residentsize, int totalsize) {
+#if defined(EA_PORT_NATIVE)
+    // PC (0x4AF3B0): the bank stays in its load buffer unless it has a bank slot.
+    if (gAEMSMgr.m_pCurLoadSDLP->mBankSlot != nullptr) {
+        gAEMSMgr.m_pCurLoadSDLP->mBankSlot->pLastAlloc += residentsize;
+        return gAEMSMgr.m_pCurLoadSDLP->mBankSlot->MAINmemLocation;
+    }
+    return gAEMSMgr.m_pCurLoadSDLP->pmem;
+#endif
     if (residentsize != totalsize) {
         if (gAEMSMgr.m_pCurLoadSDLP->AssetDescription.eDataType == SDT_AEMS_MAINMEM) {
             gAEMSMgr.m_pCurLoadSDLP->plocmem = bMalloc(residentsize, gAEMSMgr.m_pCurLoadSDLP->AssetDescription.FileName.GetString(), 0, 0x1040);

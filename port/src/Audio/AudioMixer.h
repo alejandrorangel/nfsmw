@@ -39,12 +39,15 @@ class Mixer {
     void Stop(VoiceId id);
     void StopAll();
     bool IsPlaying(VoiceId id) const;
+    // Current playback position in source frames, or -1 once the voice ended.
+    long Position(VoiceId id) const;
     void SetVolume(VoiceId id, float volume);
     void SetPan(VoiceId id, float pan); // -1 left .. 1 right
     void SetPitch(VoiceId id, float pitch);
     void SetMasterVolume(float volume);
 
     // Called by the output thread: writes frames of interleaved stereo float.
+    // NFSMW_AUDIO_DUMP=<file.wav> also records the mix (16-bit stereo).
     void Mix(float *out, size_t frames);
 
   private:

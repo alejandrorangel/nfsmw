@@ -102,7 +102,12 @@ Debug switches:
   `NFSMW_DUMP_MESH=<dir>`, `NFSMW_TRACE_FLOW`, `NFSMW_TRACE_FRAMES`,
   `NFSMW_TRACE_FE` (per-poly texture/mask/vertex dump), `NFSMW_TRACE_TEXTURES`,
   `NFSMW_TRACE_FILES`
-- `NFSMW_SOUND=1`, `NFSMW_MEMCARD=1`: turn on the unported sound / save paths
+- `NFSMW_SOUND=1`: sound (frontend sound effects play: native Csis runtime
+  `src/Audio/CsisNative.cpp`, AEMS module banks + voices on the mixer
+  `src/Audio/SndNative.cpp`; music/streams and in-game audio aren't ported).
+  `NFSMW_AUDIO_LOG=1` logs Csis/AEMS/voice activity, `NFSMW_AUDIO_DUMP=<wav>`
+  records the mixer output
+- `NFSMW_MEMCARD=1`: turn on the unported save path
 - `NFSMW_FENG_POOL=1`: frontend allocations in the FEng pool (debugging)
 - `NFSMW_HOLD_FRAME=<s>`, `NFSMW_TEXTURE_SMOKE=1`
 

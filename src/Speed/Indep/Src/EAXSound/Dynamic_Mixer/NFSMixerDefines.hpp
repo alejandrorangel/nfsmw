@@ -15,6 +15,17 @@
 #define STATESHIFT 16                        // Decl: 21
 #define MIXCTL_CURVESHIFT 24                 // Decl: 22
 
+// A mix channel input slot: holds an object ID while the map is built, then
+// ConnectMixMap stores the pointer to that object's output in it.
+#if defined(EA_PORT_NATIVE)
+#include <cstdint>
+typedef intptr_t DMixSlot;
+#define DMIX_PTR_SHIFT 3 // log2(sizeof(void *)), for byte offsets into pointer arrays
+#else
+typedef int DMixSlot;
+#define DMIX_PTR_SHIFT 2
+#endif
+
 // Decl: 87
 enum DMX_PRESET_TYPE {
     DMX_VOL = 0,
@@ -192,7 +203,7 @@ struct stMasterMixChSharedData {
 // Decl: 442
 struct stMasterMixChUniqueData {
     int outputID;             // offset 0x0, size 0x4
-    int *pInputs;             // offset 0x4, size 0x4
+    DMixSlot *pInputs;        // offset 0x4, size 0x4
     int Output;               // offset 0x8, size 0x4
     st3DMixCtlProc **p3DData; // offset 0xC, size 0x4
     int *pOutputs;            // offset 0x10, size 0x4
@@ -209,7 +220,7 @@ struct stMixChSharedData {
 // total size: 0x8
 // Decl: 457
 struct stMixChUniqueData {
-    int *pInputs; // offset 0x0, size 0x4
+    DMixSlot *pInputs; // offset 0x0, size 0x4
     int Output;   // offset 0x4, size 0x4
 };
 
