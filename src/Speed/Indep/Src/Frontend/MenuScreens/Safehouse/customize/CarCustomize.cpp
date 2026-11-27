@@ -2070,7 +2070,17 @@ void CustomizeMain::SetTitle(bool isInBackroom) {
 }
 
 void CustomizeMain::Setup() {
+#if defined(EA_PORT_NATIVE)
+    // speed.exe 0x7BFFF0: back out to My Cars, or the online menu online/LAN.
+    if (FEDatabase->IsOnlineMode() || FEDatabase->IsLANMode()) {
+        extern const char *gOnlineMainMenu;
+        BackToPkg = gOnlineMainMenu;
+    } else {
+        BackToPkg = "MyCarsManager.fng";
+    }
+#else
     BackToPkg = "FeGarageMain.fng";
+#endif
     SetTitle(gCarCustomizeManager.IsInBackRoom());
     SetScreenNames();
     gCarCustomizeManager.SetInPerformance(false);
