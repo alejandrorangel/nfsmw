@@ -1139,7 +1139,7 @@ void PVehicle::CheckOffWorld() {
     if (!suspension || suspension->IsPaused()) {
         float height = 0.0f;
         WCollisionMgr collision_mgr(0, 3);
-        mOffWorld = !collision_mgr.GetWorldHeightAtPointRigorous(ISimable::GetPosition(), height, nullptr);
+        mOffWorld = !collision_mgr.GetWorldHeightAtPointRigorous(PhysicsObject::GetPosition(), height, nullptr);
         return;
     }
     if (GetWPos().GetSurface() != SimSurface::kNull.GetConstCollection()) {
