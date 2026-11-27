@@ -504,6 +504,39 @@ void VisibleSectionManager::UnactivateOverlay() {
 DrivableScenerySection *pSectionD9 = nullptr;
 DrivableScenerySection *pSectionC14 = nullptr;
 
+#if defined(EA_PORT_NATIVE)
+// The track data stores these records with 32-bit list nodes (and, for
+// drivable sections, a 32-bit pBoundary) and links them into lists in place.
+// Natively each record is copied into a native object; the copy's address is
+// kept in the disk record's (unused) 8-byte node so unloading can find it.
+namespace {
+const int kDiskNodeSize = 8;
+
+template <typename T> T *PortCopyRecord(void *disk, int disk_size, size_t native_payload_offset, int disk_payload_offset) {
+    T *native = static_cast<T *>(bMalloc(sizeof(T), "VisibleSection (native)", 0, 0));
+    bMemSet(native, 0, sizeof(T));
+    int bytes = disk_size - disk_payload_offset;
+    if (bytes > static_cast<int>(sizeof(T) - native_payload_offset)) {
+        bytes = static_cast<int>(sizeof(T) - native_payload_offset);
+    }
+    bMemCpy(reinterpret_cast<char *>(native) + native_payload_offset, static_cast<char *>(disk) + disk_payload_offset, bytes);
+    *static_cast<T **>(disk) = native;
+    return native;
+}
+
+template <typename T> size_t PortOffsetOf(const T *base, const void *member) {
+    return static_cast<size_t>(reinterpret_cast<const char *>(member) - reinterpret_cast<const char *>(base));
+}
+
+template <typename T> void PortFreeList(bTList<T> &list) {
+    while (!list.IsEmpty()) {
+        T *node = list.RemoveHead();
+        bFree(node);
+    }
+}
+} // namespace
+#endif
+
 int VisibleSectionManager::Loader(bChunk *chunk) {
     if (chunk->GetID() == BCHUNK_VISIBLE_SECTION_MANAGER) {
         bChunk *first_chunk = chunk->GetFirstChunk();
@@ -515,6 +548,24 @@ int VisibleSectionManager::Loader(bChunk *chunk) {
                 VisibleSectionBoundary *last_boundary = reinterpret_cast<VisibleSectionBoundary *>(chunk->GetNext());
 
                 while (boundary < last_boundary) {
+#if defined(EA_PORT_NATIVE)
+                    {
+                        char *disk = reinterpret_cast<char *>(boundary);
+                        int disk_size = 0xA4 - (16 - static_cast<int8>(disk[0xA])) * static_cast<int>(sizeof(bVector2));
+                        alignas(16) static char probe_storage[sizeof(VisibleSectionBoundary)];
+                        VisibleSectionBoundary &probe = *reinterpret_cast<VisibleSectionBoundary *>(probe_storage);
+                        VisibleSectionBoundary *native = PortCopyRecord<VisibleSectionBoundary>(
+                            disk, disk_size, PortOffsetOf(&probe, &probe.SectionNumber), kDiskNodeSize);
+                        native->EndianSwap();
+                        if (IsScenerySectionDrivable(native->GetSectionNumber())) {
+                            this->DrivableBoundaryList.AddTail(native);
+                        } else {
+                            this->NonDrivableBoundaryList.AddTail(native);
+                        }
+                        boundary = reinterpret_cast<VisibleSectionBoundary *>(disk + disk_size);
+                        continue;
+                    }
+#endif
                     boundary->EndianSwap();
                     if (IsScenerySectionDrivable(boundary->GetSectionNumber())) {
                         this->DrivableBoundaryList.AddTail(boundary);
@@ -529,6 +580,21 @@ int VisibleSectionManager::Loader(bChunk *chunk) {
                 DrivableScenerySection *last_section = reinterpret_cast<DrivableScenerySection *>(chunk->GetNext());
 
                 while (section < last_section) {
+#if defined(EA_PORT_NATIVE)
+                    {
+                        char *disk = reinterpret_cast<char *>(section);
+                        int disk_size = 0xA4 - (72 - static_cast<int8>(disk[0xF])) * 2;
+                        alignas(16) static char probe_storage[sizeof(DrivableScenerySection)];
+                        DrivableScenerySection &probe = *reinterpret_cast<DrivableScenerySection *>(probe_storage);
+                        DrivableScenerySection *native = PortCopyRecord<DrivableScenerySection>(
+                            disk, disk_size, PortOffsetOf(&probe, &probe.SectionNumber), 0xC);
+                        this->DrivableSectionList.AddTail(native);
+                        native->EndianSwap();
+                        native->pBoundary = this->FindBoundary(native->GetSectionNumber());
+                        section = reinterpret_cast<DrivableScenerySection *>(disk + disk_size);
+                        continue;
+                    }
+#endif
                     this->DrivableSectionList.AddTail(section);
                     section->EndianSwap();
                     section->pBoundary = this->FindBoundary(section->GetSectionNumber());
@@ -544,6 +610,22 @@ int VisibleSectionManager::Loader(bChunk *chunk) {
             } else if (chunk->GetID() == 0x34154) {
             } else if (chunk->GetID() == BCHUNK_LOADING_SECTIONS) {
                 LoadingSection *loading_sections = reinterpret_cast<LoadingSection *>(chunk->GetData());
+#if defined(EA_PORT_NATIVE)
+                {
+                    const int disk_size = 0x4C;
+                    int num = chunk->GetSize() / disk_size;
+                    for (int n = 0; n < num; n++) {
+                        char *disk = reinterpret_cast<char *>(loading_sections) + n * disk_size;
+                        alignas(16) static char probe_storage[sizeof(LoadingSection)];
+                        LoadingSection &probe = *reinterpret_cast<LoadingSection *>(probe_storage);
+                        LoadingSection *native =
+                            PortCopyRecord<LoadingSection>(disk, disk_size, PortOffsetOf(&probe, &probe.Name), kDiskNodeSize);
+                        this->LoadingSectionList.AddTail(native);
+                        native->EndianSwap();
+                    }
+                    continue;
+                }
+#endif
                 int num_loading_sections = chunk->GetSize() / sizeof(LoadingSection);
 
                 for (int n = 0; n < num_loading_sections; n++) {
@@ -561,6 +643,14 @@ int VisibleSectionManager::Loader(bChunk *chunk) {
 
     if (chunk->GetID() == BCHUNK_VISIBLE_SECTION_OVERLAYS) {
         VisibleSectionOverlay *overlay = reinterpret_cast<VisibleSectionOverlay *>(chunk->GetData());
+#if defined(EA_PORT_NATIVE)
+        {
+            VisibleSectionOverlay *probe = static_cast<VisibleSectionOverlay *>(bMalloc(sizeof(VisibleSectionOverlay), "probe", 0, 0));
+            size_t name_off = PortOffsetOf(probe, probe->Name);
+            bFree(probe);
+            overlay = PortCopyRecord<VisibleSectionOverlay>(overlay, chunk->GetSize(), name_off, kDiskNodeSize);
+        }
+#endif
         this->OverlayList.AddTail(overlay);
         overlay->EndianSwap();
         return 1;
@@ -571,6 +661,12 @@ int VisibleSectionManager::Loader(bChunk *chunk) {
 
 int VisibleSectionManager::Unloader(bChunk *chunk) {
     if (chunk->GetID() == BCHUNK_VISIBLE_SECTION_MANAGER) {
+#if defined(EA_PORT_NATIVE)
+        PortFreeList(this->DrivableBoundaryList);
+        PortFreeList(this->NonDrivableBoundaryList);
+        PortFreeList(this->LoadingSectionList);
+        PortFreeList(this->DrivableSectionList);
+#endif
         this->DrivableBoundaryList.InitList();
         this->NonDrivableBoundaryList.InitList();
         this->LoadingSectionList.InitList();
@@ -581,7 +677,13 @@ int VisibleSectionManager::Unloader(bChunk *chunk) {
 
     if (chunk->GetID() == BCHUNK_VISIBLE_SECTION_OVERLAYS) {
         VisibleSectionOverlay *overlay = reinterpret_cast<VisibleSectionOverlay *>(chunk->GetData());
+#if defined(EA_PORT_NATIVE)
+        overlay = *reinterpret_cast<VisibleSectionOverlay **>(overlay);
+#endif
         this->OverlayList.Remove(overlay);
+#if defined(EA_PORT_NATIVE)
+        bFree(overlay);
+#endif
         return 1;
     }
 

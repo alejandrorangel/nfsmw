@@ -200,6 +200,12 @@ bool IsAnimInBank(uint32 namehash) {}
 
 int LoaderEAGLAnimations(bChunk *chunk) {
     if (chunk->GetID() == BCHUNK_EAGL_ANIMATIONS) {
+#if defined(EA_PORT_NATIVE)
+        // TODO(port): EAGL4 data is 32-bit ELF objects relocated in place by
+        // EAGL4::DynamicLoader; not supported natively yet, so the chunk is
+        // accepted and left unloaded (no skeletons/animations in game).
+        return 1;
+#endif
         if (chunk->GetAlignedSize(16) > 0) {
             CNFSAnimBank *anim_bank = new ("NFS CNFSAnimBank") CNFSAnimBank(chunk);
 

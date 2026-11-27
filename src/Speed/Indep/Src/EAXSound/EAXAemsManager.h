@@ -216,8 +216,14 @@ class EAXAemsManager : public AudioMemBase {
 
     void InitSPUram();
 
+#if defined(EA_PORT_NATIVE)
+    // The in-game load passes a RegionLoader pointer as the parameter.
+    void (*m_ExternalLoadCallback)(intptr_t);
+    intptr_t m_ExternalLoadCallbackParam;
+#else
     void (*m_ExternalLoadCallback)(int);    // offset 0x4, size 0x4, Decl: 178
     int m_ExternalLoadCallbackParam;        // offset 0x8, size 0x4, Decl: 179
+#endif
     int m_nBigFileOffset;                   // offset 0xC, size 0x4, Decl: 181
     char m_csTemp1[128];                    // offset 0x10, size 0x80, Decl: 182
     int m_NumBankLoadResolves;              // offset 0x90, size 0x4, Decl: 183

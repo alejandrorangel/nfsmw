@@ -208,6 +208,10 @@ void ControlWorldAnim(unsigned int fAnimTreeNameHash, float fTimeSet, bool fAnim
 }
 
 void StartWorldAnimations() {
+#if defined(EA_PORT_NATIVE)
+    // TODO(port): needs the EAGL4 skeletons/animations (not loaded natively yet).
+    return;
+#endif
     if (DisableWorldAnimations || AnimCfg_DisableWorldAnimations) {
         return;
     }

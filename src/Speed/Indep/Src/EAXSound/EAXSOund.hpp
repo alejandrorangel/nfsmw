@@ -469,7 +469,11 @@ class EAXSound : public AudioMemBase {
     void StartNewGamePlay();
     void InitializeFrontEnd();
     void InitializeInGame();
+#if defined(EA_PORT_NATIVE)
+    void LoadInGameSoundBanks(void (*callback)(intptr_t), intptr_t callback_param);
+#else
     void LoadInGameSoundBanks(void (*callback)(int), int32 callback_param);
+#endif
     void LoadFrontEndSoundBanks(void (*callback)(int), int32 callback_param);
     void UnloadFrontEndSoundBanks();
     void UnLoadInGameSoundBanks();

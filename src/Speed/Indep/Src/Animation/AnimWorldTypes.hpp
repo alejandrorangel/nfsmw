@@ -63,16 +63,21 @@ struct WorldAnimEntityInfo {
     uint32 mModelHash;                      // offset 0xC, size 0x4
     uint32 mLODB;                           // offset 0x10, size 0x4
     uint32 mLODZ;                           // offset 0x14, size 0x4
-    WorldAnimEntityInfo *mParentEntityInfo; // offset 0x18, size 0x4
+    PORT_PTR32(WorldAnimEntityInfo) mParentEntityInfo; // offset 0x18, size 0x4 (in place in track data)
     uint32 padB;                            // offset 0x1C, size 0x4
     uint32 mAnimTreeHash;                   // offset 0x20, size 0x4
     uint32 mAnimNameHash;                   // offset 0x24, size 0x4
     uint8 mAnimContentFlags;                // offset 0x28, size 0x1
     int8 mParentIndex;                      // offset 0x29, size 0x1
     uint16 padC;                            // offset 0x2A, size 0x2
-    WorldAnimInstance *instance_data;       // offset 0x2C, size 0x4
+    PORT_PTR32(WorldAnimInstance) instance_data;       // offset 0x2C, size 0x4
     bMatrix4 mLocalMatrix;                  // offset 0x30, size 0x40
 };
+
+#if defined(EA_PORT_NATIVE)
+static_assert(sizeof(WorldAnimEntityInfo) == 0x70, "WorldAnimEntityInfo is read in place from track data");
+static_assert(sizeof(WorldAnimInstance) == 0xA0, "WorldAnimInstance is read in place from track data");
+#endif
 
 // total size: 0x10
 struct WorldAnimNamedRange {

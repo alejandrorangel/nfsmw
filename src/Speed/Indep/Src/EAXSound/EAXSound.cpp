@@ -1171,7 +1171,11 @@ void EAXSound::LoadFrontEndSoundBanks(void (*callback)(int), int32 callback_para
     this->m_pNFSMixMaster->CreateMainMainMap(eRACE_CIRCUIT);
     this->m_pNFSMixMaster->InitMixMap(0);
 
+#if defined(EA_PORT_NATIVE)
+    gAEMSMgr.m_ExternalLoadCallback = reinterpret_cast<void (*)(intptr_t)>(callback); // int-parameter callback; the value fits
+#else
     gAEMSMgr.m_ExternalLoadCallback = callback;
+#endif
     gAEMSMgr.m_ExternalLoadCallbackParam = callback_param;
 
     this->ReInitMasterVolumes();
@@ -1284,7 +1288,11 @@ void EAXSound::StartSND11() {}
 
 bool bHasDataLoadOccured = false; // Decl: 3396
 
+#if defined(EA_PORT_NATIVE)
+void EAXSound::LoadInGameSoundBanks(void (*callback)(intptr_t), intptr_t callback_param) {
+#else
 void EAXSound::LoadInGameSoundBanks(void (*callback)(int), int32 callback_param) {
+#endif
     if (IsSoundEnabled == 0) {
         return;
     }
@@ -1730,7 +1738,12 @@ void SetSoundControlState(bool bON, eSNDCTLSTATE esndstate, char *Reason) {
     }
 }
 
+#if defined(EA_PORT_NATIVE)
+// GameFlow passes a RegionLoader pointer, so the parameter is pointer-sized.
+void LoadAemsInGame(void (*callback)(intptr_t), intptr_t callback_param) {
+#else
 void LoadAemsInGame(void (*callback)(int), int callback_param) {
+#endif
     if (IsSoundEnabled == 1) {
         g_pEAXSound->LoadInGameSoundBanks(callback, callback_param);
     } else {

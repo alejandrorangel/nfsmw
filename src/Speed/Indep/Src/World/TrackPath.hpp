@@ -74,7 +74,7 @@ class TrackPathZone {
     int8 ZoneSource;         // offset 0x18, size 0x1
     int8 CachedIndex;        // offset 0x19, size 0x1
     int16 VisitInfo;         // offset 0x1A, size 0x2
-    void *pUserData;         // offset 0x1C, size 0x4
+    PORT_PTR32(void) pUserData; // offset 0x1C, size 0x4 (32-bit in the track data)
     bVector2 BBoxMin;        // offset 0x20, size 0x8
     bVector2 BBoxMax;        // offset 0x28, size 0x8
     int32 Data[4];           // offset 0x30, size 0x10
@@ -124,6 +124,9 @@ class TrackPathZone {
         return reinterpret_cast<TrackPathZone *>(reinterpret_cast<char *>(this) + this->GetMemoryImageSize());
     }
 };
+#if defined(EA_PORT_NATIVE)
+static_assert(sizeof(TrackPathZone) == 0x244, "TrackPathZone is read in place from the track data");
+#endif
 
 // total size: 0x48C
 class TrackPathManager {
