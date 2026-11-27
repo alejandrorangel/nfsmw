@@ -207,12 +207,27 @@ void DrawSolid(eSolid *solid, const M44 world, const eDynamicLightContext *light
             }
         }
         d.num_indices = group.NumIndices;
-        if (texture && texture->AlphaBlendType == TEXBLEND_ADDATIVE) {
-            d.flags |= PORT_3D_ADDITIVE;
-        } else if (texture && texture->AlphaUsageType == TEXUSAGE_MODULATED) {
-            d.flags |= PORT_3D_ALPHA_BLEND;
-        } else if (texture && texture->AlphaUsageType == TEXUSAGE_PUNCHTHRU) {
-            d.flags |= PORT_3D_ALPHA_TEST;
+        // sub_6C68B0: alpha test when the texture is punch-through (ref
+        // 0x5F); blending only by AlphaBlendType -- SRCCOPY draws opaque even
+        // when the alpha is MODULATED (car skins: alpha is a gloss mask).
+        // BLEND/DEST_BLEND: SrcAlpha/InvSrcAlpha (DEST_* uses dest alpha on
+        // PC); ADDATIVE/DEST_ADDATIVE: SrcAlpha/One. TODO(port):
+        // SUBTRACTIVE (Zero/InvSrcColor) is drawn as an alpha blend.
+        if (texture) {
+            switch (texture->AlphaBlendType) {
+                case TEXBLEND_SRCCOPY:
+                    break;
+                case TEXBLEND_ADDATIVE:
+                case TEXBLEND_DEST_ADDATIVE:
+                    d.flags |= PORT_3D_ADDITIVE;
+                    break;
+                default:
+                    d.flags |= PORT_3D_ALPHA_BLEND;
+                    break;
+            }
+            if (texture->AlphaUsageType == TEXUSAGE_PUNCHTHRU) {
+                d.flags |= PORT_3D_ALPHA_TEST;
+            }
         }
         std::memcpy(d.world, world, sizeof(M44));
         PortMetal3DAdd(&d);

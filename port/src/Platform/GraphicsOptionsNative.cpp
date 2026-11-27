@@ -103,6 +103,12 @@ void ApplyPreset() {
         o.CarEnvironmentMapUpdateData = 2;
         o.RoadReflectionEnable = 2;
         o.CarLodLevel = 1;
+        // Port deviation: PC's top preset leaves the car reflection update
+        // rate at 1 (one env-map face per frame), which reads as laggy
+        // reflections; Apple GPUs render all six faces per frame in ~2 ms,
+        // so the top preset uses the slider's maximum (3). The slider still
+        // works as on PC.
+        o.CarEnvironmentMapEnable = 3;
     }
     if (gPCGraphicsOptionsMax.VisualTreatment != 0) {
         o.VisualTreatment = 1;

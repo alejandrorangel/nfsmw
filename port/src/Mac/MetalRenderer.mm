@@ -677,7 +677,7 @@ fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(
         // unlit effects: oD0 = vertex colour, oD1 = 0.
         out = float4(saturate(2.0 * t.rgb * (in.d0.rgb + in.d1.rgb) + in.inscatter), t.a * in.d0.a);
     }
-    if ((c.shade & 2) && out.a < 0.5) {
+    if ((c.shade & 2) && out.a < (95.0 / 255.0)) { // ALPHAREF 0x5F (sub_6C68B0)
         discard_fragment();
     }
     return out;

@@ -183,6 +183,95 @@ int swatch_offset_init = 0;
 int swatch_offset_cache[4][16];
 int swatch_offset_count[4] = {};
 
+#if defined(EA_PORT_NATIVE)
+// __flipbgr 0x6BEB80: swaps bytes 0 and 2 (RGBA <-> BGRA).
+static uint32 PortFlipBGR(uint32 c) {
+    return (c & 0xFF00FF00) | ((c & 0xFF) << 16) | ((c >> 16) & 0xFF);
+}
+
+// PC CompositeSkin32 (0x73B010). The decomp's version byte-swaps colours for
+// the big-endian GameCube, which on PC/little-endian put the gloss byte in red
+// (silver paint came out mint). PC works on A8R8G8B8 pixels (bytes B,G,R,A):
+// the base colour (gloss<<24 | blue<<16 | green<<8 | red) is stored as
+// gloss<<24 | red<<16 | green<<8 | blue; vinyl remap colours and the swatch
+// colours are __flipbgr'd; a remapped vinyl pixel blends the 3 remap colours
+// weighted by its R, G, B / 255; the mask (byte 1) blends at mask / 128.
+int CompositeSkin32(SkinCompositeParams *composite_params) {
+    TextureInfo *dest_texture = composite_params->DestTexture;
+    if (dest_texture == nullptr || dest_texture->ImageCompressionType != TEXCOMP_32BIT) {
+        return 0;
+    }
+    uint32 *dest_image_data = static_cast<uint32 *>(dest_texture->LockImage(TEXLOCK_WRITE));
+    const int num_pixels = dest_texture->Width * dest_texture->Height;
+    if (swatch_offset_init == 0) {
+        static const uint32 swatch_lookup_colours[4] = {0xBF0000FF, 0xBF00FF00, 0xBFFF0000, 0xBFFF00FF};
+        bMemSet(swatch_offset_cache, 0, sizeof(swatch_offset_cache));
+        for (int p = 0; p < num_pixels; p++) {
+            for (int i = 0; i < 4; i++) {
+                if (dest_image_data[p] == swatch_lookup_colours[i]) {
+                    if (swatch_offset_count[i] < 16) {
+                        swatch_offset_cache[i][swatch_offset_count[i]++] = p;
+                    }
+                    break;
+                }
+            }
+        }
+        swatch_offset_init = 1;
+    }
+    const uint32 base_colour = PortFlipBGR(composite_params->BaseColour);
+    for (int p = 0; p < num_pixels; p++) {
+        dest_image_data[p] = base_colour;
+    }
+    for (int i = 0; i < composite_params->NumLayers; i++) {
+        VinylLayerInfo *info = &composite_params->VinylLayerInfos[i];
+        if (info->m_LayerHash == 0) {
+            continue;
+        }
+        if (info->m_RemapPalette != 0) {
+            for (int c = 0; c < 4; c++) {
+                info->m_RemapColours[c] = PortFlipBGR(info->m_RemapColours[c]);
+            }
+        }
+        const uint32 *image_src = reinterpret_cast<const uint32 *>(info->m_LayerImageData);
+        const uint8 *mask_src = reinterpret_cast<const uint8 *>(info->m_LayerMaskData);
+        for (int p = 0; p < num_pixels; p++) {
+            uint32 src_pixel = image_src[p];
+            const uint32 src_mask = mask_src[p * 4 + 1];
+            if (info->m_RemapPalette != 0 && src_mask != 0) {
+                float weights[4] = {static_cast<float>((src_pixel >> 16) & 0xFF) * (1.0f / 255.0f),
+                                    static_cast<float>((src_pixel >> 8) & 0xFF) * (1.0f / 255.0f),
+                                    static_cast<float>(src_pixel & 0xFF) * (1.0f / 255.0f), 0.0f};
+                src_pixel = GetBlendColour(info->m_RemapColours, weights, 3, true);
+            }
+            if (src_mask < 0x80) {
+                if (src_mask != 0) {
+                    uint32 colours[2] = {src_pixel, dest_image_data[p]};
+                    float weights[2];
+                    weights[0] = static_cast<float>(src_mask) * 0.0078125f; // 0x8A7A5C
+                    weights[1] = 1.0f - weights[0];
+                    if (weights[0] > 1.0f) {
+                        weights[0] = 1.0f;
+                    }
+                    if (weights[1] < 0.0f) {
+                        weights[1] = 0.0f;
+                    }
+                    dest_image_data[p] = GetBlendColour(colours, weights, 2, false);
+                }
+            } else {
+                dest_image_data[p] = src_pixel;
+            }
+        }
+    }
+    for (int i = 0; i < 4; i++) {
+        composite_params->SwatchColours[i] = PortFlipBGR(composite_params->SwatchColours[i]);
+        for (int j = 0; j < swatch_offset_count[i]; j++) {
+            dest_image_data[swatch_offset_cache[i][j]] = composite_params->SwatchColours[i];
+        }
+    }
+    dest_texture->UnlockImage(dest_image_data);
+    return 1;
+}
+#else
 int CompositeSkin32(SkinCompositeParams *composite_params) {
     TextureInfo *dest_texture = composite_params->DestTexture;
     uint32 base_colour = composite_params->BaseColour;
@@ -311,6 +400,7 @@ int CompositeSkin32(SkinCompositeParams *composite_params) {
     dest_texture->UnlockImage(dest_image_data);
     return 1;
 }
+#endif
 
 // total size: 0x4
 struct SemiTransPixel {
