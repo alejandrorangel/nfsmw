@@ -43,9 +43,12 @@ static void *GameThread(void *) {
     }
     int rc = NFSMW_GameMain(g_argc, g_argv);
     NSLog(@"NFSMW: game main returned %d", rc);
-    dispatch_async(dispatch_get_main_queue(), ^{
-      [NSApp terminate:nil];
-    });
+    // The game has shut itself down (Quit). Leave without running static
+    // destructors: the decomp's global containers aren't safe to destroy at
+    // exit (crash in bTList<PresetCar>::~bTList from [NSApp terminate:]).
+    port_audio::StopAudioOutput();
+    fflush(nullptr);
+    _exit(rc);
     return nullptr;
 }
 
