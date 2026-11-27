@@ -779,8 +779,8 @@ void GManager::Update(float dT) {
                          info.GetRanking(), info.GetPctRaceComplete(), pos.x, pos.y, pos.z, isim == nullptr ? " (no car)" : "");
         }
     }
-#endif
     UpdatePendingSMS();
+#endif
     UpdateTriggerAvailability();
 #if defined(EA_PORT_NATIVE)
     UpdateIconVisibility();
