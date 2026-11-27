@@ -908,7 +908,7 @@ uint32 FECarRecord::GetNameHash() {
     if (bStrCmp(manu, "")) {
         char buf[128];
         Attrib::Gen::frontend frontend(FEKey, 0, nullptr);
-        FEngSNPrintf(buf, sizeof(buf), "CARNAME_%s_%s", manu, frontend.CollectionName());
+        FEngSNPrintf(buf, sizeof(buf), "CARNAME_%s_%s", manu, static_cast<const char *>(frontend.CollectionName()));
         uint32 CarNameHash = FEHashUpper(buf);
         if (DoesStringExist(CarNameHash)) {
             return CarNameHash;
@@ -922,7 +922,7 @@ uint32 FECarRecord::GetLogoHash() {
     if (bStrCmp(manu, "")) {
         char buf[128];
         Attrib::Gen::frontend frontend(FEKey, 0, nullptr);
-        FEngSNPrintf(buf, sizeof(buf), "SECONDARY_LOGO_%s", frontend.CollectionName());
+        FEngSNPrintf(buf, sizeof(buf), "SECONDARY_LOGO_%s", static_cast<const char *>(frontend.CollectionName()));
         uint32 texHash = FEHashUpper(buf);
         if (GetTextureInfo(texHash, 0, 0) != nullptr) {
             return texHash;

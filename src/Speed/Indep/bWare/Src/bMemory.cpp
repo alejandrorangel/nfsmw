@@ -156,6 +156,16 @@ void bFunkGameCube(const char *server_name, unsigned char function_num, const vo
 // STRIPPED
 bool ShouldPrintThisAllocation(void *mem, const char *debug_name) {}
 
+// Smallest remainder worth splitting off as a FreeBlock: the decomp's 15 is
+// sizeof(FreeBlock) - 1 on 32-bit. Natively FreeBlock is 24 bytes, and a
+// 16-byte remainder's header overlapped the next allocation's header,
+// corrupting the free list (seen loading cars in the Quick Race brief).
+#if defined(EA_PORT_NATIVE)
+static const int kMinFreeLeftover = static_cast<int>(sizeof(FreeBlock)) - 1;
+#else
+static const int kMinFreeLeftover = 15;
+#endif
+
 int GetAlignmentAdjustTop(intptr_t address, int alignment, int alignment_offset) {
     return (alignment - (address + alignment_offset & alignment - 1)) % alignment;
 }
@@ -206,6 +216,7 @@ void MemoryPool::RemoveMemory(void *p, int size) {}
 void MemoryPool::FreeMemory(void *p, int size, const char *debug_name) {
     this->Mutex.Lock();
     this->AddFreeMemory(p, size, debug_name);
+
     this->AmountAllocated -= size;
     this->NumAllocations--;
     this->AmountFree = this->PoolSize - this->AmountAllocated;
@@ -264,9 +275,17 @@ void *MemoryPool::AllocateMemory(int size, int alignment, int alignment_offset, 
     this->Mutex.Lock();
 
     size = (size + 3) & ~3;
+#if defined(EA_PORT_NATIVE)
+    // Every block must be able to hold a FreeBlock once it is freed or split
+    // off; the decomp's 16 is sizeof(FreeBlock) on 32-bit (24 bytes natively).
+    if (static_cast<int>(size) < static_cast<int>(sizeof(FreeBlock))) {
+        size = sizeof(FreeBlock);
+    }
+#else
     if (static_cast<int>(size) < 16) {
         size = 16;
     }
+#endif
 
     FreeBlock *best_free_block = nullptr;
     int best_alignment_adjust = 0;
@@ -277,7 +296,7 @@ void *MemoryPool::AllocateMemory(int size, int alignment, int alignment_offset, 
             int alignment_adjust = GetAlignmentAdjustTop(reinterpret_cast<intptr_t>(f), alignment, alignment_offset);
             int amount_leftover = f->Size - (size + alignment_adjust);
 
-            if (((amount_leftover == 0) || (amount_leftover > 0xf)) && (amount_leftover < best_amount_leftover)) {
+            if (((amount_leftover == 0) || (amount_leftover > kMinFreeLeftover)) && (amount_leftover < best_amount_leftover)) {
                 best_amount_leftover = amount_leftover;
                 best_alignment_adjust = alignment_adjust;
                 best_free_block = f;
@@ -292,7 +311,7 @@ void *MemoryPool::AllocateMemory(int size, int alignment, int alignment_offset, 
                 GetAlignmentAdjustBottom(reinterpret_cast<intptr_t>(reinterpret_cast<char *>(f) + f->Size) - size, alignment, alignment_offset);
             int amount_leftover = f->Size - (size + alignment_adjust);
 
-            if (((amount_leftover == 0) || (amount_leftover > 15)) && (amount_leftover < best_amount_leftover)) {
+            if (((amount_leftover == 0) || (amount_leftover > kMinFreeLeftover)) && (amount_leftover < best_amount_leftover)) {
                 best_amount_leftover = amount_leftover;
                 best_alignment_adjust = alignment_adjust;
                 best_free_block = f;

@@ -681,7 +681,7 @@ void TextureLoadingStreamingPackPhase2(eStreamingPackHeaderLoadingInfoPhase2 *lo
 }
 
 int eUnloadStreamingTexturePack(const char *filename) {
-    StreamingTexturePackLoader.DeleteStreamingPack(filename);
+    return StreamingTexturePackLoader.DeleteStreamingPack(filename);
 }
 
 void TextureUnloadingStreamingPack(eStreamingPack *streaming_pack) {
