@@ -71,6 +71,11 @@ void SubmitPoly(ePoly *poly, TextureInfo *texture_info, TextureInfo *mask = null
                          poly->Vertices[i].y, poly->Vertices[i].z, poly->UVs[i][0], poly->UVs[i][1], poly->Colours[i][0],
                          poly->Colours[i][1], poly->Colours[i][2], poly->Colours[i][3]);
         }
+        if (mask) {
+            std::fprintf(stderr, "     mask uv (%.3f, %.3f) (%.3f, %.3f) (%.3f, %.3f) (%.3f, %.3f)\n", poly->UVsMask[0][0], poly->UVsMask[0][1],
+                         poly->UVsMask[1][0], poly->UVsMask[1][1], poly->UVsMask[2][0], poly->UVsMask[2][1], poly->UVsMask[3][0],
+                         poly->UVsMask[3][1]);
+        }
     }
 }
 
