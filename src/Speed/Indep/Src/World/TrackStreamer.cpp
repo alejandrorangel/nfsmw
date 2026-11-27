@@ -838,7 +838,7 @@ void TrackStreamer::ActivateSection(TrackStreamingSection *section) {
     eAllowDuplicateSolids(true);
     SetDuplicateTextureWarning(false);
 
-    bChunk *chunks = reinterpret_cast<bChunk *>(section->pMemory);
+    bChunk *chunks = static_cast<bChunk *>(static_cast<void *>(section->pMemory));
     int sizeof_chunks = section->LoadedSize;
     LoadTempPermChunks(&chunks, &sizeof_chunks, allocation_params, section->SectionName);
 
@@ -855,7 +855,7 @@ void TrackStreamer::UnactivateSection(TrackStreamingSection *section) {
     section->UnactivatedFrameCount = 0;
     DisableWaitUntilRenderingDone();
     section->UnactivatedFrameCount = eGetFrameCounter();
-    UnloadChunks(reinterpret_cast<bChunk *>(section->pMemory), section->LoadedSize, section->SectionName);
+    UnloadChunks(static_cast<bChunk *>(static_cast<void *>(section->pMemory)), section->LoadedSize, section->SectionName);
     EnableWaitUntilRenderingDone();
     this->NumSectionsActivated--;
     section->Status = TrackStreamingSection::LOADED;
@@ -910,7 +910,7 @@ void TrackStreamer::SectionLoadedCallback(intptr_t param, int error_status) {
 void TrackStreamer::SectionLoadedCallback(TrackStreamingSection *section) {
     section->Status = TrackStreamingSection::LOADED;
     section->LoadedSize = section->Size;
-    EndianSwapChunkHeadersRecursive(reinterpret_cast<bChunk *>(section->pMemory), section->Size);
+    EndianSwapChunkHeadersRecursive(static_cast<bChunk *>(static_cast<void *>(section->pMemory)), section->Size);
     this->NumSectionsLoading--;
     this->NumSectionsLoaded++;
     section->LoadedTime = RealTimeFrames;
@@ -1399,7 +1399,7 @@ int TrackStreamer::DoHoleFilling(int largest_free) {
         if (section->Status == TrackStreamingSection::ACTIVATED) {
             eAllowDuplicateSolids(true);
             SetDuplicateTextureWarning(false);
-            MoveChunks(reinterpret_cast<bChunk *>(new_memory), reinterpret_cast<bChunk *>(section->pMemory), section->LoadedSize,
+            MoveChunks(reinterpret_cast<bChunk *>(new_memory), static_cast<bChunk *>(static_cast<void *>(section->pMemory)), section->LoadedSize,
                        section->SectionName);
 #ifdef EA_PLATFORM_GAMECUBE
             DCStoreRangeNoSync(new_memory, section->LoadedSize);

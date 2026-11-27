@@ -22,7 +22,7 @@ struct DiscBundleSectionMember {
     // total size: 0x8
     int16 SectionNumber;                    // offset 0x0, size 0x2
     int16 FileOffset;                       // offset 0x2, size 0x2
-    struct TrackStreamingSection *pSection; // offset 0x4, size 0x4
+    PORT_PTR32(struct TrackStreamingSection) pSection; // offset 0x4, size 0x4
 };
 
 // total size: 0x114
@@ -70,13 +70,19 @@ struct TrackStreamingSection {
     int32 LoadedTime;                 // offset 0x40, size 0x4
     int32 BaseLoadingPriority;        // offset 0x44, size 0x4
     int32 LoadingPriority;            // offset 0x48, size 0x4
-    void *pMemory;                    // offset 0x4C, size 0x4
-    DiscBundleSection *pDiscBundle;   // offset 0x50, size 0x4
+    PORT_PTR32(void) pMemory;         // offset 0x4C, size 0x4
+    PORT_PTR32(DiscBundleSection) pDiscBundle; // offset 0x50, size 0x4
     int32 LoadedSize;                 // offset 0x54, size 0x4
 #ifndef EA_BUILD_A124
-    VisibleSectionBoundary *pBoundary; // offset 0x58, size 0x4
+    PORT_PTR32(VisibleSectionBoundary) pBoundary; // offset 0x58, size 0x4
 #endif
 };
+
+#if defined(EA_PORT_NATIVE) && !defined(EA_BUILD_A124)
+// These arrays are used in place from the region's chunk data (32-bit layout).
+static_assert(sizeof(TrackStreamingSection) == 0x5C, "TrackStreamingSection is read in place");
+static_assert(sizeof(DiscBundleSectionMember) == 0x8, "DiscBundleSectionMember is read in place");
+#endif
 
 // total size: 0x68
 struct StreamingPositionEntry {
