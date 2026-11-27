@@ -20,7 +20,7 @@ class ESpawnSmackable : public Event {
     enum { kEventID = 0xEB626F77 };
 
     ESpawnSmackable(UMath::Vector3 pPosition, HMODEL pScenery, UMath::Vector4 pOrientation, bool pVirginSpawn, WTrigger *pTrigger,
-                    unsigned int phSimable);
+                    uintptr_t phSimable);
 
     ~ESpawnSmackable() override;
 
@@ -33,7 +33,7 @@ class ESpawnSmackable : public Event {
     bool fVirginSpawn;           // offset: 0x28, size 0x1
 
     WTrigger *fTrigger;     // offset: 0x30, size 0x4
-    unsigned int fhSimable; // offset: 0x34, size 0x4
+    uintptr_t fhSimable;    // offset: 0x34, size 0x4
 };
 
 void ESpawnSmackable_MakeEvent_Callback(const void *staticData);

@@ -17,7 +17,7 @@ class Model : public Sim::Object,
               public IAttachable,
               public IModel,
               public EventSequencer::IContext,
-              public UTL::Collections::GarbageNode<Model, 434> {
+              public UTL::Collections::GarbageNode<Model, IMODEL_INSTANCE_LIMIT> {
   public:
     // total size: 0x60
     struct Effect : public Sim::Effect {

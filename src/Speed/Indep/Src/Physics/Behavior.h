@@ -94,9 +94,8 @@ template <typename T> class BehaviorSpecsPtr : public AttributeStructPtr<T> {
   public:
     BehaviorSpecsPtr(Behavior *behavior, int index) : AttributeStructPtr<T>(LookupKey(behavior->GetOwner(), index)) {}
 
-    BehaviorSpecsPtr(ISimable *owner, int index) : AttributeStructPtr<T>(0) {
-        // TODO
-    }
+    // speed.exe 1.3: Smackable::Smackable (0x688660) looks the key up the same way
+    BehaviorSpecsPtr(ISimable *owner, int index) : AttributeStructPtr<T>(LookupKey(owner, index)) {}
 
     Attrib::Key LookupKey(const ISimable *owner, int index) {
         const Attrib::Instance &owneratr = owner->GetAttributes();

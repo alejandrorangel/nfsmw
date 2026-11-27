@@ -13,6 +13,7 @@
 #include "Speed/Indep/Src/Generated/Events/ELoadingScreenOn.hpp"
 #include "Speed/Indep/Src/Generated/Events/ESndGameState.hpp"
 #include "Speed/Indep/Src/Generated/Events/ESimulate.hpp"
+#include "Speed/Indep/Src/Generated/Events/ESpawnSmackable.hpp"
 #include "Speed/Indep/Src/Main/Event.h"
 #include "Speed/Indep/Libs/Support/Miscellaneous/StringHash.h"
 
@@ -33,6 +34,7 @@ const EventEntry kEvents[] = {
     {0x75B0D22B, ESndGameState_MakeEvent_Callback},
     {0x2AF7332B, EEnterBin_MakeEvent_Callback},
     {0x2EC2700D, EAutoSave_MakeEvent_Callback},
+    {ESpawnSmackable::kEventID, ESpawnSmackable_MakeEvent_Callback},
     // TODO(port): ECinematicMoment (0x7D2B68BD) needs its name pointers
     // resolved from the event data first.
 };

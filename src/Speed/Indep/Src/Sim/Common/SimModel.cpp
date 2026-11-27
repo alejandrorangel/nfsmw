@@ -113,6 +113,14 @@ void Model::BeginDraw(UCrc32 service, Packet *what) {
     }
 }
 
+const CollisionGeometry::Bounds *Model::GetCollisionGeometry() const {
+    return mGeometry;
+}
+
+bool Model::OnDraw(Packet *service) {
+    return false;
+}
+
 WUID Model::GetWorldID() const {
     return reinterpret_cast<WUID>(GetInstanceHandle()) | 0x4000000;
 }

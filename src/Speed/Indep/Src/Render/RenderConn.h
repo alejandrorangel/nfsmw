@@ -334,6 +334,11 @@ class Pkt_Smackable_Open : public Sim::Packet {
   public:
     DECLARE_RENDERPACKET(Pkt_Smackable_Open, SmackableRenderConn);
 
+    // speed.exe 1.3: built inline by HeirarchyModel (0x6722C0, 0x66B2A0)
+    Pkt_Smackable_Open(bHash32 modelhash, WUID objectwuid, const CollisionGeometry::Bounds *collisionnode, const ModelHeirarchy *heirarchy,
+                       uint32 rendernode)
+        : mModelHash(modelhash), mObjectWUID(objectwuid), mCollisionNode(collisionnode), mHeirarchy(heirarchy), mRenderNode(rendernode) {}
+
   private:
     bHash32 mModelHash;                              // offset 0x4, size 0x4
     WUID mObjectWUID;                                // offset 0x8, size 0x4
@@ -352,6 +357,18 @@ class Pkt_Smackable_Service : public Sim::Packet {
     }
 
     DECLARE_RENDERPACKET(Pkt_Smackable_Service, SmackableRenderConn);
+
+    bool InView() const {
+        return this->mVisible;
+    }
+
+    float DistanceToView() const {
+        return this->mDistanceToView;
+    }
+
+    void SetChildVisibility(uint32 visibility) {
+        this->mChildVisibility = visibility;
+    }
 
   private:
     bool mVisible;           // offset 0x4, size 0x1

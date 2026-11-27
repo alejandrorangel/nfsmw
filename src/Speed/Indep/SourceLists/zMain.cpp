@@ -20,6 +20,8 @@
 
 #include "Speed/Indep/Src/Generated/Events/EResetProps.cpp"
 
+#include "Speed/Indep/Src/Generated/Events/ESpawnSmackable.cpp"
+
 #include "Speed/Indep/Src/Generated/Events/EReloadHud.cpp"
 
 #include "Speed/Indep/Src/Generated/Events/EGTriggerInternal.cpp"

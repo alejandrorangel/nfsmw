@@ -9,10 +9,21 @@
 #include "Speed/Indep/Src/Physics/Bounds.h"
 #include "Speed/Indep/Src/World/WorldTypes.h"
 
+#if defined(EA_PORT_NATIVE)
+// speed.exe 1.3 sizes the model tables for 0x8F8 models (the Listable and
+// Instanceable constructors 0x67FAA0 / 0x67FA50 reserve 0x8F8): every loaded
+// smackable prop has a SceneryModel. The console builds stop at 434.
+#define IMODEL_INSTANCE_LIMIT 0x8F8
+#else
+#define IMODEL_INSTANCE_LIMIT 434
+#endif
+
 // total size: 0x4
-class IModel : public UTL::COM::IUnknown, public UTL::Collections::Instanceable<HMODEL, IModel, 434>, public UTL::Collections::Listable<IModel, 434> {
+class IModel : public UTL::COM::IUnknown,
+               public UTL::Collections::Instanceable<HMODEL, IModel, IMODEL_INSTANCE_LIMIT>,
+               public UTL::Collections::Listable<IModel, IMODEL_INSTANCE_LIMIT> {
   public:
-    enum { InstanceLimit = 434 };
+    enum { InstanceLimit = IMODEL_INSTANCE_LIMIT };
 
     DECL_INTERFACE(IModel);
     struct Enumerator {

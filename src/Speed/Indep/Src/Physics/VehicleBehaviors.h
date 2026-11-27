@@ -39,6 +39,18 @@ struct RBComplexParams : public Sim::Param {
 
 // total size: 0x28
 struct RBSimpleParams : public Sim::Param {
+    // speed.exe 1.3: inlined into Smackable::Smackable (0x688660) and
+    // Smackable::Simplify (0x684C60); named UCRC32_BASE like RBComplexParams.
+    RBSimpleParams(const UMath::Vector3 &initPos, const UMath::Vector3 &initVel, const UMath::Vector3 &initAngVel, const UMath::Matrix4 &initMat,
+                   float initRadius, float initMass)
+        : Sim::Param(UCrc32(0xa6b47fac), this), //
+          finitPos(initPos),                    //
+          finitVel(initVel),                    //
+          finitAngVel(initAngVel),              //
+          finitMat(initMat),                    //
+          finitRadius(initRadius),              //
+          finitMass(initMass) {}
+
     static UCrc32 TypeName() {
         static UCrc32 value = "RBSimpleParams";
         return value;
