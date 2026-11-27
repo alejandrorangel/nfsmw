@@ -14,6 +14,7 @@
 #include "Speed/Indep/Src/Ecstasy/Ecstasy.hpp"
 #include "Speed/Indep/Src/Ecstasy/EcstasyData.hpp"
 #include "Speed/Indep/Src/Ecstasy/EmitterSystem.h"
+#include "Speed/Indep/Src/Ecstasy/eStrip.hpp"
 #include "Speed/Indep/Src/Ecstasy/Texture.hpp"
 #include "Speed/Indep/Src/Misc/SpeedChunks.hpp"
 #include "Speed/Indep/bWare/Inc/bChunk.hpp"
@@ -406,4 +407,123 @@ void PortRenderWorldEffects(eView *view) {
     gPolysThisFrame = 0;
     // ePostDisplay (0x504D00, at the end of eDisplayFrame).
     eResestLightFlarePool();
+}
+
+// ---------------------------------------------------------------------------
+// Immediate strips (car drop shadows: DrawAmbientShadow / DrawKeithProjShadow,
+// and any other eBeginStrip users). PC 0x6BEA90 / 0x6BED50 begin a strip in a
+// slot (vertices x,y,z, D3DCOLOR, u,v) with the texture and local -> world
+// matrix (identity when null); the add functions fill it; 0x6CF930 /
+// 0x6CF970 end it by queueing it (sub_6E0770) in effect dword_93DEBC
+// (WORLDPRELIT, 17) with the texture's blend state. eAddColour/exAddColour
+// swap bytes 0 and 2 of the colour (the decomp's 0xAABBGGRR to D3DCOLOR).
+// Natively the strip goes to the prelit pass as quads, two strip triangles
+// at a time (a lone last triangle as a degenerate quad).
+namespace {
+struct StripState {
+    TextureInfo *texture = nullptr;
+    bMatrix4 matrix;
+    bool have_matrix = false;
+    std::vector<PortPrelitVertex> verts;
+    int num_pos = 0, num_col = 0, num_uv = 0;
+};
+StripState gStrip;
+
+bool BeginStripCommon(TextureInfo *texture, int num_verts, bMatrix4 *matrix) {
+    gStrip.texture = texture;
+    gStrip.have_matrix = matrix != nullptr;
+    if (matrix != nullptr) {
+        gStrip.matrix = *matrix;
+    }
+    gStrip.verts.assign(num_verts > 0 ? num_verts : 0, PortPrelitVertex{});
+    gStrip.num_pos = gStrip.num_col = gStrip.num_uv = 0;
+    return true;
+}
+
+PortPrelitVertex &StripSlot(int &counter) {
+    if (counter >= static_cast<int>(gStrip.verts.size())) {
+        gStrip.verts.resize(counter + 1, PortPrelitVertex{});
+    }
+    return gStrip.verts[counter++];
+}
+
+void AddVertexCommon(const bVector3 &v) {
+    bVector3 p = v;
+    if (gStrip.have_matrix) {
+        const bMatrix4 &m = gStrip.matrix;
+        p.x = v.x * m.v0.x + v.y * m.v1.x + v.z * m.v2.x + m.v3.x;
+        p.y = v.x * m.v0.y + v.y * m.v1.y + v.z * m.v2.y + m.v3.y;
+        p.z = v.x * m.v0.z + v.y * m.v1.z + v.z * m.v2.z + m.v3.z;
+    }
+    PortPrelitVertex &s = StripSlot(gStrip.num_pos);
+    s.x = p.x;
+    s.y = p.y;
+    s.z = p.z;
+}
+
+void AddColourCommon(unsigned int colour) {
+    StripSlot(gStrip.num_col).colour = (colour & 0xFF00FF00) | ((colour & 0xFF) << 16) | ((colour >> 16) & 0xFF);
+}
+
+void AddUVCommon(float u, float v) {
+    PortPrelitVertex &s = StripSlot(gStrip.num_uv);
+    s.u = u;
+    s.v = v;
+}
+
+bool EndStripCommon(eView *view) {
+    const int n = gStrip.num_pos;
+    if (n < 3 || !DrawsPrelit(view)) {
+        return true;
+    }
+    uint32_t flags;
+    PortPrelitBlend blend = BlendFor(gStrip.texture, &flags);
+    std::vector<PortPrelitVertex> quads;
+    const std::vector<PortPrelitVertex> &v = gStrip.verts;
+    for (int i = 0; i + 2 < n; i += 2) {
+        // Strip triangles (i, i+1, i+2) and (i+1, i+3, i+2) form the quad
+        // i, i+1, i+3, i+2 around its perimeter.
+        quads.push_back(v[i]);
+        quads.push_back(v[i + 1]);
+        if (i + 3 < n) {
+            quads.push_back(v[i + 3]);
+        } else {
+            quads.push_back(v[i + 2]);
+        }
+        quads.push_back(v[i + 2]);
+    }
+    PortMetalPrelitAddQuads(MetalTextureOf(gStrip.texture), blend, flags, quads.data(), static_cast<uint32_t>(quads.size() / 4));
+    return true;
+}
+} // namespace
+
+bool eBeginStrip(TextureInfo *texture, int num_verts, bMatrix4 *matrix) {
+    return BeginStripCommon(texture, num_verts, matrix);
+}
+bool exBeginStrip(TextureInfo *texture, int num_verts, bMatrix4 *matrix) {
+    return BeginStripCommon(texture, num_verts, matrix);
+}
+void eAddVertex(const bVector3 &v) {
+    AddVertexCommon(v);
+}
+void exAddVertex(const bVector3 &v) {
+    AddVertexCommon(v);
+}
+void eAddColour(unsigned int colour) {
+    AddColourCommon(colour);
+}
+void exAddColour(unsigned int colour) {
+    AddColourCommon(colour);
+}
+void eAddUV(float u, float v) {
+    AddUVCommon(u, v);
+}
+void exAddUV(float u, float v) {
+    AddUVCommon(u, v);
+}
+bool eEndStrip(eView *view) {
+    return EndStripCommon(view);
+}
+bool exEndStrip(eView *view) {
+    return EndStripCommon(view);
 }

@@ -4444,10 +4444,19 @@ void CarRenderInfo::DrawAmbientShadow(eView *view, const bVector3 *position, flo
 
     shadow_alpha_scale *= 1.0f - car_elevation_scale;
 
+#if defined(EA_PORT_NATIVE)
+    // PC DrawAmbientShadow (0x744440): min 110 in the frontend, else 50
+    // (in_front_end ? 0x3C + 0x32 : 0x32); max 110 (0x8A0E50); the lerp is
+    // doubled (fadd st, st(0)) before the clamp to 0xFE.
+    float shadow_alpha_min = in_front_end != 0 ? 110.0f : 50.0f;
+    float shadow_alpha_max = 110.0f;
+    float shadow_alpha = 2.0f * ((shadow_alpha_max - shadow_alpha_min) * shadow_alpha_scale + shadow_alpha_min);
+#else
     float shadow_alpha_min = in_front_end != 0 ? 110.0f : 0.0f;
     float shadow_alpha_max = in_front_end != 0 ? 110.0f : 25.0f;
 
     float shadow_alpha = (shadow_alpha_max - shadow_alpha_min) * shadow_alpha_scale + shadow_alpha_min;
+#endif
     int shadow_alphai = static_cast<int>(shadow_alpha);
 
     shadow_colour = static_cast<unsigned int>(bClamp(shadow_alphai, 0, 0xFE) << 24);
