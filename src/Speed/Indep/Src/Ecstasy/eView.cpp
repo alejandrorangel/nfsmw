@@ -21,6 +21,7 @@ eView::eView() {
 
 eVisibleState eView::GetVisibleState(const bVector3 *aabb_min, const bVector3 *aabb_max, bMatrix4 *local_world) {
     eVisibleState vis_state = this->GetVisibleStateSB(aabb_min, aabb_max, local_world);
+    return vis_state;
 }
 
 eVisibleState eView::GetVisibleState(eModel *model, bMatrix4 *local_world) {

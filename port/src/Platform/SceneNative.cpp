@@ -9,7 +9,9 @@
 #include "Speed/Indep/Src/Ecstasy/EcstasyData.hpp"
 #include "Speed/Indep/Src/Ecstasy/Texture.hpp"
 #include "Speed/Indep/Src/Camera/Camera.hpp"
+#include "Speed/Indep/Src/Frontend/FECarLoader.hpp"
 #include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/FEPkg_GarageMain.hpp"
+#include "Speed/Indep/Src/World/Car.hpp"
 #include "Speed/Indep/Src/Misc/ResourceLoader.hpp"
 #include "Speed/Indep/bWare/Inc/bWare.hpp"
 
@@ -21,6 +23,7 @@
 #include <cstring>
 
 TextureInfo *PortSolidTexture(eSolid *solid, int index); // SolidNative.cpp
+extern bTList<FrontEndRenderingCar> FrontEndRenderingCarList; // CarRender.cpp
 
 namespace {
 
@@ -221,9 +224,71 @@ bool ViewProjectionFor(eView *view, M44 out) {
     return true;
 }
 
+// Each view's world -> clip matrix for the frame (visibility tests).
+const int kMaxViews = 22;
+M44 gViewClip[kMaxViews];
+bool gViewClipValid[kMaxViews];
+
+void SetViewClip(eView *view, const M44 view_proj) {
+    if (view->ID >= 0 && view->ID < kMaxViews) {
+        std::memcpy(gViewClip[view->ID], view_proj, sizeof(M44));
+        gViewClipValid[view->ID] = true;
+    }
+    // Focal length in pixels for eView::GetPixelSize (480-line screen).
+    Camera *camera = view->GetCamera();
+    float fov_h = camera->GetFieldOfView() * (2.0f * 3.1415927f / 65536.0f);
+    view->H = 320.0f / std::tan(fov_h * 0.5f);
+}
+
+// Frustum test of local-space points against a view: all outside one clip
+// plane -> not visible, all inside -> fully, otherwise partially.
+eVisibleState ClassifyPoints(int view_id, const float (*points)[3], int count, const bMatrix4 *local_world) {
+    if (view_id < 0 || view_id >= kMaxViews || !gViewClipValid[view_id]) {
+        return EVISIBLESTATE_PARTIAL;
+    }
+    M44 world, mvp;
+    if (local_world) {
+        std::memcpy(world, local_world, sizeof(M44));
+    } else {
+        Identity(world);
+    }
+    Multiply(mvp, world, gViewClip[view_id]);
+    unsigned outside_all = 0x3F, outside_any = 0;
+    for (int i = 0; i < count; i++) {
+        float c[4];
+        for (int j = 0; j < 4; j++) {
+            c[j] = points[i][0] * mvp[0 * 4 + j] + points[i][1] * mvp[1 * 4 + j] + points[i][2] * mvp[2 * 4 + j] + mvp[3 * 4 + j];
+        }
+        unsigned out = 0;
+        out |= c[0] < -c[3] ? 1 : 0;
+        out |= c[0] > c[3] ? 2 : 0;
+        out |= c[1] < -c[3] ? 4 : 0;
+        out |= c[1] > c[3] ? 8 : 0;
+        out |= c[2] < 0.0f ? 16 : 0;
+        out |= c[2] > c[3] ? 32 : 0;
+        outside_all &= out;
+        outside_any |= out;
+    }
+    if (outside_all != 0) {
+        return EVISIBLESTATE_NOT;
+    }
+    return outside_any == 0 ? EVISIBLESTATE_FULL : EVISIBLESTATE_PARTIAL;
+}
+
+eVisibleState ClassifyBox(int view_id, const bVector3 *aabb_min, const bVector3 *aabb_max, const bMatrix4 *local_world) {
+    float corners[8][3];
+    for (int i = 0; i < 8; i++) {
+        corners[i][0] = (i & 1) ? aabb_max->x : aabb_min->x;
+        corners[i][1] = (i & 2) ? aabb_max->y : aabb_min->y;
+        corners[i][2] = (i & 4) ? aabb_max->z : aabb_min->z;
+    }
+    return ClassifyPoints(view_id, corners, 8, local_world);
+}
+
 // Frontend: the garage backdrop and the player's car (PC ___eDisplayFrame,
 // game flow state 3: GarageMainScreen::HandleRender(1), RenderFrontEndCars).
 int gSceneDraws; // NFSMW_TRACE_SCENE
+int gSceneCalls, gSceneNoSolid;
 bool gSceneLog;
 M44 gSceneViewProj;
 
@@ -235,6 +300,9 @@ bool RenderFrontEndScene() {
     eView *view = eGetView(1, false);
     if (log) {
         Camera *c = view->GetCamera();
+        if (garage) {
+            std::fprintf(stderr, "[scene] garage visible %d\n", garage->IsVisable());
+        }
         std::fprintf(stderr, "[scene] garage %p camera %p fov %u near %.2f far %.1f pos (%.2f %.2f %.2f)\n", (void *)garage, (void *)c,
                      c ? c->GetFieldOfView() : 0, c ? c->GetNearZ() : 0.0f, c ? c->GetFarZ() : 0.0f, c ? c->GetPosition()->x : 0.0f,
                      c ? c->GetPosition()->y : 0.0f, c ? c->GetPosition()->z : 0.0f);
@@ -247,6 +315,7 @@ bool RenderFrontEndScene() {
         return false;
     }
     PortMetal3DBeginFrame(view_proj);
+    SetViewClip(view, view_proj);
     gSceneLog = log;
     std::memcpy(gSceneViewProj, view_proj, sizeof(M44));
     if (log) {
@@ -257,11 +326,19 @@ bool RenderFrontEndScene() {
     static const bool on_top = std::getenv("NFSMW_SCENE_ON_TOP") != nullptr;
     PortMetal3DSetOverlay(on_top);
     gSceneDraws = 0;
+    gSceneCalls = gSceneNoSolid = 0;
     garage->HandleRender(1);
     int backdrop = gSceneDraws;
     RenderFrontEndCars(view, 0);
     if (log) {
-        std::fprintf(stderr, "[scene] draws: backdrop %d, cars %d\n", backdrop, gSceneDraws - backdrop);
+        std::fprintf(stderr, "[scene] draws: backdrop %d, cars %d (render calls %d, no solid %d)\n", backdrop, gSceneDraws - backdrop,
+                     gSceneCalls, gSceneNoSolid);
+        GarageCarLoader *loader = GetGarageCarLoader();
+        std::fprintf(stderr, "[scene] garage loader: loading %d current %d switched %d\n", loader->IsThereALoadingRideInfo(),
+                     loader->IsThereACurrentRideInfo(), loader->HasSwitched());
+        for (FrontEndRenderingCar *c = FrontEndRenderingCarList.GetHead(); c != FrontEndRenderingCarList.EndOfList(); c = c->GetNext()) {
+            std::fprintf(stderr, "[scene]   fe car %p render info %p visible %d\n", (void *)c, (void *)c->GetRenderInfo(), c->Visible);
+        }
     }
     return true;
 }
@@ -272,7 +349,9 @@ bool RenderFrontEndScene() {
 // current 3D frame. Lighting and blending matrices come with the shaders.
 void eViewPlatInterface::Render(eModel *model, bMatrix4 *local_to_world, eLightContext *light_context, uint32 flags,
                                 bMatrix4 *blending_matricies) {
+    gSceneCalls++;
     if (model == nullptr || model->GetSolid() == nullptr) {
+        gSceneNoSolid++;
         return;
     }
     M44 world;
@@ -295,6 +374,19 @@ void eViewPlatInterface::Render(eModel *model, bMatrix4 *local_to_world, eLightC
         std::fprintf(stderr, "[scene]   %s centre (%.1f %.1f %.1f) size %.1f -> clip (%.2f %.2f %.2f w %.2f)\n", s->Name, local[0], local[1], local[2],
                      s->AABBMaxX - s->AABBMinX, clip[0], clip[1], clip[2], clip[3]);
     }
+}
+
+eVisibleState eViewPlatInterface::GetVisibleStateGB(const bVector3 *aabb_min, const bVector3 *aabb_max, bMatrix4 *local_world) {
+    return ClassifyBox(static_cast<eView *>(this)->ID, aabb_min, aabb_max, local_world);
+}
+
+eVisibleState eViewPlatInterface::GetVisibleStateSB(const bVector3 *aabb_min, const bVector3 *aabb_max, bMatrix4 *local_world) {
+    return ClassifyBox(static_cast<eView *>(this)->ID, aabb_min, aabb_max, local_world);
+}
+
+eVisibleState eViewPlatInterface::GetVisibleStateSB(const bVector3 *position, bMatrix4 *local_world) {
+    float point[1][3] = {{position->x, position->y, position->z}};
+    return ClassifyPoints(static_cast<eView *>(this)->ID, point, 1, local_world);
 }
 
 // Builds this frame's 3D scene (published with the frontend).

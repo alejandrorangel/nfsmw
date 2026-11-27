@@ -194,8 +194,17 @@ void elResetLightContext(eDynamicLightContext *light_context) {
     bMemSet(light_context, 0, sizeof(*light_context));
 }
 
+#if defined(EA_PORT_NATIVE)
+// Not decompiled yet; the native renderer lights models itself for now (the
+// light context keeps what elResetLightContext set). Callers ignore the result.
+int elSetupLights(eDynamicLightContext *light_context, eShaperLightRig *shaper_lights, bVector3 *local_pos, bMatrix4 *local_world,
+                  bMatrix4 *world_view, eView *view) {
+    return 1;
+}
+#else
 int elSetupLights(eDynamicLightContext *light_context /* r27 */, eShaperLightRig *shaper_lights /* r26 */, bVector3 *local_pos /* r22 */,
                   bMatrix4 *local_world /* r1+0x4B8 */, bMatrix4 *world_view /* r4 */, eView *view /* r8 */) {}
+#endif
 
 int elSetupLightContext(eDynamicLightContext *light_context /* r31 */, eShaperLightRig *shaper_lights /* r28 */, bMatrix4 *local_world /* r30 */,
                         bMatrix4 *world_view /* r27 */, bVector4 *camera_world_position /* r29 */, eView *view /* r26 */) {

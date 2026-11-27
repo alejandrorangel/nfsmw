@@ -118,6 +118,10 @@ void eDisplayFrame() {
     frame++;
     PortRenderScene(frame);
     int quads = RenderFrontend();
+    // The PC frame ends by recycling the per-frame scratch memory
+    // (eFrameMalloc), which matrices for this frame's draws came from.
+    void eSwapFrameMallocBuffers();
+    eSwapFrameMallocBuffers();
     PaceFrame();
 
     if (std::getenv("NFSMW_TRACE_FLOW") && frame % 60 == 0) {
