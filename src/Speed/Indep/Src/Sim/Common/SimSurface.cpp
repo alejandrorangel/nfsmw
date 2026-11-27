@@ -28,10 +28,19 @@ SimSurface::SimSurface(const Attrib::Collection *spec) : Attrib::Gen::simsurface
     }
 }
 
+#if defined(EA_PORT_NATIVE)
+// Inlined on PC (Effects' EffectLookup walks up the surface tree with it);
+// the root's parent is no surface, which becomes the null surface (kNull).
+SimSurface SimSurface::GetParentSurface() const {
+    Attrib::Key parent = GetParent();
+    return SimSurface(parent);
+}
+#else
 // UNSOLVED, confusing
 // SimSurface SimSurface::GetParentSurface() const {
 //     const Attrib::Collection *collection;
 // }
+#endif
 
 void SimSurface::UpdateSystem() {}
 

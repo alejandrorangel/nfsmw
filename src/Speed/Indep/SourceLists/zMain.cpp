@@ -59,6 +59,8 @@
 #include "Speed/Indep/Src/Generated/Events/EEnterBin.cpp"
 
 #include "Speed/Indep/Src/Generated/Events/EAutoSave.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/ECollision.cpp"
 #endif
 
 #include "Speed/Indep/Src/Input/Common/action.cpp"
