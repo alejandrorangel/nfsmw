@@ -519,6 +519,19 @@ vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffe
         o.d1 = saturate(float4(min(extinction, 1.0) * ambient * o.color.rgb, o.color.a));
         // oT1 = (u / 2 + (N . WorldView[0]) / 2, v / 2): WindowReflection.
         o.uv1 = float2(0.5 * o.uv.x + 0.5 * dot(n, c.view_x.xyz), 0.5 * o.uv.y);
+    } else if (c.effect == 6) {
+        // IDI_TREE_FX technique #0 (vs #1): oD0 = (E sat(N.L) DiffuseColour.rgb,
+        // sat(N.L) DiffuseColour.w), oD1 = (AmbientColour.rgb AmbientColour.w,
+        // 1) colour (no extinction), oT2 = in-scatter.
+        float3 extinction = 1;
+        if (fog.enabled) {
+            Scatter(o.world_pos, c.eye.xyz, fog, extinction, o.inscatter);
+        }
+        float ndl = saturate(dot(fog.light_dir.xyz, o.normal));
+        float4 diffuse = fog.lit ? ndl * fog.diffuse : float4(0);
+        o.d0 = saturate(float4(min(extinction, 1.0) * diffuse.rgb, diffuse.a));
+        float3 ambient = fog.lit ? fog.ambient.rgb * fog.ambient.w : float3(1);
+        o.d1 = saturate(float4(ambient, 1) * o.color);
     } else if (FoggedEffect(c.effect)) {
         float3 extinction = 1;
         if (fog.enabled) {
@@ -648,12 +661,15 @@ fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(
         float3 diffuse = fog.lit ? fog.diffuse.rgb : float3(0);
         float3 col = (t.rgb * (saturate(ndl) * diffuse) + spec + t.rgb * in.d0.rgb) * in.d1.rgb;
         out = float4(saturate(2.0 * col + in.inscatter), world_reflect ? 1.0 : t.a * in.d0.a);
+    } else if (c.effect == 6) {
+        // IDI_TREE_FX ps #0: 2 (t oD1 + t oD0) + oT2, alpha t.a.
+        out = float4(saturate(2.0 * t.rgb * (in.d0.rgb + in.d1.rgb) + in.inscatter), t.a);
     } else if (c.effect == 5) {
-        // IDI_GLOSSYWINDOW_FX ps #10: 2 t.a spec + t oD0 + 2 t oD1 +
-        // t.a reflection (WindowReflection, wrap, LOD bias -1) + in-scatter;
-        // alpha t.a.
+        // IDI_GLOSSYWINDOW_FX ps #10: 2 (t oD1 + t oD0 + 2 t.a spec) (the
+        // mad_x2 doubles the running sum) + t.a reflection (WindowReflection,
+        // wrap, LOD bias -1) + in-scatter; alpha t.a.
         float3 refl = tex2.sample(s, in.uv1, bias(-1.0)).rgb;
-        float3 rgb = 2.0 * t.a * in.spec + t.rgb * in.d0.rgb + 2.0 * t.rgb * in.d1.rgb + t.a * refl + in.inscatter;
+        float3 rgb = 2.0 * (t.rgb * in.d1.rgb + t.rgb * in.d0.rgb + 2.0 * t.a * in.spec) + t.a * refl + in.inscatter;
         out = float4(saturate(rgb), t.a);
     } else {
         // PC WORLD (ps #12): 2 x texture x (oD0 + oD1) + in-scatter (mad_x2,
@@ -750,6 +766,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     id<MTLTexture> _envCube, _envDepth;
     id<MTLTexture> _blackCube; // bound when there is none
     unsigned _envFacesDrawn; // faces drawn at least once (bit per face)
+    bool _drawingEnvFace;    // drawDraws is drawing a dynamic env-map face
     uint64_t _frame;
 }
 
@@ -933,7 +950,9 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         rp.stencilAttachment.storeAction = MTLStoreActionDontCare;
         id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rp];
         enc.label = @"EnvMap face";
+        _drawingEnvFace = true;
         [self drawDraws:f.draws viewProj:f.view_proj eye:f.eye fog:scene.fog envMap:nil width:size height:size encoder:enc];
+        _drawingEnvFace = false;
         [enc endEncoding];
         _envFacesDrawn |= 1u << face;
     }
@@ -990,6 +1009,18 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 } c = {};
                 c.stride = d.vertex_stride;
                 c.effect = d.effect;
+                if (_drawingEnvFace) {
+                    // eViewPlatInterface::Render 0x6DA9B0: in views other than
+                    // the main one (render target type != 0), WORLD draws with
+                    // WORLDNOFOG (8) and WORLDREFLECT / WORLDNORMALMAP with
+                    // WORLDNORMALMAPNOFOG (30, fixed function); both are
+                    // 2 x texture x colour, alpha texture x colour alpha.
+                    if (d.effect == 0) {
+                        c.effect = 8;
+                    } else if (d.effect == 1 || d.effect == 3) {
+                        c.effect = 30;
+                    }
+                }
                 memcpy(c.eye, eye, sizeof(float) * 3);
                 memcpy(c.view_x, view_x, sizeof(view_x));
                 static const char *shade_env = getenv("NFSMW_SHADE");
@@ -1009,7 +1040,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 if (d.flags & PORT_3D_ENVMAP) {
                     c.shade |= 16;
                 }
-                if ((d.effect == 1 || d.effect == 3) && d.texture2 && d.texture3 && d.vertex_stride >= 60) {
+                if ((c.effect == 1 || c.effect == 3) && d.texture2 && d.texture3 && d.vertex_stride >= 60) {
                     c.shade |= 128;
                 }
                 // IDI_CAR_FX technique: #1 (shader=3, PC's higher car detail)
