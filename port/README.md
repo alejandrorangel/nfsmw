@@ -113,6 +113,54 @@ Debug switches:
 - `NFSMW_FENG_POOL=1`: frontend allocations in the FEng pool (debugging)
 - `NFSMW_HOLD_FRAME=<s>`, `NFSMW_TEXTURE_SMOKE=1`
 
+## Benchmark
+
+```sh
+python3 port/tools/benchmark.py                      # race, pursuit, frontend; 3 runs each
+python3 port/tools/benchmark.py -n 5 race rain       # chosen scenarios, 5 runs
+python3 port/tools/benchmark.py --vary FSAALevel=0,2 race
+python3 port/tools/benchmark.py --set ShadowDetail=0 --screenshots shots/after race
+python3 port/tools/benchmark.py --compare shots/before shots/after   # per-image max/mean pixel difference
+```
+
+`NFSMW_BENCHMARK=<scenario>` (or `--benchmark <scenario>`) makes a run
+reproducible: it boots straight into a fixed Quick Race with the game's
+SkipFE switches (or to the main menu), the race AI drives the player's car
+(`AIVehicleHuman::SetAiControl`), every frame is exactly one 1/60 s sim tick,
+the random seed is fixed, file I/O completes synchronously (so what is loaded
+by a frame never depends on the disk), the real keyboard/mouse/pad and saves
+(profiles) are off, and frames are drawn offscreen in lockstep with no pacing
+or vsync (every 15th frame is copied to the window). Two runs give
+pixel-identical screenshots. After the scenario's frames (3600, a minute of
+game time, from the moment the race is on) it writes `<scenario>.csv`
+(per frame: `frame_ms` wall, `game_ms` game loop, `render_ms` render build,
+`present_ms` main-thread encode, `gpu_ms`, active `cars`) and
+`<scenario>_<frame>.png` to `$NFSMW_BENCHMARK_OUT`, and exits.
+
+| scenario | what |
+|---|---|
+| `race` | downtown Rockport circuit 21.1.1, 3 opponents, light traffic, no cops (renderer, GPU) |
+| `rain` | the same with `NFSMW_RAIN` (rain particles, wet road) |
+| `pursuit` | Rosewood sprint 15.2.1, 3 opponents, a heat 4 pursuit from frame 240 (AI, physics, ~10 cars) |
+| `frontend` | the main menu over the garage car (car shading, frontend) |
+| `forest` | Rosewood forest circuit 15.1.1 (foliage, long views) |
+| `list-races` | prints the race database's event IDs |
+
+Overrides: `NFSMW_BENCHMARK_FRAMES`, `NFSMW_BENCHMARK_SHOTS=<f>,<f>`,
+`NFSMW_BENCHMARK_RACE=<event id>`, `NFSMW_BENCHMARK_CAR=<vehicle>`,
+`NFSMW_BENCHMARK_OPPONENTS`, `NFSMW_BENCHMARK_TRAFFIC=<0..100>`,
+`NFSMW_BENCHMARK_PRESENT=<n>` (copy every n'th frame to the window; 1 with
+`NFSMW_BENCHMARK_VSYNC=1` is display-bound like play), `NFSMW_BENCHMARK_TIMEOUT`.
+
+`benchmark.py` writes the video options to a temporary `NFSMW_VIDEO_CONFIG`
+(starting from the game's defaults for this Mac, or `--base user`; your
+`VideoOptions.cfg` is only read), runs each scenario `-n` times
+(`--vary` values take turns), checks every run's screenshots against the
+first's, and prints median/p90/p99 frame time, average fps, GPU time and the
+spread of the runs' medians, warning when runs are over 5% apart (other
+games running, thermal state). The numbers move with machine load; compare
+within one invocation.
+
 ## Recovered data
 
 `tools/gen_data.py` reads initialised tables straight out of `speed.exe`

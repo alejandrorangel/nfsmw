@@ -79,6 +79,8 @@ const Scenario kScenarios[] = {
      3, 10, false, 0.0f, 3600, {600, 1800, 3600}},
     {"forest", "the Rosewood forest circuit (15.1.1), 3 opponents: trees, foliage and long views", false, "15.1.1", "bmwm3gtre46", 3, 2, 10, false,
      0.0f, 3600, {600, 1800, 3600}},
+    {"rain", "the downtown circuit (21.1.1) in the rain (NFSMW_RAIN): rain particles, wet road", false, "21.1.1", "bmwm3gtre46", 3, 3, 10, false,
+     0.0f, 3600, {600, 1800, 3600}},
     {"pursuit", "Rosewood sprint (15.2.1), 3 opponents, a heat 4 pursuit, traffic: the CPU (AI, physics) and many cars", false, "15.2.1", "bmwm3gtre46", 3, 1, 60,
      true, 4.0f, 3600, {600, 1800, 3600}},
     {"frontend", "the main menu over the garage car: car shading and the frontend", true, nullptr, nullptr, 0, 0, 0, false, 0.0f, 3600,
@@ -250,6 +252,9 @@ void PortBenchmarkConfigure(int argc, char **argv) {
         std::exit(2);
     }
     gLaunch = Now();
+    if (std::strcmp(gScenario->name, "rain") == 0) {
+        setenv("NFSMW_RAIN", "1", 1); // RainNative.cpp's AlwaysRain
+    }
     gRace = std::getenv("NFSMW_BENCHMARK_RACE") ? std::getenv("NFSMW_BENCHMARK_RACE") : (gScenario->race ? gScenario->race : "");
     gCar = std::getenv("NFSMW_BENCHMARK_CAR") ? std::getenv("NFSMW_BENCHMARK_CAR") : (gScenario->car ? gScenario->car : "");
     gFrames = EnvInt("NFSMW_BENCHMARK_FRAMES", gScenario->frames);

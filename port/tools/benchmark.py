@@ -1,6 +1,7 @@
 """Runs the native port's benchmark mode several times and prints each scenario's frame times.
 
     python3 port/tools/benchmark.py                          # race, pursuit, frontend; 3 runs each
+    python3 port/tools/benchmark.py race rain forest         # also: rain, forest
     python3 port/tools/benchmark.py -n 5 race                # one scenario, 5 runs
     python3 port/tools/benchmark.py --vary FSAALevel=0,3 race
     python3 port/tools/benchmark.py --set ShadowDetail=0 --set RacingResolution=3
@@ -42,6 +43,7 @@ USER_OPTIONS = os.path.expanduser('~/Library/Application Support/NFSMW/VideoOpti
 SCENARIOS = {
     'race': 'downtown Rockport circuit, 3 opponents, light traffic: renderer and GPU',
     'pursuit': 'Rosewood sprint, 3 opponents, heat 4 pursuit: CPU (AI, physics), many cars',
+    'rain': 'the downtown circuit in the rain: rain particles, wet road',
     'frontend': 'main menu over the garage car: car shading, frontend',
     'forest': 'Rosewood forest circuit, 3 opponents: trees and long views',
 }
@@ -80,7 +82,7 @@ def write_options(path, options):
 def game_env(binary_data, out_dir, options_path, extra):
     env = dict(os.environ)
     for key in list(env):
-        if key.startswith('NFSMW_BENCHMARK') or key.startswith('NFSMW_TRACE') or key.startswith('NFSMW_AUTO'):
+        if key.startswith('NFSMW_BENCHMARK') or key.startswith('NFSMW_TRACE') or key.startswith('NFSMW_AUTO') or key == 'NFSMW_RAIN':
             del env[key]
     env['NFSMW_DATA'] = binary_data
     env['NFSMW_BENCHMARK_OUT'] = out_dir
@@ -259,7 +261,7 @@ def main():
     try:
         if args.compare:
             worst = compare_sets(args.compare[0], args.compare[1], work)
-            print('identical' if worst == 0 else 'max difference %d' % worst)
+            print('identical' if worst == 0 else ('missing or resized images' if worst > 255 else 'max difference %d' % worst))
             return 0 if worst == 0 else 1
         return benchmark(args, work)
     finally:
