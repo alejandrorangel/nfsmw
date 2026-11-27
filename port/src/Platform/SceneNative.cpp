@@ -106,6 +106,8 @@ void DrawSolid(eSolid *solid, const M44 world) {
             d.flags = PORT_3D_ADDITIVE;
         } else if (texture && texture->AlphaUsageType == TEXUSAGE_MODULATED) {
             d.flags = PORT_3D_ALPHA_BLEND;
+        } else if (texture && texture->AlphaUsageType == TEXUSAGE_PUNCHTHRU) {
+            d.flags = PORT_3D_ALPHA_TEST;
         }
         std::memcpy(d.world, world, sizeof(M44));
         PortMetal3DAdd(&d);
@@ -333,6 +335,15 @@ bool RenderFrontEndScene() {
     if (log) {
         std::fprintf(stderr, "[scene] draws: backdrop %d, cars %d (render calls %d, no solid %d)\n", backdrop, gSceneDraws - backdrop,
                      gSceneCalls, gSceneNoSolid);
+        int wheels = 0;
+        for (eSolid *sol = SolidList.GetHead(); sol != SolidList.EndOfList(); sol = sol->GetNext()) {
+            if (std::strstr(sol->Name, "WHEEL") || std::strstr(sol->Name, "TIRE") || std::strstr(sol->Name, "RIM")) {
+                if (wheels++ < 6) {
+                    std::fprintf(stderr, "[scene]   wheel solid %s\n", sol->Name);
+                }
+            }
+        }
+        std::fprintf(stderr, "[scene] %d wheel/tire solids loaded\n", wheels);
         GarageCarLoader *loader = GetGarageCarLoader();
         std::fprintf(stderr, "[scene] garage loader: loading %d current %d switched %d\n", loader->IsThereALoadingRideInfo(),
                      loader->IsThereACurrentRideInfo(), loader->HasSwitched());
@@ -362,6 +373,10 @@ void eViewPlatInterface::Render(eModel *model, bMatrix4 *local_to_world, eLightC
     }
     DrawSolid(model->GetSolid(), world);
     gSceneDraws++;
+    if (gSceneLog && std::strstr(model->GetSolid()->Name, "TIRE")) {
+        std::fprintf(stderr, "[scene]   %s world v3 (%.2f %.2f %.2f) w-col (%.2f %.2f %.2f %.2f)\n",
+                     model->GetSolid()->Name, world[12], world[13], world[14], world[3], world[7], world[11], world[15]);
+    }
     if (gSceneLog) {
         eSolid *s = model->GetSolid();
         float local[4] = {(s->AABBMinX + s->AABBMaxX) * 0.5f, (s->AABBMinY + s->AABBMaxY) * 0.5f, (s->AABBMinZ + s->AABBMaxZ) * 0.5f, 1.0f};

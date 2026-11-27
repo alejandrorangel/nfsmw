@@ -55,7 +55,7 @@ struct Port3DDraw {
     uint32_t flags; // PORT_3D_*
     float world[16];
 };
-enum { PORT_3D_ALPHA_BLEND = 1, PORT_3D_ADDITIVE = 2 };
+enum { PORT_3D_ALPHA_BLEND = 1, PORT_3D_ADDITIVE = 2, PORT_3D_ALPHA_TEST = 4 };
 
 void PortMetal3DBeginFrame(const float view_proj[16]);
 float PortMetalViewAspect(); // drawable width / height

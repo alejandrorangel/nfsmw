@@ -262,11 +262,13 @@ vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffe
     return o;
 }
 
+// shade: bit 0 texture-only debug view, bit 1 alpha test (punch-through
+// textures only; elsewhere alpha is a gloss/spec mask, or blends).
 fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(0)]], constant uint &shade [[buffer(0)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear, address::repeat);
     float4 t = tex.sample(s, in.uv);
-    float4 c = shade == 1 ? t : t * in.color;
-    if (c.a < 0.25) {
+    float4 c = (shade & 1) ? t : t * in.color;
+    if ((shade & 2) && c.a < 0.5) {
         discard_fragment();
     }
     // Placeholder lighting until the game's shaders are ported.
@@ -404,6 +406,9 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 c.stride = d.vertex_stride;
                 static const char *shade_env = getenv("NFSMW_SHADE");
                 c.shade = (shade_env && strcmp(shade_env, "texture") == 0) ? 1 : 0;
+                if (d.flags & PORT_3D_ALPHA_TEST) {
+                    c.shade |= 2;
+                }
                 // mvp = world * view_proj (row vectors).
                 for (int i = 0; i < 4; i++) {
                     for (int j = 0; j < 4; j++) {

@@ -2791,7 +2791,7 @@ static const uint32 CullBFace = 1;
 static const uint32 shadowBias = 1;
 
 // TODO
-#ifdef NON_MATCHING
+#if defined(NON_MATCHING) || defined(EA_PORT_NATIVE)
 const float lbl_8040AD3C = 1.0f;
 const float lbl_8040AD4C = 0.0f;
 #else
