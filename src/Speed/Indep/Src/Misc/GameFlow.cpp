@@ -1175,6 +1175,10 @@ void LoadGlobalChunks() {
     }
     WaitForResourceLoadingComplete();
 
+#if defined(EA_PORT_NATIVE)
+    // speed.exe 1.3 @ 0x66493E: the frontend gets its look from the start.
+    IVisualTreatment::Get()->SetState(IVisualTreatment::FE_LOOK);
+#endif
     void eDisplayFrame(); // Decl: 3404
     eDisplayFrame();
     eLoadStreamingTexturePack(CarTexturePackFilename);

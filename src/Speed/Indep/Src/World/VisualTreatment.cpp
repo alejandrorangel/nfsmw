@@ -11,6 +11,15 @@
 #include "Speed/Indep/Src/Misc/Timer.hpp"
 #include "TimeOfDay.hpp"
 
+// The PC IVisualTreatment (speed.exe 1.3) holds only the midday, uves and cop
+// cam looks (ctor 0x74B8B0) and always blends/uses the midday one
+// (UpdateVisualLook 0x73E2F0, BlendVisualLookAttribute 0x73E090..0x73E180).
+#if defined(EA_PORT_NATIVE)
+#define VISUAL_LOOK_IS_MIDDAY() true
+#else
+#define VISUAL_LOOK_IS_MIDDAY() (GetCurrentTimeOfDay() == eTOD_MIDDAY)
+#endif
+
 float twkVisualTreatmentTargetHeat = -1.0f;
 float twkVisualTreatmentRadialBlur = -1.0f;
 float twkVisualTreatmentPulseBrightness = -1.0f;
@@ -272,7 +281,7 @@ void IVisualTreatment::BlendVisualLookAttribute(bMatrix4 &result, float defaultU
                                                 const UMath::Matrix4 &(Attrib::Gen::visuallook::*funcPtr)() const) {
     bMemSet(&result, 0, sizeof(bMatrix4));
 
-    if (GetCurrentTimeOfDay() == eTOD_MIDDAY) {
+    if (VISUAL_LOOK_IS_MIDDAY()) {
         if (defaultUves != 0.0f) {
             AddBlend(&result, (bMatrix4 *)&(this->MiddayVisualLook.*funcPtr)(), defaultUves);
         }
@@ -296,7 +305,7 @@ void IVisualTreatment::BlendVisualLookAttribute(float &result, float defaultUves
     result = 0.0f;
 
     if (defaultUves != 0.0f) {
-        if (GetCurrentTimeOfDay() == eTOD_MIDDAY) {
+        if (VISUAL_LOOK_IS_MIDDAY()) {
             result += (this->MiddayVisualLook.*funcPtr)() * defaultUves;
         } else {
             result += (this->SunsetVisualLook.*funcPtr)() * defaultUves;
@@ -313,7 +322,7 @@ void IVisualTreatment::BlendVisualLookAttribute(bVector4 &result, float defaultU
     bMemSet(&result, 0, sizeof(bVector4));
 
     if (defaultUves != 0.0f) {
-        if (GetCurrentTimeOfDay() == eTOD_MIDDAY) {
+        if (VISUAL_LOOK_IS_MIDDAY()) {
             AddBlend(&result, (bVector4 *)(&(this->MiddayVisualLook.*funcPtr)()), defaultUves);
         } else {
             AddBlend(&result, (bVector4 *)(&(this->SunsetVisualLook.*funcPtr)()), defaultUves);
@@ -334,7 +343,7 @@ void IVisualTreatment::UpdateVisualLook() {
         this->RadialBlur = 0.0f;
     } else if (this->State == FE_LOOK) {
         currVisualLook = &this->SunsetVisualLook;
-        if (GetCurrentTimeOfDay() == eTOD_MIDDAY) {
+        if (VISUAL_LOOK_IS_MIDDAY()) {
             currVisualLook = &this->MiddayVisualLook;
         }
 

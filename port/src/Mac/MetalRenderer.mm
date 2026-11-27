@@ -170,6 +170,9 @@ struct Frame3D {
     float eye[3] = {0, 0, 0};
     std::vector<Draw3D> draws;
     bool overlay = false;
+    bool treatment = false; // apply the visual treatment (vt) to this frame
+    PortVisualTreatment vt;
+    id<MTLTexture> gain_map;
 };
 static Frame3D g3DBuilding;
 static Frame3D g3DPublished;
@@ -184,6 +187,17 @@ void PortMetal3DBeginFrame(const float view_proj[16]) {
     memcpy(g3DBuilding.view_proj, view_proj, sizeof(g3DBuilding.view_proj));
     g3DBuilding.draws.clear();
     g3DBuilding.overlay = false;
+    g3DBuilding.treatment = false;
+    g3DBuilding.gain_map = nil;
+}
+
+void PortMetal3DSetTreatment(const PortVisualTreatment *treatment) {
+    g3DBuilding.treatment = treatment != nullptr;
+    if (treatment) {
+        g3DBuilding.vt = *treatment;
+        g3DBuilding.gain_map = (__bridge id<MTLTexture>)treatment->gain_map;
+        g3DBuilding.vt.gain_map = nullptr; // held by gain_map
+    }
 }
 
 void PortMetal3DSetEye(const float eye[3]) {
@@ -351,6 +365,58 @@ fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(
     return out;
 }
 
+// Full-screen triangle for the post-process passes.
+struct QuadOut { float4 pos [[position]]; float2 uv; };
+
+vertex QuadOut quad_vs(uint vid [[vertex_id]]) {
+    float2 p = float2((vid << 1) & 2, vid & 2);
+    QuadOut o;
+    o.pos = float4(p * 2 - 1, 0, 1);
+    o.uv = float2(p.x, 1 - p.y);
+    return o;
+}
+
+constant float3 kLuminance = float3(0.6125, 0.5154, 0.0721); // LUMINANCE_VECTOR (IDI_FILTER_FX / IDI_VISUALTREATMENT_FX)
+
+// IDI_FILTER_FX: weighted taps of one texture (sub_6D2CD0). lum_alpha: pass
+// p4, alpha = luminance of the weighted rgb; otherwise pass p0..p3, rgba.
+struct FilterConst { float4 weights[4]; float4 offsets[4]; uint taps; uint lum_alpha; };
+
+fragment float4 filter_fs(QuadOut in [[stage_in]], texture2d<float> src [[texture(0)]], constant FilterConst &c [[buffer(0)]]) {
+    constexpr sampler s(filter::linear, address::clamp_to_edge);
+    float4 sum = 0;
+    for (uint i = 0; i < c.taps; i++) {
+        sum += src.sample(s, in.uv + c.offsets[i].xy) * c.weights[i];
+    }
+    if (c.lum_alpha) {
+        sum.a = dot(saturate(sum.rgb), kLuminance);
+    }
+    return saturate(sum);
+}
+
+// IDI_VISUALTREATMENT_FX technique 0 (ps_2_0, shader #4).
+struct TreatmentConst { float4 black_bloom; float4 tint; float4 desaturation; float colour_bloom; float brightness; float vignette; float pad; };
+
+fragment float4 treatment_fs(QuadOut in [[stage_in]], texture2d<float> scene [[texture(0)]], texture2d<float> bloom [[texture(1)]],
+                             texture2d<float> gain [[texture(2)]], constant TreatmentConst &c [[buffer(0)]],
+                             constant uint *spline [[buffer(1)]]) {
+    constexpr sampler lin(filter::linear, address::clamp_to_edge);
+    float4 b = bloom.sample(lin, in.uv);              // DIFFUSETEX: blurred quarter-size scene, a = luminance
+    // SPLINE (256x1, point sampled at (b.a, b.r)): r black bloom, g colour bloom.
+    uint texel = spline[min(uint(saturate(b.a) * 256.0), 255u)];
+    float4 curve = float4((texel >> 16) & 0xff, (texel >> 8) & 0xff, texel & 0xff, texel >> 24) / 255.0;
+    float4 col = scene.sample(lin, in.uv);            // DiffuseMap: the frame
+    float4 g = gain.sample(lin, in.uv);               // GAINMAP: UVESVIGNETTE
+    float lum = dot(col.rgb, kLuminance);
+    float3 desat = c.desaturation.x * col.rgb + lum * c.desaturation.y;
+    float3 colour_bloom = col.rgb * (curve.g * c.colour_bloom * c.tint.rgb);
+    float black_bloom = curve.r * c.black_bloom.x + c.black_bloom.y;
+    float3 rgb = desat * black_bloom + colour_bloom;
+    rgb += g.g * c.vignette;
+    rgb *= c.brightness;
+    return float4(g.b * rgb, 1);
+}
+
 fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear);
     float4 c = tex.sample(s, in.uv);
@@ -371,6 +437,11 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     id<MTLDepthStencilState> _depthTest;
     id<MTLDepthStencilState> _depthOff;
     id<MTLTexture> _white;
+    // Visual treatment (see PortVisualTreatment).
+    id<MTLRenderPipelineState> _filterPipeline;
+    id<MTLRenderPipelineState> _treatmentPipeline;
+    id<MTLTexture> _sceneColor, _sceneDepth; // the frame (PC 0x93DEF8)
+    id<MTLTexture> _bloom[2];                // quarter size (PC 0x982964, 0x982968)
     uint64_t _frame;
 }
 
@@ -434,6 +505,24 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 if (!_meshPipelines[mode]) {
                     NSLog(@"NFSMW: mesh pipeline %d failed: %@", mode, error);
                 }
+            }
+        }
+        if (lib) {
+            MTLRenderPipelineDescriptor *pd = [MTLRenderPipelineDescriptor new];
+            pd.vertexFunction = [lib newFunctionWithName:@"quad_vs"];
+            pd.fragmentFunction = [lib newFunctionWithName:@"filter_fs"];
+            pd.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+            _filterPipeline = [_device newRenderPipelineStateWithDescriptor:pd error:&error];
+            if (!_filterPipeline) {
+                NSLog(@"NFSMW: filter pipeline failed: %@", error);
+            }
+            pd.fragmentFunction = [lib newFunctionWithName:@"treatment_fs"];
+            pd.colorAttachments[0].pixelFormat = view.colorPixelFormat;
+            pd.depthAttachmentPixelFormat = view.depthStencilPixelFormat;
+            pd.stencilAttachmentPixelFormat = view.depthStencilPixelFormat;
+            _treatmentPipeline = [_device newRenderPipelineStateWithDescriptor:pd error:&error];
+            if (!_treatmentPipeline) {
+                NSLog(@"NFSMW: treatment pipeline failed: %@", error);
             }
         }
         MTLDepthStencilDescriptor *dd = [MTLDepthStencilDescriptor new];
@@ -518,6 +607,123 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     }
 }
 
+// Offscreen targets for the visual treatment, sized like the drawable.
+- (void)ensureTreatmentTargets:(CGSize)size {
+    NSUInteger w = (NSUInteger)size.width, h = (NSUInteger)size.height;
+    if (_sceneColor && _sceneColor.width == w && _sceneColor.height == h) {
+        return;
+    }
+    MTLTextureDescriptor *cd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                                                                  width:w
+                                                                                 height:h
+                                                                              mipmapped:NO];
+    cd.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+    cd.storageMode = MTLStorageModePrivate;
+    _sceneColor = [_device newTextureWithDescriptor:cd];
+    MTLTextureDescriptor *dd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float_Stencil8
+                                                                                  width:w
+                                                                                 height:h
+                                                                              mipmapped:NO];
+    dd.usage = MTLTextureUsageRenderTarget;
+    dd.storageMode = MTLStorageModeMemoryless;
+    _sceneDepth = [_device newTextureWithDescriptor:dd];
+    // PC 0x6C311D: the bloom targets are a quarter of the back buffer.
+    cd.width = w / 4 > 0 ? w / 4 : 1;
+    cd.height = h / 4 > 0 ? h / 4 : 1;
+    for (int i = 0; i < 2; i++) {
+        _bloom[i] = [_device newTextureWithDescriptor:cd];
+    }
+}
+
+// One IDI_FILTER_FX pass (sub_6D2CD0): taps of (weight, dx, dy) in source
+// texels, drawn over the whole target.
+- (void)filter:(id<MTLTexture>)src into:(id<MTLTexture>)dst taps:(const float (*)[3])taps count:(int)count
+     lumAlpha:(bool)lumAlpha commandBuffer:(id<MTLCommandBuffer>)cmd {
+    MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+    rp.colorAttachments[0].texture = dst;
+    rp.colorAttachments[0].loadAction = MTLLoadActionDontCare;
+    rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+    struct {
+        float weights[4][4];
+        float offsets[4][4];
+        uint32_t taps;
+        uint32_t lum_alpha;
+        uint32_t pad[2];
+    } c = {};
+    for (int i = 0; i < count; i++) {
+        for (int j = 0; j < 4; j++) {
+            c.weights[i][j] = taps[i][0];
+        }
+        c.offsets[i][0] = taps[i][1] / (float)src.width;
+        c.offsets[i][1] = taps[i][2] / (float)src.height;
+    }
+    c.taps = count;
+    c.lum_alpha = lumAlpha ? 1 : 0;
+    id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rp];
+    [enc setRenderPipelineState:_filterPipeline];
+    [enc setFragmentTexture:src atIndex:0];
+    [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
+    [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+    [enc endEncoding];
+}
+
+// The 3D scene into an offscreen frame, then the bloom source: PC
+// sub_6DBEC0 (2x2 taps down to a quarter, alpha = luminance; kernel 0x8F9560)
+// and sub_6DBFE0 (0x8F9474 = 2 rounds of a 4-tap horizontal then vertical
+// blur; kernels 0x8F9530 / 0x8F9500).
+- (void)drawTreatedScene:(const Frame3D &)scene commandBuffer:(id<MTLCommandBuffer>)cmd view:(MTKView *)view {
+    [self ensureTreatmentTargets:view.drawableSize];
+    MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+    rp.colorAttachments[0].texture = _sceneColor;
+    rp.colorAttachments[0].loadAction = MTLLoadActionClear;
+    rp.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
+    rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+    rp.depthAttachment.texture = _sceneDepth;
+    rp.depthAttachment.loadAction = MTLLoadActionClear;
+    rp.depthAttachment.clearDepth = 1.0;
+    rp.depthAttachment.storeAction = MTLStoreActionDontCare;
+    rp.stencilAttachment.texture = _sceneDepth;
+    rp.stencilAttachment.loadAction = MTLLoadActionClear;
+    rp.stencilAttachment.storeAction = MTLStoreActionDontCare;
+    id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rp];
+    [self drawScene:scene encoder:enc view:view];
+    [enc endEncoding];
+
+    static const float down[4][3] = {{0.25f, -0.5f, -0.5f}, {0.25f, 0.5f, -0.5f}, {0.25f, -0.5f, 0.5f}, {0.25f, 0.5f, 0.5f}};
+    static const float blur_h[4][3] = {{1 / 3.0f, 1.5f, 0}, {1 / 6.0f, 3.0f, 0}, {1 / 3.0f, -1.5f, 0}, {1 / 6.0f, -3.0f, 0}};
+    static const float blur_v[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 / 3.0f, 0, -1.5f}, {1 / 6.0f, 0, -3.0f}};
+    [self filter:_sceneColor into:_bloom[0] taps:down count:4 lumAlpha:true commandBuffer:cmd];
+    for (int i = 0; i < 2; i++) {
+        [self filter:_bloom[0] into:_bloom[1] taps:blur_h count:4 lumAlpha:false commandBuffer:cmd];
+        [self filter:_bloom[1] into:_bloom[0] taps:blur_v count:4 lumAlpha:false commandBuffer:cmd];
+    }
+}
+
+// PC sub_6D53D0: the treatment from the offscreen frame into the drawable.
+- (void)applyTreatment:(const Frame3D &)scene encoder:(id<MTLRenderCommandEncoder>)enc {
+    const PortVisualTreatment &vt = scene.vt;
+    struct {
+        float black_bloom[4];
+        float tint[4];
+        float desaturation[4];
+        float colour_bloom, brightness, vignette, pad;
+    } c = {{vt.black_bloom[0], vt.black_bloom[1], 0, 0},
+           {vt.tint[0], vt.tint[1], vt.tint[2], vt.tint[3]},
+           {vt.desaturation[0], vt.desaturation[1], 0, 0},
+           vt.colour_bloom,
+           vt.brightness,
+           vt.vignette,
+           0};
+    [enc setRenderPipelineState:_treatmentPipeline];
+    [enc setDepthStencilState:_depthOff];
+    [enc setFragmentTexture:_sceneColor atIndex:0];
+    [enc setFragmentTexture:_bloom[0] atIndex:1];
+    [enc setFragmentTexture:(scene.gain_map ? scene.gain_map : _white) atIndex:2];
+    [enc setFragmentBytes:vt.spline length:sizeof(vt.spline) atIndex:1];
+    [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
+    [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+}
+
 - (void)drawInMTKView:(MTKView *)view {
     MTLRenderPassDescriptor *pass = view.currentRenderPassDescriptor;
     if (!pass) {
@@ -539,8 +745,14 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     pass.depthAttachment.loadAction = MTLLoadActionClear;
 
     id<MTLCommandBuffer> cmd = [_queue commandBuffer];
+    bool treated = !scene.overlay && scene.treatment && !scene.draws.empty() && _filterPipeline && _treatmentPipeline;
+    if (treated) {
+        [self drawTreatedScene:scene commandBuffer:cmd view:view];
+    }
     id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:pass];
-    if (!scene.overlay) {
+    if (treated) {
+        [self applyTreatment:scene encoder:enc];
+    } else if (!scene.overlay) {
         [self drawScene:scene encoder:enc view:view];
     }
     [enc setDepthStencilState:_depthOff];

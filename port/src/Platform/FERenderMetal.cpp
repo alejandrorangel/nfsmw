@@ -112,12 +112,14 @@ static void PaceFrame() {
     next_ns += period_ns;
 }
 
-void PortRenderScene(int frame); // SceneNative.cpp
+void PortRenderScene(int frame);           // SceneNative.cpp
+void PortVisualTreatmentFrame(int frame); // VisualTreatmentNative.cpp
 
 void eDisplayFrame() {
     static int frame = 0;
     frame++;
     PortRenderScene(frame);
+    PortVisualTreatmentFrame(frame);
     int quads = RenderFrontend();
     // The PC frame ends by recycling the per-frame scratch memory
     // (eFrameMalloc), which matrices for this frame's draws came from.

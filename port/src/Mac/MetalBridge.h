@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 enum PortPixelFormat {
     PORT_PIXEL_BGRA8,
@@ -70,6 +71,25 @@ void PortMetal3DSetEye(const float eye[3]); // world-space camera position
 float PortMetalViewAspect(); // drawable width / height
 void PortMetal3DSetOverlay(bool on_top); // debug: draw this frame's 3D over the frontend
 void PortMetal3DAdd(const Port3DDraw *draw);
+
+// PC visual treatment (IDI_VISUALTREATMENT_FX technique 0, applied by
+// speed.exe 1.3 sub_6D53D0 to the 3D scene before the frontend is drawn).
+// Effect constants as set by sub_6D4EF0, plus the 256x1 SPLINE lookup
+// (A8R8G8B8: r black bloom, g colour bloom, b detail map curve; sub_6C3B20)
+// and the GAINMAP texture (UVESVIGNETTE).
+struct PortVisualTreatment {
+    float black_bloom[2]; // BlackBloomIntensity.xy
+    float colour_bloom;   // ColourBloomIntensity
+    float brightness;     // VisualEffectBrightness
+    float tint[4];        // ColourBloomTint
+    float desaturation[2]; // Desaturation.xy
+    float vignette;       // VisualEffectVignette
+    float pad;
+    uint32_t spline[256];
+    void *gain_map; // id<MTLTexture>, or null (white)
+};
+// Applies the treatment to this 3D frame (call after PortMetal3DBeginFrame).
+void PortMetal3DSetTreatment(const PortVisualTreatment *treatment);
 
 // GPU buffers for model data (retained; release with PortMetalReleaseBuffer).
 void *PortMetalCreateBuffer(const void *data, size_t length, const char *label);
