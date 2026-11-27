@@ -19,6 +19,7 @@ extern void bMemoryInit();
 // frontend sound effects play natively, music and in-game audio don't yet.
 extern int IsSoundEnabled;
 extern int IsMemcardEnabled; // profiles (the PC's file-based realmc store)
+extern bool UnlockAllThings;
 // Keyboard events -> game input (InputMac.mm).
 #include "../Audio/AudioMixer.h"
 
@@ -37,6 +38,11 @@ static void *GameThread(void *) {
         if (strcmp(memcard, "0") == 0) {
             IsMemcardEnabled = 0;
         }
+    }
+    // NFSMW_UNLOCK_ALL=1: the game's own "unlock all things" switch (cars,
+    // parts, vinyls, ...) for testing customization without a career save.
+    if (const char *unlock = getenv("NFSMW_UNLOCK_ALL")) {
+        UnlockAllThings = strcmp(unlock, "0") != 0;
     }
     PortBenchmarkInit(); // NFSMW_BENCHMARK: the scenario's race switches, no sound
     bMemoryInit();

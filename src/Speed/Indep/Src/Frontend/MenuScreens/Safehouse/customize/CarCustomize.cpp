@@ -32,6 +32,19 @@
 
 extern const float gTradeInFactor = 0.25f; // size: 0x4
 
+#if defined(EA_PORT_NATIVE)
+// Data this file's unit owns in the originals (speed.exe 1.3 addresses); the
+// native build would otherwise link zero-filled stubs (gCarCustomizeManager's
+// ShoppingCart list never constructed).
+CarCustomizeManager gCarCustomizeManager;                 // 0x9B9EC0
+const char *CustomizeShoppingCart::pParentPkg = "";       // 0x905ED4
+uint32 CustomizeDecals::CurrentDecalLocation = CC_DECAL_WINDSHIELD; // 0x905ED8 (0x501)
+bool CustomizeParts::TexturePackLoaded;                   // 0x9B9EB0
+bool CustomizeNumbers::bShowcaseOn;                       // 0x9B9EB1
+bool CustomizeHUDTexPackResources[11];
+uint32 CustomizeHUDTexTextureResources[11][5];
+#endif
+
 uint32 TranslateCustomizeCatToMarker(eCustomizeCategory cat) {
     switch (cat) {
         case CC_BODY_KIT:
@@ -2295,9 +2308,17 @@ void CustomizationScreen::NotificationMessage(u32 msg, FEObject *pobj, u32 param
                 return;
             }
 
+#if defined(EA_PORT_NATIVE)
+            // speed.exe 0x7B7080: the deferred preview fires once the scroll
+            // has settled for 0.3 s (the GC-derived "* 0.001f <= 0.25f" never did).
+            if ((RealTimer - ScrollTime).GetSeconds() <= 0.3f) {
+                return;
+            }
+#else
             if ((RealTimer - ScrollTime).GetSeconds() * 0.001f <= 0.25f) {
                 return;
             }
+#endif
 
             bNeedsRefresh = false;
             RefreshHeader();

@@ -110,6 +110,8 @@ Debug switches:
   `NFSMW_AUDIO_LOG=1` logs Csis/AEMS/voice activity, `NFSMW_AUDIO_DUMP=<wav>`
   records the mixer output
 - `NFSMW_MEMCARD=1`: turn on the unported save path
+- `NFSMW_UNLOCK_ALL=1`: the game's `UnlockAllThings` switch (all cars, parts,
+  vinyls unlocked) for testing customization without a career save
 - `NFSMW_FENG_POOL=1`: frontend allocations in the FEng pool (debugging)
 - `NFSMW_HOLD_FRAME=<s>`, `NFSMW_TEXTURE_SMOKE=1`
 

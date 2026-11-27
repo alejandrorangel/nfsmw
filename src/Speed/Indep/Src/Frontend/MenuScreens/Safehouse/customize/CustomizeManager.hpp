@@ -139,7 +139,13 @@ class CarCustomizeManager {
 
     void GetPerformancePartsList(Physics::Upgrades::Type type, bTList<SelectablePart> &the_list);
 
+#if defined(EA_PORT_NATIVE)
+    CarType GetTuningCarType() { // Decl: 325
+        return TuningCar->GetType();
+    }
+#else
     CarType GetTuningCarType() {} // Decl: 325
+#endif
 
     void SetInBackRoom(bool in_back) {
         CustomizeSetInBackRoom(in_back);
