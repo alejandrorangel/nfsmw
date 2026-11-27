@@ -13,6 +13,14 @@
 #include "Speed/Indep/Src/Generated/Events/ECommitRenderAssets.cpp"
 
 #include "Speed/Indep/Src/Generated/Events/EDeliverMessage.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EChangeState.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EShowRaceCountdown.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EResetProps.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EReloadHud.cpp"
 #endif
 
 #include "Speed/Indep/Src/Input/Common/action.cpp"

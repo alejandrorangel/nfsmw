@@ -44,7 +44,7 @@ class IPlayer : public UTL::COM::IUnknown, public UTL::Collections::ListableSet<
     virtual void SetSettings(int fe_index);
     virtual int GetSettingsIndex() const;
     virtual IHud *GetHud() const;
-    virtual void SetHud() const; // TODO fix params
+    virtual void SetHud(ePlayerHudType ht);
     virtual void SetRenderPort(int renderport);
     virtual int GetRenderPort() const;
     virtual void SetControllerPort(int port);

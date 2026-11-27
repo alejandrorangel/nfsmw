@@ -47,7 +47,7 @@ class LocalPlayer : public Sim::Entity, public IPlayer, public Sim::Collision::I
         return mHud;
     }
 
-    void SetHud(ePlayerHudType ht);
+    void SetHud(ePlayerHudType ht) override;
     void SetControllerPort(int port) override;
 
     int GetControllerPort() const override {

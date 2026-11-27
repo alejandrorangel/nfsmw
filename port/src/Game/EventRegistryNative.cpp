@@ -6,6 +6,7 @@
 // this table lists those. Unknown IDs return null and callers skip them.
 #include "Speed/Indep/Src/Generated/Events/ESimulate.hpp"
 #include "Speed/Indep/Src/Main/Event.h"
+#include "Speed/Indep/Libs/Support/Miscellaneous/StringHash.h"
 
 namespace {
 
@@ -36,5 +37,37 @@ void (*RegisterEvent::LookupEvent(unsigned int tag))(const void *) {
 // event lists in CARP data keep their tags.
 // TODO(port): resolvers for the events that get reconstructed.
 void (*RegisterEvent::ResolveEvent(unsigned int tag))(void *, const struct UGroup *) {
+    return nullptr;
+}
+
+// PC: RegisterEvent::GetLuaBinding (0x6337A0) looks the event up in the same
+// key order table and returns its gEventLuaBindings entry: the function a
+// script calls as E<name>(...) to queue the event. Keys are stringhash32 of the
+// event's name (LuaRuntime::HandleGlobalIndex).
+// TODO(port): only the bindings of reconstructed events are listed.
+struct lua_State;
+int EShowRaceCountdown_MakeEvent_LuaBinding(lua_State *luaState);
+int EResetProps_MakeEvent_LuaBinding(lua_State *luaState);
+
+namespace {
+
+struct LuaBindingEntry {
+    const char *name;
+    RegisterEvent::LuaBinding binding;
+};
+
+const LuaBindingEntry kLuaBindings[] = {
+    {"EShowRaceCountdown", EShowRaceCountdown_MakeEvent_LuaBinding},
+    {"EResetProps", EResetProps_MakeEvent_LuaBinding},
+};
+
+} // namespace
+
+int (*RegisterEvent::GetLuaBinding(unsigned int tag))(lua_State *) {
+    for (const LuaBindingEntry &e : kLuaBindings) {
+        if (stringhash32(e.name) == tag) {
+            return e.binding;
+        }
+    }
     return nullptr;
 }

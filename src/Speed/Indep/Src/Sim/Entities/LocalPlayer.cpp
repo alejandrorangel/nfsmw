@@ -412,3 +412,27 @@ void LocalPlayer::OnCollision(const COLLISION_INFO &cinfo) {
         mFFB->ReportCollision(cinfo, UTL::COM::ComparePtr(bodyA, static_cast<IEntity *>(this)->GetSimable()));
     }
 }
+
+#if defined(EA_PORT_NATIVE)
+// PC: 0x6F13F0. Feeds the HUD widgets (speedometer, tachometer, shift light,
+// turbo/temp gauges, NOS, speedbreaker, pursuit and milestone boards, busted
+// meter, race information, leaderboard, heat...) from the car and the race,
+// then updates the HUD itself.
+// TODO(port): only the HUD update is ported; the widget feeds aren't, so the
+// gauges don't move yet.
+void LocalPlayer::UpdateHud(float dT) {
+    if (mHud == nullptr) {
+        return;
+    }
+    ISimable *isim = static_cast<IEntity *>(this)->GetSimable();
+    if (isim == nullptr) {
+        return;
+    }
+    IVehicle *ivehicle;
+    IHumanAI *humanAI;
+    if (!isim->QueryInterface(&ivehicle) || !isim->QueryInterface(&humanAI)) {
+        return;
+    }
+    mHud->Update(this, dT);
+}
+#endif
