@@ -135,6 +135,11 @@ def run(binary, data, scenario, options, out_dir, args):
     if args.vsync:
         extra['NFSMW_BENCHMARK_VSYNC'] = '1'
         extra['NFSMW_BENCHMARK_PRESENT'] = '1'
+    for setting in args.env:
+        name, sep, value = setting.partition('=')
+        if not sep or not name:
+            sys.exit('An environment variable is NAME=VALUE: %s' % setting)
+        extra[name.strip()] = value.strip()
     env = game_env(data, out_dir, options_path, extra)
     load = os.getloadavg()[0]
     started = time.time()
@@ -254,6 +259,8 @@ def main():
     parser.add_argument('--keep', metavar='DIR', help='keep every run (CSV, log, screenshots, options) in DIR')
     parser.add_argument('--vsync', action='store_true', help='present every frame with the display sync on (the frame rate is the display\'s)')
     parser.add_argument('--timeout', type=int, default=300, help='seconds a run may take, 300 by default')
+    parser.add_argument('--env', action='append', default=[], metavar='NAME=VALUE',
+                        help='an environment variable for every run (e.g. NFSMW_BENCHMARK_NOS=600-900)')
     parser.add_argument('--compare', nargs=2, metavar=('A', 'B'), help='compare two screenshot directories and exit')
     args = parser.parse_args()
 

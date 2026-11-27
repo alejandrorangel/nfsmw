@@ -153,6 +153,20 @@ Overrides: `NFSMW_BENCHMARK_FRAMES`, `NFSMW_BENCHMARK_SHOTS=<f>,<f>`,
 `NFSMW_BENCHMARK_OPPONENTS`, `NFSMW_BENCHMARK_TRAFFIC=<0..100>`,
 `NFSMW_BENCHMARK_PRESENT=<n>` (copy every n'th frame to the window; 1 with
 `NFSMW_BENCHMARK_VSYNC=1` is display-bound like play), `NFSMW_BENCHMARK_TIMEOUT`.
+Screen effects on cue: `NFSMW_BENCHMARK_NOS=<from>-<to>` holds the player's
+NOS over those frames (the visual treatment's radial blur boosts the motion
+blur), `NFSMW_BENCHMARK_BREAKER=<frame>` engages the pursuit breaker
+(vignette, desaturation, radial blur); pass them through `benchmark.py
+--env NAME=VALUE`. `NFSMW_BENCHMARK_RACE=21.2.2` goes through a tunnel
+(frames ~1700-2300: the exit glare).
+
+Screen effect switches: `NFSMW_NO_MOTION_BLUR=1`, `NFSMW_DEBUG_RADIAL_BLUR=<v>`
+(forces the treatment's radial blur that boosts the motion blur),
+`NFSMW_NO_GLARE_QUAD=1`, `NFSMW_X360_EFFECTS=1` (PC's X360 light-flare
+trails, which speed.exe 1.3 never enables: the option's device maximum is
+0), `NFSMW_NO_SHADOW_MESH=1`; traces `NFSMW_TRACE_MOTION_BLUR`,
+`NFSMW_TRACE_GLARE`, `NFSMW_TRACE_SHADOW_MESH`, `NFSMW_TRACE_SHADOW_CG`,
+`NFSMW_TRACE_SOLID_EFFECTS`.
 
 `benchmark.py` writes the video options to a temporary `NFSMW_VIDEO_CONFIG`
 (starting from the game's defaults for this Mac, or `--base user`; your
