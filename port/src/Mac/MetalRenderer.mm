@@ -1823,6 +1823,8 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     [enc setDepthBias:4.0f slopeScale:4.0f clamp:0.0f];
     [enc setFragmentSamplerState:_meshSamplers[gTextureFiltering.load() % 3] atIndex:0];
     int bound = -1;
+    id<MTLBuffer> bound_vertices = nil;
+    id<MTLTexture> bound_texture = nil;
     for (const Draw3D &d : scene.shadow_draws) {
         bool car = d.effect == 4;
         if ((d.flags & PORT_3D_ADDITIVE) || (!car && (d.flags & PORT_3D_ALPHA_BLEND))) {
@@ -1850,10 +1852,17 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
             [enc setRenderPipelineState:_shadowPipelines[pipeline]];
             bound = pipeline;
         }
-        [enc setVertexBuffer:d.vertex_buffer offset:0 atIndex:0];
+        if (d.vertex_buffer != bound_vertices) {
+            [enc setVertexBuffer:d.vertex_buffer offset:0 atIndex:0];
+            bound_vertices = d.vertex_buffer;
+        }
         [enc setVertexBytes:&c length:sizeof(c) atIndex:1];
         [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
-        [enc setFragmentTexture:(d.texture ? d.texture : _white) atIndex:0];
+        id<MTLTexture> texture = d.texture ? d.texture : _white;
+        if (texture != bound_texture) {
+            [enc setFragmentTexture:texture atIndex:0];
+            bound_texture = texture;
+        }
         [enc drawIndexedPrimitives:MTLPrimitiveTypeTriangle
                         indexCount:d.num_indices
                          indexType:MTLIndexTypeUInt16
@@ -1897,6 +1906,50 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         // Opaque first, then blended in submission order.
         [enc setViewport:(MTLViewport){0, 0, width, height, 0, 1}];
         [enc setCullMode:MTLCullModeNone];
+        // The bindings every draw of this list shares: bound once. Per draw
+        // only what differs from the draw before is bound again (the
+        // encoder keeps the rest), which spares the driver re-emitting it.
+        [enc setVertexBytes:&fog length:sizeof(fog) atIndex:2];
+        [enc setFragmentBytes:&fog length:sizeof(fog) atIndex:4];
+        struct {
+            float scroll;
+            float pad[3];
+            float intensity[4];
+        } sky = {_sky.cloud_scroll, {0, 0, 0},
+                 {_sky.cloud_intensity[0], _sky.cloud_intensity[1], _sky.cloud_intensity[2], _sky.cloud_intensity[3]}};
+        [enc setVertexBytes:&sky length:sizeof(sky) atIndex:3];
+        [enc setFragmentSamplerState:_meshSamplers[gTextureFiltering.load() % 3] atIndex:0];
+        [enc setFragmentTexture:(env_map ? env_map : _blackCube) atIndex:1];
+        [enc setFragmentTexture:(_shadowValid ? _shadowDepth : _shadowDepthLit) atIndex:4];
+        [enc setFragmentTexture:(_shadowValid ? _shadowColour : _black) atIndex:5];
+        [enc setFragmentTexture:(_reflBound ? _reflBound : _white) atIndex:9];
+        struct Bound {
+            id<MTLRenderPipelineState> pipeline;
+            id<MTLDepthStencilState> depth;
+            id<MTLBuffer> vertices;
+            id<MTLTexture> textures[4]; // 0, 2, 3 (1 is the list's)
+            const Draw3D *car_consts;   // whose material / lights / envmap are bound
+            bool sky_bound;             // the sky's fragment constants and textures
+        } bound = {};
+        auto bindPipeline = [&](id<MTLRenderPipelineState> p) {
+            if (p != bound.pipeline) {
+                [enc setRenderPipelineState:p];
+                bound.pipeline = p;
+            }
+        };
+        auto bindDepth = [&](id<MTLDepthStencilState> ds) {
+            if (ds != bound.depth) {
+                [enc setDepthStencilState:ds];
+                bound.depth = ds;
+            }
+        };
+        auto bindTexture = [&](id<MTLTexture> t, int index) {
+            if (t != bound.textures[index]) {
+                [enc setFragmentTexture:t atIndex:index];
+                bound.textures[index] = t;
+            }
+        };
+        id<MTLRenderPipelineState> pipelines[3] = {};
         // Pass 2 (the player view's frame only): ___eDisplayFrame 0x6DF3C3
         // draws the sky again with ColorWriteMode 8 (alpha only) and ZFUNC
         // LESSEQUAL after the world, so the frame's alpha (cleared to 0, the
@@ -1906,6 +1959,9 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         for (int blended = _onlySkyAlpha ? 2 : 0; blended < (_passMainScene && !_skipSkyAlpha ? 3 : 2); blended++) {
             if (blended == 2) {
                 _passMask = 2;
+            }
+            for (int m = 0; m < 3; m++) {
+                pipelines[m] = [self meshPipeline:m];
             }
             for (const Draw3D &d : draws) {
                 int mode = (d.flags & PORT_3D_ADDITIVE) ? 2 : (d.flags & PORT_3D_ALPHA_BLEND) ? 1 : 0;
@@ -2011,42 +2067,37 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                     }
                 }
                 memcpy(c.world, d.world, sizeof(c.world));
-                [enc setRenderPipelineState:[self meshPipeline:mode]];
+                bindPipeline(pipelines[mode]);
                 // D3D default ZWRITEENABLE stays on: no PC effect technique
                 // turns it off, so alpha-blended car glass writes depth too
                 // (otherwise the sky's alpha pass shows through the windows
                 // and over bright blooms them). Additive draws (glows) and the
                 // sky alpha pass only test.
-                [enc setDepthStencilState:(mode != 2 && blended != 2 && d.effect != 19 ? _depthWrite : _depthTest)];
-                [enc setVertexBuffer:d.vertex_buffer offset:0 atIndex:0];
+                bindDepth(mode != 2 && blended != 2 && d.effect != 19 ? _depthWrite : _depthTest);
+                if (d.vertex_buffer != bound.vertices) {
+                    [enc setVertexBuffer:d.vertex_buffer offset:0 atIndex:0];
+                    bound.vertices = d.vertex_buffer;
+                }
                 [enc setVertexBytes:&c length:sizeof(c) atIndex:1];
-                [enc setVertexBytes:&fog length:sizeof(fog) atIndex:2];
-                [enc setFragmentTexture:(d.texture ? d.texture : _white) atIndex:0];
-                [enc setFragmentSamplerState:_meshSamplers[gTextureFiltering.load() % 3] atIndex:0];
-                [enc setFragmentTexture:(env_map ? env_map : _blackCube) atIndex:1];
-                [enc setFragmentTexture:(d.texture2 ? d.texture2 : _black) atIndex:2];
-                [enc setFragmentTexture:(d.texture3 ? d.texture3 : _black) atIndex:3];
-                [enc setFragmentTexture:(_shadowValid ? _shadowDepth : _shadowDepthLit) atIndex:4];
-                [enc setFragmentTexture:(_shadowValid ? _shadowColour : _black) atIndex:5];
-                [enc setFragmentTexture:(_reflBound ? _reflBound : _white) atIndex:9];
-                [enc setFragmentBytes:&fog length:sizeof(fog) atIndex:4];
+                bindTexture(d.texture ? d.texture : _white, 0);
+                bindTexture(d.texture2 ? d.texture2 : _black, 2);
+                bindTexture(d.texture3 ? d.texture3 : _black, 3);
                 [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
                 // The car effect's vertex constants (IDI_CAR_FX vs #11/#9/...).
-                [enc setVertexBytes:d.material length:sizeof(d.material) atIndex:4];
-                [enc setVertexBytes:d.lights length:sizeof(d.lights) atIndex:5];
-                [enc setVertexBytes:d.envmap length:sizeof(d.envmap) atIndex:6];
-                struct {
-                    float scroll;
-                    float pad[3];
-                    float intensity[4];
-                } sky = {_sky.cloud_scroll, {0, 0, 0},
-                         {_sky.cloud_intensity[0], _sky.cloud_intensity[1], _sky.cloud_intensity[2], _sky.cloud_intensity[3]}};
-                [enc setVertexBytes:&sky length:sizeof(sky) atIndex:3];
-                if (c.effect == 19) {
+                if (bound.car_consts == nullptr || memcmp(bound.car_consts->material, d.material, sizeof(d.material)) != 0 ||
+                    memcmp(bound.car_consts->lights, d.lights, sizeof(d.lights)) != 0 ||
+                    memcmp(bound.car_consts->envmap, d.envmap, sizeof(d.envmap)) != 0) {
+                    [enc setVertexBytes:d.material length:sizeof(d.material) atIndex:4];
+                    [enc setVertexBytes:d.lights length:sizeof(d.lights) atIndex:5];
+                    [enc setVertexBytes:d.envmap length:sizeof(d.envmap) atIndex:6];
+                    bound.car_consts = &d;
+                }
+                if (c.effect == 19 && !bound.sky_bound) {
                     [enc setFragmentBytes:&sky length:sizeof(sky) atIndex:5];
                     for (int i = 0; i < 3; i++) {
                         [enc setFragmentTexture:(_skyMisc[i] ? _skyMisc[i] : _black) atIndex:6 + i];
                     }
+                    bound.sky_bound = true;
                 }
                 [enc drawIndexedPrimitives:MTLPrimitiveTypeTriangle
                                 indexCount:d.num_indices
@@ -2056,8 +2107,8 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 if (c.effect == 19 && !(c.shade & 1)) {
                     // IDI_SKYBOX_FX passes p1 and p2: SRCALPHA / INVSRCALPHA,
                     // ZFUNC EQUAL, no depth writes.
-                    [enc setRenderPipelineState:[self meshPipeline:1]];
-                    [enc setDepthStencilState:_depthEqual];
+                    bindPipeline(pipelines[1]);
+                    bindDepth(_depthEqual);
                     for (uint32_t pass = 1; pass <= 2; pass++) {
                         c.pad = pass;
                         [enc setVertexBytes:&c length:sizeof(c) atIndex:1];
