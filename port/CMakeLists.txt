@@ -104,6 +104,8 @@ add_library(nfsmw_platform OBJECT
     src/Platform/TextInputNative.cpp
     src/Platform/RealmcNative.cpp
     src/Platform/BenchmarkNative.cpp
+    src/Platform/ParticlesNative.cpp
+    src/Platform/LightFlaresNative.cpp
     src/Game/SelectCarCameraMover.cpp
     src/Game/CameraDriveNative.cpp
     src/Game/RainNative.cpp
@@ -139,6 +141,7 @@ target_compile_options(nfsmw_platform PRIVATE
 add_executable(nfsmw MACOSX_BUNDLE
     src/Mac/main.mm
     src/Mac/MetalRenderer.mm
+    src/Mac/MetalPrelit.mm
     src/Mac/InputMac.mm
     src/Mac/InputPadMac.mm
     src/Mac/AudioOutputMac.mm

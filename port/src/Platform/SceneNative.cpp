@@ -29,6 +29,7 @@
 #include "Speed/Indep/bWare/Inc/bWare.hpp"
 
 #include "../Mac/MetalBridge.h"
+#include "ParticlesNative.h"
 
 #include <chrono>
 #include <cmath>
@@ -1267,8 +1268,10 @@ bool RenderWorldScene(int frame) {
     int scenery = gSceneDraws;
     RenderWorldModels(view, 0);
     int models = gSceneDraws - scenery;
+    PortRenderSkids(view);
     DrawTestCars(view, 0); // ___eDisplayFrame 0x6DEE44: sub_750B10 → VehicleRenderConn::RenderAll
     gShadowLevelClip = nullptr;
+    PortRenderWorldEffects(view);
     // ___eDisplayFrame 0x6DF4F7: with the Particle option (0x9017EC) on, the
     // particles (EmitterSystem::Render, not ported) and then in a race, in
     // the IDI_PARTICLES_FX effect with z writes off, player 1's

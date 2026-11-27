@@ -446,7 +446,7 @@ struct EmitterLibrary {
     uint32 Padding;       // offset 0x4, size 0x4
     uint16 SectionNumber; // offset 0x8, size 0x2
     uint16 mNumTriggers;  // offset 0xA, size 0x2
-    EmitterGroup *mGroup; // offset 0xC, size 0x4
+    PORT_PTR32(EmitterGroup) mGroup; // offset 0xC, size 0x4
     bMatrix4 LocalWorld;  // offset 0x10, size 0x40
 
     void EndianSwap();

@@ -804,7 +804,11 @@ void EmitterSystem::KillParticle(Emitter *em, EmitterParticle *particle) {
     delete particle;
 }
 
+#if defined(EA_PORT_NATIVE)
+bool EnableParticleSystem = true; // speed.exe 1.3 0x8F86EC: initialised to 1, never written
+#else
 bool EnableParticleSystem;
+#endif
 
 EmitterGroup *EmitterSystem::CreateEmitterGroup(const Attrib::StringKey &group_name, uint32 creation_context_flags) {
     if (!EnableParticleSystem) {
@@ -1371,6 +1375,7 @@ int GetEmitterGroupsToTrigger(bVector3 &pos, EmitterLibrary **lib_buffer_out) {
     return num_ret;
 }
 
+#if !defined(EA_PORT_NATIVE) // natively in port/src/Platform/ParticlesNative.cpp (32-bit on-disk layout)
 int32 EmitterSystem::Loader(bChunk *bchunk) {
     if (bchunk->GetID() == BCHUNK_SPEED_EMITTER_GROUP) {
         return 1;
@@ -1443,6 +1448,8 @@ int32 EmitterSystem::Unloader(bChunk *bchunk) {
     }
     return 0;
 }
+
+#endif
 
 int32 EmitterSystem::TexturePageLoader(bChunk *bchunk) {
     if (bchunk->GetID() == BCHUNK_SPEED_XENON_TEXTURE_PAGE) {

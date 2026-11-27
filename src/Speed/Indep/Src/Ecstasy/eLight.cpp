@@ -19,7 +19,11 @@ static eLightMaterial *DefaultLightMaterial = &DefaultLightMaterialData;
 #else
 static eLightMaterial *DefaultLightMaterial; // size: 0x4, address: 0x8041A63C
 #endif
+#if defined(EA_PORT_NATIVE)
+int32 DrawLightFlares = 1; // speed.exe 1.3 0x8F2918
+#else
 int32 DrawLightFlares;
+#endif
 
 #if defined(EA_PORT_NATIVE)
 // PC (speed.exe 1.3 @ 0x501A10). A light material chunk is one 32-bit
@@ -358,7 +362,9 @@ int elCloneLightContext(eDynamicLightContext *light_context, bMatrix4 *local_wor
     return 1;
 }
 
+#if !defined(EA_PORT_NATIVE) // natively in port/src/Platform/LightFlaresNative.cpp (PC 0x502640)
 void UpdateLightFlareParameters() {}
+#endif
 
 float indep_fpow(float n, float p) {
     return ePowf(n, p);
@@ -447,7 +453,11 @@ void eRenderLightFlarePool(eView *view /* r30 */) {
     }
 }
 
+#if defined(EA_PORT_NATIVE)
+uint32 eLightFlareTextureNameHashes[3] = {0x8868656f, 0x88d8e8a2, 0x3394fe62}; // speed.exe 1.3 0x8F2434
+#else
 uint32 eLightFlareTextureNameHashes[3];  // size: 0xC, address: 0x8041A69C
+#endif
 TextureInfo *eLightFlareTextureInfos[3]; // size: 0xC, address: 0x8046B134
 
 void eLightUpdateTextures() {

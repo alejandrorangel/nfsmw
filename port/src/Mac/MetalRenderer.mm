@@ -2,6 +2,7 @@
 
 #include "MetalBridge.h"
 #import "BenchmarkMac.h"
+#include "MetalPrelitBridge.h"
 
 #include <atomic>
 #include <mutex>
@@ -266,6 +267,7 @@ void PortMetal3DBeginFrame(const float view_proj[16]) {
     g3DBuilding.reflection_draws.clear();
     g3DBuilding.reflection_mode = 0;
     g3DBuilding.reflection_blur = false;
+    PortMetalPrelitBeginFrame();
     g3DBuilding.particle_verts.clear();
     g3DBuilding.particles.clear();
     g3DBuilding.drops.clear();
@@ -505,6 +507,7 @@ int PortMetalFEEndFrame() {
     std::lock_guard<std::mutex> guard(gFELock);
     std::swap(gFEPublished, gFEBuilding);
     std::swap(g3DPublished, g3DBuilding);
+    PortMetalPrelitPublish();
     return gFEPublished.quads;
 }
 
@@ -2107,6 +2110,8 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
     _passMask = 1;
     _passMainScene = true;
     [self drawScene:scene encoder:enc view:view];
+    // Particles, skid marks, light flares (MetalPrelit.mm).
+    PortMetalPrelitDraw((__bridge void *)enc, (__bridge void *)_device, scene.view_proj, samples, (int)_colorFormat, (int)_depthFormat);
     [self drawParticles:scene encoder:enc];
     _passSamples = 1;
     _passMask = 0;
