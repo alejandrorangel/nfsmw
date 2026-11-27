@@ -1677,7 +1677,11 @@ void CustomizeSub::SetupVisual() {
         }
         AddCustomOption(g_pCustomizePartsPkg, 0x3f23165c, 0xd32729a6, CC_WINDOW_TINT);
         AddCustomOption(g_pCustomizeSubTopPkg, 0xda1dae54, 0x955980bc, CC_DECAL_LOCATION);
+#if defined(EA_PORT_NATIVE)
+        AddCustomOption("Numbers.fng", 0x45a1c644, 0x6857e5ac, CC_NUMBERS); // speed.exe 0x7BC210
+#else
         AddCustomOption("FeCustomize_ToolBox", 0x45a1c644, 0x6857e5ac, CC_NUMBERS);
+#endif
         AddCustomOption(g_pCustomizeHudPkg, 0x028f88bc, 0x78980a6b, CC_CUSTOM_HUD);
     } else {
         AddCustomOption(g_pCustomizePaintPkg, 0x0db89e17, 0x055da70c, CC_PAINT);
