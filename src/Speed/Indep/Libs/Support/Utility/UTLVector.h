@@ -5,6 +5,9 @@
 #include "Speed/Indep/Libs/Support/Utility/UMath.h"
 #include "Speed/Indep/Libs/Support/Utility/UTLSequencer.h"
 #include <cstddef>
+#if defined(EA_PORT_NATIVE)
+#include <cstdio>
+#endif
 
 static const int DEFAULT_VECTOR_ALIGNMENT = 16;
 
@@ -78,6 +81,18 @@ template <typename T, int Alignment = DEFAULT_VECTOR_ALIGNMENT> class Vector {
         if (size() >= capacity()) {
             reserve(GetGrowSize(size() + 1));
         }
+#if defined(EA_PORT_NATIVE)
+        // A full FixedVector can't grow (GetGrowSize is its Size): drop the
+        // element instead of writing past the fixed buffer into its neighbours.
+        if (size() >= capacity()) {
+            static bool warned;
+            if (!warned) {
+                warned = true;
+                std::fprintf(stderr, "[port] UTL::Vector full (%u), push_back dropped\n", static_cast<unsigned int>(capacity()));
+            }
+            return;
+        }
+#endif
         new (&mBegin[size()]) value_type(val);
         mSize++;
     }

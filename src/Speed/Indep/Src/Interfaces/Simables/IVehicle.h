@@ -26,7 +26,16 @@ enum eVehicleList {
     VEHICLE_MAX,
 };
 
-class IVehicle : public UTL::COM::IUnknown, public UTL::Collections::ListableSet<IVehicle, 10, eVehicleList, VEHICLE_MAX> {
+#if defined(EA_PORT_NATIVE)
+// speed.exe's vehicle list buckets hold 20 (List vtable 0x8918D8 GetGrowSize,
+// 96-byte buckets in _mLists 0x92CD18): PVehicle::MakeRoom's vehicle limit,
+// reached with the traffic pool.
+#define IVEHICLE_LIST_SIZE 20
+#else
+#define IVEHICLE_LIST_SIZE 10
+#endif
+
+class IVehicle : public UTL::COM::IUnknown, public UTL::Collections::ListableSet<IVehicle, IVEHICLE_LIST_SIZE, eVehicleList, VEHICLE_MAX> {
   public:
     DECL_INTERFACE(IVehicle);
 

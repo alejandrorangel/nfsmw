@@ -59,6 +59,7 @@
 #include "Speed/Indep/Src/Generated/Hash.hpp"
 #include "Speed/Indep/Src/Generated/Messages/MICECameraFinished.h"
 #include "Speed/Indep/Src/Interfaces/SimActivities/INIS.h"
+#include "Speed/Indep/Src/Interfaces/SimActivities/ITrafficCenter.h"
 #include "CameraAINative.hpp"
 
 #include <algorithm>
@@ -1104,7 +1105,9 @@ int Director::sNumDirectors;
 
 } // namespace CameraAI
 
-class CDActionDrive : public CameraAI::Action, public Sim::Collision::IListener {
+// ITrafficCenter (vtable 0x895128 at +0x24): AITrafficManager spawns traffic
+// around the followed car.
+class CDActionDrive : public CameraAI::Action, public Sim::Collision::IListener, public ITrafficCenter {
   public:
     static CameraAI::Action *Construct(CameraAI::Director *director);
     CDActionDrive(CameraAI::Director *director, IPlayer *player);
@@ -1126,6 +1129,7 @@ class CDActionDrive : public CameraAI::Action, public Sim::Collision::IListener 
         }
     }
     void OnCollision(const Sim::Collision::Info &cinfo) override;
+    bool GetTrafficBasis(UMath::Matrix4 &matrix, UMath::Vector3 &velocity) override;
 
   private:
     void AquireCar();
@@ -1252,6 +1256,26 @@ void CDActionDrive::OnCollision(const Sim::Collision::Info &cinfo) {
         default:
             break;
     }
+}
+
+// The decomp header declares the base as a plain virtual; every implementer
+// overrides it (the PC vtables carry only the overrides).
+bool ITrafficCenter::GetTrafficBasis(UMath::Matrix4 &, UMath::Vector3 &) {
+    return false;
+}
+
+// 0x4731D0
+bool CDActionDrive::GetTrafficBasis(UMath::Matrix4 &matrix, UMath::Vector3 &velocity) {
+    if (mVehicle == nullptr) {
+        return false;
+    }
+    IBody *body;
+    if (!mVehicle->QueryInterface(&body) || body == nullptr) {
+        return false;
+    }
+    body->GetTransform(matrix);
+    body->GetLinearVelocity(velocity);
+    return true;
 }
 
 void CDActionDrive::AquireCar() {

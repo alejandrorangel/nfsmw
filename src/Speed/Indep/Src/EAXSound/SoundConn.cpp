@@ -148,7 +148,7 @@ void CarSoundConn::UpdateState(float dT) {
 
 // total size: 0x28
 // Decl: 294
-class HeliSoundConn : public Sim::Connection, public UTL::Collections::Listable<HeliSoundConn, 10> {
+class HeliSoundConn : public Sim::Connection, public UTL::Collections::Listable<HeliSoundConn, SOUND_CONN_LIST_SIZE> {
   public:
     static Sim::Connection *Construct(const Sim::ConnectionData &data);
     HeliSoundConn(const Sim::ConnectionData &data);

@@ -14,9 +14,16 @@
 class CarRenderInfo;
 
 // total size: 0x64
-class VehicleRenderConn : public Sim::Connection, public UTL::Collections::Listable<VehicleRenderConn, 10> {
+#if defined(EA_PORT_NATIVE)
+// speed.exe reserves 20 (0x75A970): one per vehicle up to PVehicle::MakeRoom's 20.
+#define VEHICLE_RENDER_CONN_LIMIT 20
+#else
+#define VEHICLE_RENDER_CONN_LIMIT 10
+#endif
+
+class VehicleRenderConn : public Sim::Connection, public UTL::Collections::Listable<VehicleRenderConn, VEHICLE_RENDER_CONN_LIMIT> {
   public:
-    enum { Limit = 10 };
+    enum { Limit = VEHICLE_RENDER_CONN_LIMIT };
     enum eState {
         S_None = 0,
         S_Loading = 1,

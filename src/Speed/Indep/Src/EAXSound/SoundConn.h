@@ -22,8 +22,16 @@
 
 struct HeliSoundConn;
 
+#if defined(EA_PORT_NATIVE)
+// speed.exe reserves 20 for the car and heli sound connection lists (0x4CB810,
+// 0x4CB900): one per vehicle up to PVehicle::MakeRoom's 20.
+#define SOUND_CONN_LIST_SIZE 20
+#else
+#define SOUND_CONN_LIST_SIZE 10
+#endif
+
 // Decl: 28
-class CarSoundConn : public Sim::Connection, public UTL::Collections::Listable<CarSoundConn, 10> {
+class CarSoundConn : public Sim::Connection, public UTL::Collections::Listable<CarSoundConn, SOUND_CONN_LIST_SIZE> {
   public:
     static Connection *Construct(const Sim::ConnectionData &data);
     CarSoundConn(const Sim::ConnectionData &data);

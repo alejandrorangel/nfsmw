@@ -3,7 +3,13 @@
 
 #include <algorithm>
 
+#if defined(EA_PORT_NATIVE)
+// speed.exe holds 20 (TheValidTargets 0x90D660, vtable 0x8915B8 GetGrowSize),
+// one per PVehicle up to MakeRoom's 20.
+typedef UTL::FixedVector<ISimable *, 20, 16> ValidTargetList;
+#else
 typedef UTL::FixedVector<ISimable *, 10, 16> ValidTargetList;
+#endif
 
 ValidTargetList TheValidTargets;
 bTList<AITarget> TheAITargets;
