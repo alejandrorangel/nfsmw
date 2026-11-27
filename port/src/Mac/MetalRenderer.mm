@@ -1999,13 +1999,18 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         [enc setFragmentTexture:(st.shadow_valid ? st.shadow_depth : _shadowDepthLit) atIndex:4];
         [enc setFragmentTexture:(st.shadow_valid ? st.shadow_colour : _black) atIndex:5];
         [enc setFragmentTexture:(st.refl_bound ? st.refl_bound : _white) atIndex:9];
+        // The sky's constants and textures are the same for the whole list;
+        // bound up front so every mesh_fs draw has buffer 5 (Metal validation).
+        [enc setFragmentBytes:&sky length:sizeof(sky) atIndex:5];
+        for (int i = 0; i < 3; i++) {
+            [enc setFragmentTexture:(st.sky_misc[i] ? st.sky_misc[i] : _black) atIndex:6 + i];
+        }
         struct Bound {
             id<MTLRenderPipelineState> pipeline;
             id<MTLDepthStencilState> depth;
             id<MTLBuffer> vertices;
             id<MTLTexture> textures[4]; // 0, 2, 3 (1 is the list's)
             const Draw3D *car_consts;   // whose material / lights / envmap are bound
-            bool sky_bound;             // the sky's fragment constants and textures
             // The MeshConst fields mesh_fs reads (shade, effect, pad, eye,
             // the shadow ones; not the matrices) of the constants bound for
             // the fragment stage, valid when has_fragment.
@@ -2181,13 +2186,6 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                     [enc setVertexBytes:d.lights length:sizeof(d.lights) atIndex:5];
                     [enc setVertexBytes:d.envmap length:sizeof(d.envmap) atIndex:6];
                     bound.car_consts = &d;
-                }
-                if (c.effect == 19 && !bound.sky_bound) {
-                    [enc setFragmentBytes:&sky length:sizeof(sky) atIndex:5];
-                    for (int i = 0; i < 3; i++) {
-                        [enc setFragmentTexture:(st.sky_misc[i] ? st.sky_misc[i] : _black) atIndex:6 + i];
-                    }
-                    bound.sky_bound = true;
                 }
                 [enc drawIndexedPrimitives:MTLPrimitiveTypeTriangle
                                 indexCount:d.num_indices
