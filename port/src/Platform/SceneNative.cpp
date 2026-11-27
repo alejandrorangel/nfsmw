@@ -371,7 +371,19 @@ void eViewPlatInterface::Render(eModel *model, bMatrix4 *local_to_world, eLightC
     } else {
         Identity(world);
     }
+    // Per-instance texture swaps (car skins, decals, number plates): applied
+    // to the solid's table for this draw and restored after.
+    TextureInfo **replaced_storage[128];
+    TextureInfo ***replaced = nullptr;
+    int num_replacements = model->PortNumReplacementTextures();
+    if (num_replacements > 0 && num_replacements <= 128) {
+        replaced = replaced_storage;
+        model->ApplyReplacementTextureTable(replaced);
+    }
     DrawSolid(model->GetSolid(), world);
+    if (replaced) {
+        model->RestoreReplacementTextureTable(replaced);
+    }
     gSceneDraws++;
     if (gSceneLog && std::strstr(model->GetSolid()->Name, "TIRE")) {
         std::fprintf(stderr, "[scene]   %s world v3 (%.2f %.2f %.2f) w-col (%.2f %.2f %.2f %.2f)\n",

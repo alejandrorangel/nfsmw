@@ -26,6 +26,11 @@ class eModel : public bTNode<eModel> {
     void AttachReplacementTextureTable(eReplacementTextureTable *replacement_texture_table, int num_textures, int instance_index);
     void RestoreReplacementTextureTable(TextureInfo ***replaced_textures);
     void ApplyReplacementTextureTable(TextureInfo ***replaced_textures);
+#if defined(EA_PORT_NATIVE)
+    int PortNumReplacementTextures() const {
+        return pReplacementTextureTable ? NumReplacementTextures : 0;
+    }
+#endif
     int GetBoundingBox(bVector3 *min, bVector3 *max);
     bVector4 *GetPivotPosition();
     bMatrix4 *GetPivotMatrix();
