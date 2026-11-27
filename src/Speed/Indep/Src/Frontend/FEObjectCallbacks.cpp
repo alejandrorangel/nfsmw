@@ -98,7 +98,14 @@ bool FEngMovieStopper::Callback(FEObject *obj) {
 }
 
 bool FEngHidePCObjects::Callback(FEObject *obj) {
-    if (obj->Flags & 0x8) {
+#if defined(EA_PLATFORM_WIN32)
+    // PC (speed.exe 1.3 @ 0x516230) hides the console-only objects (flag 0x40),
+    // e.g. "Press START button"; consoles hide the PC-only ones (flag 0x8).
+    const unsigned int hide_flag = 0x40;
+#else
+    const unsigned int hide_flag = 0x8;
+#endif
+    if (obj->Flags & hide_flag) {
         FEngSetInvisible(obj);
         if (obj->Flags & FF_IsButton) {
             obj->Flags &= ~FF_IsButton;

@@ -16,7 +16,12 @@ void UIMemcardBoot::NotificationMessage(u32 msg, FEObject *obj, u32 param1, u32 
             MemoryCard::GetInstance()->ShowMessages(true);
             extern int IsMemcardEnabled;
             if (!IsMemcardEnabled) {
+#if !defined(EA_PORT_NATIVE)
+                // UIMemcardBase::InitComplete already queued this when the
+                // memory card is disabled; a second one advances the boot flow
+                // twice (never seen on PC/console, where it's always enabled).
                 cFEng::Get()->QueueGameMessage(0x461a18ee, GetPackageName(), 0xff);
+#endif
                 return;
             }
             SetStringCheckingCard();
