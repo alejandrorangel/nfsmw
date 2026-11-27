@@ -56,7 +56,10 @@ re-run the generator to drop stale ones.
 **The game boots to its frontend and renders the 3D garage on Metal** --
 splash, main menu and sub-menus over the frontend garage with the player's
 car, driven by the game's own screens, car loader and camera mover.
-Keyboard, gamepad and mouse work in the menus.
+Keyboard, gamepad and mouse work in the menus. Quick Race works through the
+track select and the quick play brief (race database, random car in the
+garage); accepting loads the region (L2RA) and currently stops at the
+unported simulation `Scheduler`.
 
 In place:
 
@@ -71,10 +74,15 @@ In place:
 - Reconstructed from speed.exe 1.3: `SelectCarCameraMover`, `StringToNumber`,
   input action generation, `Attrib::DefaultDataArea`
 - `eMathNative.cpp`: the Ecstasy matrix layer (D3DX on PC)
+- Lighting/shading from the PC effects (WORLD/CAR), the game's light rigs
+- Gameplay: `GRaceDatabase`/`GRaceParameters`/`GRaceBin`/`GRaceCustom`,
+  `GManager` vault loading, `GVault`
+- `port/src/Audio/EAAudioFormat.*`: EA-XA R2 / SCxl stream / BNKl bank
+  decoding (not wired to the game yet)
 
-Not yet: the PC shaders (lighting, car paint, reflections -- the effects are
-compiled D3D9 `fx_2_0` resources in speed.exe), sound, saves, movies, the
-in-game world.
+Not yet: reflections/env maps, sound output (the Csis/snd9 layers),
+saves, movies, EAGL4 animation data (32-bit ELF objects; skeletons, world
+animations and NIS scenes are skipped natively), the in-game simulation.
 
 Aspect ratio (`NFSMW_ASPECT`): `fill` (default) scales the 640x480
 frontend by window height and lets elements outside the 4:3 area use the
@@ -92,7 +100,8 @@ Debug switches:
   scene over the frontend; `NFSMW_SHADE=texture` ignores vertex colours
 - `NFSMW_TRACE_SCENE`, `NFSMW_TRACE_ACTIONS`, `NFSMW_DUMP_CONTROLLERS`,
   `NFSMW_DUMP_MESH=<dir>`, `NFSMW_TRACE_FLOW`, `NFSMW_TRACE_FRAMES`,
-  `NFSMW_TRACE_FE`, `NFSMW_TRACE_TEXTURES`, `NFSMW_TRACE_FILES`
+  `NFSMW_TRACE_FE` (per-poly texture/mask/vertex dump), `NFSMW_TRACE_TEXTURES`,
+  `NFSMW_TRACE_FILES`
 - `NFSMW_SOUND=1`, `NFSMW_MEMCARD=1`: turn on the unported sound / save paths
 - `NFSMW_FENG_POOL=1`: frontend allocations in the FEng pool (debugging)
 - `NFSMW_HOLD_FRAME=<s>`, `NFSMW_TEXTURE_SMOKE=1`

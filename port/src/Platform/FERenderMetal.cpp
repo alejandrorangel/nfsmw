@@ -43,7 +43,7 @@ void *MetalTextureOf(TextureInfo *t) {
     return t->GetPlatInfo()->MetalTexture;
 }
 
-void SubmitPoly(ePoly *poly, TextureInfo *texture_info) {
+void SubmitPoly(ePoly *poly, TextureInfo *texture_info, TextureInfo *mask = nullptr) {
     PortFEVertex quad[4];
     for (int i = 0; i < 4; i++) {
         quad[i].x = poly->Vertices[i].x * (1.0f / 320.0f) - 1.0f;
@@ -54,7 +54,8 @@ void SubmitPoly(ePoly *poly, TextureInfo *texture_info) {
     }
     PortMetalFEAddQuad(MetalTextureOf(texture_info), BlendFor(texture_info), quad);
     if (std::getenv("NFSMW_TRACE_FE")) {
-        std::fprintf(stderr, "[fe] tex=%s flags=%#x\n", texture_info ? texture_info->DebugName : "(none)", poly->GetFlags());
+        std::fprintf(stderr, "[fe] tex=%s mask=%s flags=%#x\n", texture_info ? texture_info->DebugName : "(none)",
+                     mask ? mask->DebugName : "-", poly->GetFlags());
         for (int i = 0; i < 4; i++) {
             std::fprintf(stderr, "     v%d pos=(%.1f, %.1f, %.2f) uv=(%.3f, %.3f) rgba=%02x %02x %02x %02x\n", i, poly->Vertices[i].x,
                          poly->Vertices[i].y, poly->Vertices[i].z, poly->UVs[i][0], poly->UVs[i][1], poly->Colours[i][0],
@@ -74,7 +75,7 @@ void eViewPlatInterface::FERender(ePoly *poly, TextureInfo *texture_info, int us
 }
 
 void eViewPlatInterface::FERender(ePoly *poly, TextureInfo *texture_info, TextureInfo *texture_info_mask, int use_previous_data) {
-    SubmitPoly(poly, texture_info); // TODO: multi-texture mask (0x6D1930)
+    SubmitPoly(poly, texture_info, texture_info_mask); // TODO: multi-texture mask (0x6D1930)
 }
 
 extern float RealTimeElapsed;
