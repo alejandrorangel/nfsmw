@@ -370,7 +370,13 @@ void SimTask::Run(float dT_sim, float dT_render) {
             return;
         }
         Sim::Profile::Scope profile(mProfile);
+#if defined(EA_PORT_NATIVE)
+        // PC 0x6ECD90 hands variable-rate tasks the render time banked since their last run, not the rate accumulator
+        // (with mUpdate, AIPursuit got dT ~= 1 every few frames and busted the player in under a second).
+        bool handled = mHandler->OnTask(GetInstanceHandle(), mTimeBank);
+#else
         bool handled = mHandler->OnTask(GetInstanceHandle(), mUpdate);
+#endif
         mTimeBank = 0.0f;
         mUpdate -= 1.0f;
     }
