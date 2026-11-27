@@ -129,6 +129,8 @@ static void PaceFrame() {
 
 void PortRenderScene(int frame);           // SceneNative.cpp
 void PortVisualTreatmentFrame(int frame); // VisualTreatmentNative.cpp
+void ePreDisplay();                       // Ecstasy.cpp
+void ePostDisplay();
 
 // NFSMW_TRACE_FRAMETIME: logs frames whose period exceeds 20 ms, split into
 // the game loop (since the last frame was presented) and the render build,
@@ -153,6 +155,10 @@ void eDisplayFrame() {
     frame++;
     uint64_t render_start = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
     double game_ms = ft.last_end ? (render_start - ft.last_end) / 1e6 : 0;
+    // ___eDisplayFrame 0x6DE3D1 starts with ePreDisplay (0x504C50): TickSFX,
+    // the sun's flares, SimpleModelAnim::Update, DoTunnelBloom and
+    // DoTinting for views 1 and 2, the flare attributes.
+    ePreDisplay();
     PortRenderScene(frame);
     double scene_ms = MsSince(render_start);
     PortVisualTreatmentFrame(frame);
@@ -182,6 +188,9 @@ void eDisplayFrame() {
     // (eFrameMalloc), which matrices for this frame's draws came from.
     void eSwapFrameMallocBuffers();
     eSwapFrameMallocBuffers();
+    // 0x6E7623: ePostDisplay (0x504D00): UpdateTextureAnimations,
+    // UpdateAllScreenEFX, the flare pool reset, the accumulation buffer flag.
+    ePostDisplay();
     // eDisplayFrame 0x6E764B: the frame ends by advancing eFrameCounter
     // (Main_AnimateFrame services the render conns once per frame; car render
     // conns compare it against their last render frame).

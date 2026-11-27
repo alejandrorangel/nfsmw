@@ -4,6 +4,8 @@
 
 #include "MetalPrelitBridge.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -22,6 +24,7 @@ struct Batch {
 struct Frame {
     std::vector<PortPrelitVertex> vertices; // two triangles per quad
     std::vector<Batch> batches;
+    size_t split = SIZE_MAX; // batches from here on are part 1 (PortMetalPrelitSplit)
 };
 
 Frame gBuilding;
@@ -131,7 +134,8 @@ id<MTLRenderPipelineState> Pipeline(int samples, PortPrelitBlend blend) {
     }
     d.rasterSampleCount = (NSUInteger)(1 << si);
     MTLRenderPipelineColorAttachmentDescriptor *c = d.colorAttachments[0];
-    c.writeMask = MTLColorWriteMaskRed | MTLColorWriteMaskGreen | MTLColorWriteMaskBlue; // COLORWRITEENABLE 7
+    c.writeMask = blend == PORT_PRELIT_ALPHA_ONLY ? MTLColorWriteMaskAlpha // IDI_WORLDMIN_FX COLORWRITEENABLE 8
+                                                  : MTLColorWriteMaskRed | MTLColorWriteMaskGreen | MTLColorWriteMaskBlue; // COLORWRITEENABLE 7
     MTLBlendFactor src = MTLBlendFactorSourceAlpha, dst = MTLBlendFactorOneMinusSourceAlpha;
     switch (blend) {
     case PORT_PRELIT_OPAQUE:
@@ -156,7 +160,7 @@ id<MTLRenderPipelineState> Pipeline(int samples, PortPrelitBlend blend) {
     default:
         break;
     }
-    c.blendingEnabled = blend != PORT_PRELIT_OPAQUE;
+    c.blendingEnabled = blend != PORT_PRELIT_OPAQUE && blend != PORT_PRELIT_ALPHA_ONLY;
     c.sourceRGBBlendFactor = c.sourceAlphaBlendFactor = src;
     c.destinationRGBBlendFactor = c.destinationAlphaBlendFactor = dst;
     NSError *error = nil;
@@ -172,6 +176,11 @@ id<MTLRenderPipelineState> Pipeline(int samples, PortPrelitBlend blend) {
 void PortMetalPrelitBeginFrame() {
     gBuilding.vertices.clear();
     gBuilding.batches.clear();
+    gBuilding.split = SIZE_MAX;
+}
+
+void PortMetalPrelitSplit() {
+    gBuilding.split = gBuilding.batches.size();
 }
 
 void PortMetalPrelitAddQuads(void *texture, PortPrelitBlend blend, uint32_t flags, const PortPrelitVertex *vertices, uint32_t num_quads) {
@@ -180,7 +189,8 @@ void PortMetalPrelitAddQuads(void *texture, PortPrelitBlend blend, uint32_t flag
     }
     id<MTLTexture> t = (__bridge id<MTLTexture>)texture;
     Frame &f = gBuilding;
-    if (f.batches.empty() || f.batches.back().texture != t || f.batches.back().blend != blend || f.batches.back().flags != flags) {
+    if (f.batches.empty() || f.batches.size() == f.split || f.batches.back().texture != t || f.batches.back().blend != blend ||
+        f.batches.back().flags != flags) {
         f.batches.push_back({t, blend, flags, (uint32_t)f.vertices.size(), 0});
     }
     static const int order[6] = {0, 1, 2, 0, 2, 3};
@@ -197,16 +207,23 @@ void PortMetalPrelitPublish() {
     std::swap(gPublished, gBuilding);
 }
 
-void PortMetalPrelitDraw(void *encoder, void *device, const float view_proj[16], int samples, int colour_format, int depth_format) {
+void PortMetalPrelitDraw(void *encoder, void *device, const float view_proj[16], int samples, int colour_format, int depth_format,
+                         int part) {
     std::vector<PortPrelitVertex> vertices;
     std::vector<Batch> batches;
     {
         std::lock_guard<std::mutex> guard(gLock);
-        if (gPublished.batches.empty()) {
+        size_t first = 0, end = gPublished.batches.size();
+        if (part == 0) {
+            end = std::min(end, gPublished.split);
+        } else if (part == 1) {
+            first = std::min(end, gPublished.split);
+        }
+        if (first >= end) {
             return;
         }
         vertices = gPublished.vertices;
-        batches = gPublished.batches;
+        batches.assign(gPublished.batches.begin() + first, gPublished.batches.begin() + end);
     }
     id<MTLRenderCommandEncoder> enc = (__bridge id<MTLRenderCommandEncoder>)encoder;
     id<MTLDevice> dev = (__bridge id<MTLDevice>)device;

@@ -22,6 +22,7 @@
 #include "Speed/Indep/Src/World/ScreenEffects.hpp"
 
 #include "../Mac/MetalBridge.h"
+#include "ScreenEffectsNative.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -74,9 +75,16 @@ void IVisualTreatmentPlat::Fill(PortVisualTreatment &out) {
 
     out.desaturation[0] = this->Desaturation;
     out.desaturation[1] = 1.0f - this->Desaturation;
+    // DetailMapIntensity (+0x170) is set too but no technique reads it;
+    // VisualEffectBrightness = +0x174 + 1, VisualEffectVignette = +0x17C.
     out.brightness = this->PulseBrightness + 1.0f;
     out.vignette = this->PursuitBreakerBlend;
     out.pad = 0.0f;
+    // VisualEffectRadialBlur (+0x178; 0 while the accumulation buffer is
+    // flushed) and RadialBlurOffset are set but no technique reads them
+    // either; what +0x178 does on PC is boost the motion blur, through
+    // 0x982C74 (ScreenEffectsNative.cpp).
+    gPortRadialBlur = this->RadialBlur;
 
     for (int i = 0; i < 256; i++) {
         out.spline[i] = SplineTexel(static_cast<float>(i) * (1.0f / 255.0f), &this->BlackBloomCurve, &this->ColourBloomCurve,

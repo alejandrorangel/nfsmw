@@ -24,6 +24,9 @@ enum PortPrelitBlend {
     PORT_PRELIT_SUBTRACTIVE,    // Zero / InvSrcColor
     PORT_PRELIT_DEST_ALPHA,     // DestAlpha / InvDestAlpha
     PORT_PRELIT_DEST_ADDITIVE,  // DestAlpha / One
+    // IDI_WORLDMIN_FX (effect 7, fixed function): no blending, alpha only
+    // (COLORWRITEENABLE 8), z test without writes; the tunnel glare quad.
+    PORT_PRELIT_ALPHA_ONLY,
     PORT_PRELIT_NUM_BLENDS,
 };
 enum { PORT_PRELIT_ALPHA_TEST = 1, PORT_PRELIT_DEPTH_WRITE = 2 };
@@ -33,9 +36,14 @@ void PortMetalPrelitBeginFrame();
 // Adds num_quads quads (4 vertices each, corners in order around the
 // perimeter) with texture (id<MTLTexture>, null = white).
 void PortMetalPrelitAddQuads(void *texture, PortPrelitBlend blend, uint32_t flags, const PortPrelitVertex *vertices, uint32_t num_quads);
+// Splits the building frame: quads added from now on are part 1 (drawn after
+// the motion blur, PortMetal3DSetMotionBlur), the ones before part 0.
+void PortMetalPrelitSplit();
 // Publishes the building frame (PortMetalFEEndFrame calls it).
 void PortMetalPrelitPublish();
 // Render thread: draws the published frame into encoder (an
 // id<MTLRenderCommandEncoder> of the main scene pass, samples per pixel)
-// with view_proj (world -> clip, row vectors).
-void PortMetalPrelitDraw(void *encoder, void *device, const float view_proj[16], int samples, int colour_format, int depth_format);
+// with view_proj (world -> clip, row vectors). part: 0 or 1 (see
+// PortMetalPrelitSplit), -1 all.
+void PortMetalPrelitDraw(void *encoder, void *device, const float view_proj[16], int samples, int colour_format, int depth_format,
+                         int part = -1);

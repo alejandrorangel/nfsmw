@@ -118,6 +118,20 @@ struct PortOverBright {
 // Null = off for this frame (call after PortMetal3DBeginFrame).
 void PortMetal3DSetOverBright(const PortOverBright *overbright);
 
+// PC motion blur (speed.exe 1.3 sub_6DBB20, g_MotionBlurEnable): the frame
+// so far (StretchRect 0x982A28 -> 0x93DE60) through two IDI_FILTER_FX p3
+// passes of sub_6D2840 (four taps of 0.25, tap i reading the texture rect
+// (-i o0, -i o1)..(1 - i o2, 1 - i o3), the second pass with 4 o, into
+// 0x93DE64 and back), then blended over the frame with D3DRS_BLENDFACTOR
+// (sub_6D3B80: BLENDFACTOR / INVBLENDFACTOR, all four channels). Called where
+// the PC does it in the frame: the meshes (but the sky's alpha-only pass) and
+// prelit quads queued so far are blurred, the ones after are not.
+struct PortMotionBlur {
+    float offsets[4]; // sub_6D2840 arg 5 of the first pass
+    float factor;     // blend factor (byte) / 255
+};
+void PortMetal3DSetMotionBlur(const PortMotionBlur *blur);
+
 // PC world atmospheric scattering (IDI_WORLD_FX family vertex shaders:
 // extinction and Rayleigh + Henyey-Greenstein Mie in-scattering), with the
 // constants speed.exe 1.3 sub_6D6CF0 sets each frame from the 'effects'

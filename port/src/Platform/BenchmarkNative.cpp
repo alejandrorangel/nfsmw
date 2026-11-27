@@ -35,6 +35,7 @@
 #include "Speed/Indep/Src/Interfaces/SimActivities/ICopMgr.h"
 #include "Speed/Indep/Src/Interfaces/SimEntities/IPlayer.h"
 #include "Speed/Indep/Src/Interfaces/Simables/IAI.h"
+#include "Speed/Indep/Src/Interfaces/Simables/IInput.h"
 #include "Speed/Indep/Src/Interfaces/Simables/ISimable.h"
 #include "Speed/Indep/Src/Interfaces/Simables/IVehicle.h"
 #include "Speed/Indep/Src/Misc/Config.h"
@@ -169,6 +170,32 @@ void DriveWithAI() {
         ICopMgr::Get()->LockoutCops(false);
         ICopMgr::Get()->PursueAtHeatLevel(static_cast<int>(gScenario->heat));
         std::fprintf(stderr, "[benchmark] pursuit at heat %d (frame %d)\n", static_cast<int>(gScenario->heat), gBenchFrame);
+    }
+    // Screen effects on cue: NFSMW_BENCHMARK_NOS=<from>-<to> holds the NOS
+    // control (IInput::SetControlNOS) over those frames (the radial blur);
+    // NFSMW_BENCHMARK_BREAKER=<frame> charges and engages the pursuit
+    // breaker then (IPlayer::ChargeGameBreaker, ToggleGameBreaker).
+    static int nos_from = -1, nos_to = -1;
+    static const int breaker = EnvInt("NFSMW_BENCHMARK_BREAKER", -1);
+    if (nos_from < 0) {
+        nos_from = 0;
+        if (const char *nos = std::getenv("NFSMW_BENCHMARK_NOS")) {
+            std::sscanf(nos, "%d-%d", &nos_from, &nos_to);
+        }
+    }
+    if (gBenchFrame >= nos_from && gBenchFrame <= nos_to) {
+        IInput *input;
+        if (simable->QueryInterface(&input)) {
+            input->SetControlNOS(true);
+        }
+        if (gBenchFrame == nos_from) {
+            std::fprintf(stderr, "[benchmark] NOS on (frames %d-%d)\n", nos_from, nos_to);
+        }
+    }
+    if (gBenchFrame == breaker) {
+        player->ChargeGameBreaker(1.0f);
+        bool on = player->ToggleGameBreaker();
+        std::fprintf(stderr, "[benchmark] pursuit breaker %s (frame %d)\n", on ? "on" : "refused", gBenchFrame);
     }
 }
 

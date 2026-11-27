@@ -106,6 +106,7 @@ add_library(nfsmw_platform OBJECT
     src/Platform/BenchmarkNative.cpp
     src/Platform/ParticlesNative.cpp
     src/Platform/LightFlaresNative.cpp
+    src/Platform/ScreenEffectsNative.cpp
     src/Game/SelectCarCameraMover.cpp
     src/Game/CameraDriveNative.cpp
     src/Game/RainNative.cpp

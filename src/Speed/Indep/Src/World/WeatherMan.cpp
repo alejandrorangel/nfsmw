@@ -27,6 +27,25 @@ int LoaderWeatherMan(bChunk *bchunk) {
         return 0;
     }
 
+#if defined(EA_PORT_NATIVE)
+    // The pack (0x10 bytes) and each region (0xA4) start with a 32-bit
+    // bTNode; natively the node is bigger, so each region is copied into a
+    // native GenericRegion, remembered in its disk record's unused node.
+    char *disk = bchunk->GetAlignedData(16);
+    int32 version = *reinterpret_cast<int32 *>(disk + 0x8);
+    int32 num = *reinterpret_cast<int32 *>(disk + 0xC);
+    if (version == 2) {
+        for (int i = 0; i < num; i++) {
+            char *record = disk + 0x10 + i * 0xA4;
+            GenericRegion *region = static_cast<GenericRegion *>(bMalloc(sizeof(GenericRegion), "GenericRegion (native)", 0, 0));
+            bMemSet(region, 0, sizeof(*region));
+            bMemCpy(region->Name, record + 0x8, 0xA4 - 0x8);
+            bMemCpy(record, &region, sizeof(region));
+            AddRegion(region);
+        }
+    }
+    return 1;
+#endif
     WeatherRegionPack *region_pack = reinterpret_cast<WeatherRegionPack *>(bchunk->GetAlignedData(16));
     bPlatEndianSwap(&region_pack->Version);
     bPlatEndianSwap(&region_pack->NumRegions);
@@ -66,6 +85,19 @@ int UnloaderWeatherMan(bChunk *bchunk) {
         return 0;
     }
 
+#if defined(EA_PORT_NATIVE)
+    char *disk = bchunk->GetAlignedData(16);
+    if (*reinterpret_cast<int32 *>(disk + 0x8) == 2) {
+        int32 num = *reinterpret_cast<int32 *>(disk + 0xC);
+        for (int i = 0; i < num; i++) {
+            GenericRegion *region;
+            bMemCpy(&region, disk + 0x10 + i * 0xA4, sizeof(region)); // the native copy (see the loader)
+            RemoveRegion(region);
+            bFree(region);
+        }
+    }
+    return 1;
+#endif
     WeatherRegionPack *region_pack = reinterpret_cast<WeatherRegionPack *>(bchunk->GetAlignedData(16));
     if (region_pack->Version == 2) {
         GenericRegion *region = reinterpret_cast<GenericRegion *>(&region_pack[1]);

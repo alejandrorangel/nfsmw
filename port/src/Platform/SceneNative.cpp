@@ -30,6 +30,7 @@
 
 #include "../Mac/MetalBridge.h"
 #include "ParticlesNative.h"
+#include "ScreenEffectsNative.h"
 
 #include <chrono>
 #include <cmath>
@@ -973,6 +974,9 @@ bool RenderFrontEndScene() {
     int backdrop = gSceneDraws;
     RenderFrontEndCars(view, 0);
     gShadowLevelClip = nullptr;
+    // 0x6DF1CC: the motion blur runs in the frontend too (the garage camera
+    // rarely moves fast enough for it).
+    PortMotionBlurFrame(view);
     if (log) {
         std::fprintf(stderr, "[scene] draws: backdrop %d, cars %d (render calls %d, no solid %d)\n", backdrop, gSceneDraws - backdrop,
                      gSceneCalls, gSceneNoSolid);
@@ -1328,6 +1332,10 @@ bool RenderWorldScene(int frame) {
     PortRenderSkids(view);
     DrawTestCars(view, 0); // ___eDisplayFrame 0x6DEE44: sub_750B10 → VehicleRenderConn::RenderAll
     gShadowLevelClip = nullptr;
+    // 0x6DEFCE / 0x6DF1CC: the tunnel glare quad, then the motion blur over
+    // the frame so far.
+    PortTunnelGlareFrame(view);
+    PortMotionBlurFrame(view);
     PortRenderWorldEffects(view);
     // ___eDisplayFrame 0x6DF4F7: with the Particle option (0x9017EC) on, the
     // particles (EmitterSystem::Render, not ported) and then in a race, in

@@ -307,7 +307,13 @@ void DoTunnelBloom(eView *view) {
                 }
 
                 if (len < 17.0f) {
+#if defined(EA_PORT_NATIVE)
+                    // speed.exe 1.3 (0x72AE82): len x 1/17 (0x8B2AEC), so the glare
+                    // fades as the camera nears the exit's plane.
+                    SE_def.data[1] = len * (1.0f / 17.0f) * view->ScreenEffects->GetDATA(SE_GLARE, 1);
+#else
                     SE_def.data[1] = view->ScreenEffects->GetDATA(SE_GLARE, 1) * (len / 1.7f);
+#endif
                 } else {
                     if (view->ScreenEffects->GetDATA(SE_GLARE, 1) < 1.0f) {
                         SE_def.data[1] = view->ScreenEffects->GetDATA(SE_GLARE, 1) + GlareFallon;

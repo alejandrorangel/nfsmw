@@ -200,6 +200,8 @@ struct Frame3D {
     PortWorldFog fog = {};
     bool overbright = false;
     PortOverBright ob = {};
+    bool motion_blur = false; // PortMetal3DSetMotionBlur
+    PortMotionBlur mb = {};
     // IDI_SKYBOX_FX constants (PortMetal3DSetSky); textures held strongly.
     PortSky sky = {};
     id<MTLTexture> sky_misc[3];
@@ -255,6 +257,7 @@ void PortMetal3DBeginFrame(const float view_proj[16]) {
     g3DBuilding.gain_map = nil;
     g3DBuilding.fog = {};
     g3DBuilding.overbright = false;
+    g3DBuilding.motion_blur = false;
     g3DBuilding.sky = {};
     for (int i = 0; i < 3; i++) {
         g3DBuilding.sky_misc[i] = nil;
@@ -361,6 +364,14 @@ void PortMetal3DSetOverBright(const PortOverBright *overbright) {
     g3DBuilding.overbright = overbright != nullptr;
     if (overbright) {
         g3DBuilding.ob = *overbright;
+    }
+}
+
+void PortMetal3DSetMotionBlur(const PortMotionBlur *blur) {
+    g3DBuilding.motion_blur = blur != nullptr;
+    if (blur) {
+        g3DBuilding.mb = *blur;
+        PortMetalPrelitSplit();
     }
 }
 
@@ -1117,6 +1128,33 @@ fragment float4 overbright_add_fs(QuadOut in [[stage_in]], texture2d<float> src 
     return float4(src.sample(s, in.uv).rgb * intensity, 0);
 }
 
+// Motion blur (sub_6DBB20): one sub_6D2840 pass, IDI_FILTER_FX p3 (ps #4:
+// four taps times FilterWeights 0.25, rgba). Tap i's texture coordinates
+// run over the rect (-i k o.xy)..(1 - i k o.zw) across the quad (k = 1, then
+// 4). sub_6D2840 doesn't offset its quad by half a pixel (sub_6D2CD0 and
+// sub_6D3B80 do), so D3D9 interpolates the pixel centres' coordinates at
+// x / w rather than (x + 0.5) / w.
+struct RadialConst { float4 offsets; float scale; float pad[3]; };
+
+fragment float4 radial_fs(QuadOut in [[stage_in]], texture2d<float> src [[texture(0)]], constant RadialConst &c [[buffer(0)]]) {
+    constexpr sampler s(filter::linear, address::clamp_to_edge);
+    float2 uv = in.uv - 0.5 / float2(src.get_width(), src.get_height());
+    float4 sum = 0;
+    for (int i = 0; i < 4; i++) {
+        float k = float(i) * c.scale;
+        float2 t = mix(-k * c.offsets.xy, 1.0 - k * c.offsets.zw, uv);
+        sum += src.sample(s, t) * 0.25;
+    }
+    return saturate(sum);
+}
+
+// sub_6D3B80 with IDI_FILTER_FX p0 (FilterWeights[0] = 1, ColorWriteMode
+// 0xF): the texture as is; the blend state does the rest.
+fragment float4 texture_fs(QuadOut in [[stage_in]], texture2d<float> src [[texture(0)]]) {
+    constexpr sampler s(filter::linear, address::clamp_to_edge);
+    return src.sample(s, in.uv);
+}
+
 // IDI_PARTICLES_FX technique 0 (vs #5; ps_1_1 #4: mul_x2 r0, t0, v0) with
 // the texture's alpha test (ALPHAREF 0x5F, sub_6C68B0).
 struct ParticleVertex { packed_float3 pos; uint color; packed_float2 uv; };
@@ -1219,6 +1257,15 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     // targets (on PC 0x982964/0x982968 again, after the treatment used them).
     id<MTLTexture> _obSource, _ob[2];
     id<MTLRenderPipelineState> _overbrightPipeline, _overbrightAddPipeline;
+    // Motion blur (PortMotionBlur): PC 0x93DE60 / 0x93DE64 (full size), the
+    // sub_6D2840 pipeline, sub_6D3B80's blend-factor composite per sample
+    // count, and the frame's multisampled colour and depth kept in memory
+    // (not memoryless) for the frames where the scene pass is split around
+    // the blur.
+    id<MTLTexture> _mb[2];
+    id<MTLRenderPipelineState> _radialPipeline;
+    id<MTLRenderPipelineState> _mbBlendPSO[4];
+    id<MTLTexture> _sceneColorMSKept, _sceneDepthKept;
     // IDI_PARTICLES_FX: [sample count 1, 2, 4, 8][opaque, alpha, additive], rgb writes.
     id<MTLRenderPipelineState> _particlePSO[4][3];
     // IDI_RAIN_DROP_FX and the frame copy it refracts.
@@ -1229,6 +1276,8 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     id<MTLTexture> _blackCube; // bound when there is none
     unsigned _envFacesDrawn; // faces drawn at least once (bit per face)
     bool _drawingEnvFace;    // drawDraws is drawing a dynamic env-map face
+    bool _skipSkyAlpha;      // drawDraws leaves out the sky's alpha-only pass
+    bool _onlySkyAlpha;      // drawDraws draws just the sky's alpha-only pass
     // PC shadow map (sub_6E44C0): 1024x1024 depth (0x982CF8) and colour
     // (0x982CF0) targets; pipelines for car (red) and world (depth only) draws.
     id<MTLTexture> _shadowDepth, _shadowColour;
@@ -1331,6 +1380,11 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
             _filterPipeline = [_device newRenderPipelineStateWithDescriptor:pd error:&error];
             if (!_filterPipeline) {
                 NSLog(@"NFSMW: filter pipeline failed: %@", error);
+            }
+            pd.fragmentFunction = [lib newFunctionWithName:@"radial_fs"];
+            _radialPipeline = [_device newRenderPipelineStateWithDescriptor:pd error:&error];
+            if (!_radialPipeline) {
+                NSLog(@"NFSMW: radial blur pipeline failed: %@", error);
             }
             pd.fragmentFunction = [lib newFunctionWithName:@"overbright_fs"];
             _overbrightPipeline = [_device newRenderPipelineStateWithDescriptor:pd error:&error];
@@ -1776,7 +1830,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         // world drawn with ColorWriteMode 7) holds the sky's: what over
         // bright's downsample (IDI_FILTER_FX p5) scales by.
         const int saved_mask = _passMask;
-        for (int blended = 0; blended < (_passMainScene ? 3 : 2); blended++) {
+        for (int blended = _onlySkyAlpha ? 2 : 0; blended < (_passMainScene && !_skipSkyAlpha ? 3 : 2); blended++) {
             if (blended == 2) {
                 _passMask = 2;
             }
@@ -1989,6 +2043,94 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         _ob[i] = [_device newTextureWithDescriptor:cd];
     }
     _obSource = [_device newTextureWithDescriptor:cd];
+    _mb[0] = _mb[1] = nil;
+    _sceneColorMSKept = _sceneDepthKept = nil;
+}
+
+// The motion blur's targets and the kept (stored) multisampled colour and
+// depth, made on first use at the frame's size.
+- (void)ensureMotionBlurTargets {
+    NSUInteger w = _sceneColor.width, h = _sceneColor.height;
+    if (_mb[0] != nil) {
+        return;
+    }
+    MTLTextureDescriptor *cd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                                                                  width:w
+                                                                                 height:h
+                                                                              mipmapped:NO];
+    cd.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+    cd.storageMode = MTLStorageModePrivate;
+    for (int i = 0; i < 2; i++) {
+        _mb[i] = [_device newTextureWithDescriptor:cd];
+        _mb[i].label = i == 0 ? @"Motion blur 0x93DE60" : @"Motion blur 0x93DE64";
+    }
+    MTLTextureDescriptor *dd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float_Stencil8
+                                                                                  width:w
+                                                                                 height:h
+                                                                              mipmapped:NO];
+    dd.usage = MTLTextureUsageRenderTarget;
+    dd.storageMode = MTLStorageModePrivate;
+    if (_sceneSamples > 1) {
+        dd.textureType = MTLTextureType2DMultisample;
+        dd.sampleCount = _sceneSamples;
+        MTLTextureDescriptor *md = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                                                                      width:w
+                                                                                     height:h
+                                                                                  mipmapped:NO];
+        md.textureType = MTLTextureType2DMultisample;
+        md.sampleCount = _sceneSamples;
+        md.usage = MTLTextureUsageRenderTarget;
+        md.storageMode = MTLStorageModePrivate;
+        _sceneColorMSKept = [_device newTextureWithDescriptor:md];
+    }
+    _sceneDepthKept = [_device newTextureWithDescriptor:dd];
+}
+
+// sub_6D3B80's composite (BLENDFACTOR / INVBLENDFACTOR) for a pass with this
+// many samples, depth attached but untouched.
+- (id<MTLRenderPipelineState>)motionBlurBlendPipeline:(int)samples {
+    int si = samples >= 8 ? 3 : samples >= 4 ? 2 : samples >= 2 ? 1 : 0;
+    if (_mbBlendPSO[si] != nil) {
+        return _mbBlendPSO[si];
+    }
+    MTLRenderPipelineDescriptor *pd = [MTLRenderPipelineDescriptor new];
+    pd.vertexFunction = [_lib newFunctionWithName:@"quad_vs"];
+    pd.fragmentFunction = [_lib newFunctionWithName:@"texture_fs"];
+    pd.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+    pd.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float_Stencil8;
+    pd.stencilAttachmentPixelFormat = MTLPixelFormatDepth32Float_Stencil8;
+    pd.rasterSampleCount = (NSUInteger)(1 << si);
+    MTLRenderPipelineColorAttachmentDescriptor *c = pd.colorAttachments[0];
+    c.blendingEnabled = YES;
+    c.sourceRGBBlendFactor = c.sourceAlphaBlendFactor = MTLBlendFactorBlendColor;
+    c.destinationRGBBlendFactor = c.destinationAlphaBlendFactor = MTLBlendFactorOneMinusBlendColor;
+    NSError *error = nil;
+    _mbBlendPSO[si] = [_device newRenderPipelineStateWithDescriptor:pd error:&error];
+    if (!_mbBlendPSO[si]) {
+        NSLog(@"NFSMW: motion blur blend pipeline failed: %@", error);
+    }
+    return _mbBlendPSO[si];
+}
+
+// One sub_6D2840 pass (see radial_fs).
+- (void)radialBlur:(id<MTLTexture>)src into:(id<MTLTexture>)dst offsets:(const float *)offsets scale:(float)scale
+     commandBuffer:(id<MTLCommandBuffer>)cmd {
+    MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+    rp.colorAttachments[0].texture = dst;
+    rp.colorAttachments[0].loadAction = MTLLoadActionDontCare;
+    rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+    struct {
+        float offsets[4];
+        float scale;
+        float pad[3];
+    } c = {{offsets[0], offsets[1], offsets[2], offsets[3]}, scale, {0, 0, 0}};
+    id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rp];
+    enc.label = @"Motion blur";
+    [enc setRenderPipelineState:_radialPipeline];
+    [enc setFragmentTexture:src atIndex:0];
+    [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
+    [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+    [enc endEncoding];
 }
 
 // One IDI_FILTER_FX pass (sub_6D2CD0): taps of (weight, dx, dy) in source
@@ -2121,6 +2263,19 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
     rp.stencilAttachment.texture = _sceneDepth;
     rp.stencilAttachment.loadAction = MTLLoadActionClear;
     rp.stencilAttachment.storeAction = MTLStoreActionDontCare;
+    // The motion blur splits the pass (PortMetal3DSetMotionBlur): the frame
+    // and its depth are stored after the first part and loaded for the
+    // second.
+    const bool split = scene.motion_blur && _radialPipeline && [self motionBlurBlendPipeline:samples];
+    if (split) {
+        [self ensureMotionBlurTargets];
+        rp.depthAttachment.texture = rp.stencilAttachment.texture = _sceneDepthKept;
+        rp.depthAttachment.storeAction = MTLStoreActionStore;
+        if (samples > 1) {
+            rp.colorAttachments[0].texture = _sceneColorMSKept;
+            rp.colorAttachments[0].storeAction = MTLStoreActionStoreAndMultisampleResolve;
+        }
+    }
     id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rp];
     enc.label = @"Scene";
     // The world effects write ColorWriteMode 7 (rgb; sub_6CFCE0) in the
@@ -2128,9 +2283,49 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
     _passSamples = samples;
     _passMask = 1;
     _passMainScene = true;
+    _skipSkyAlpha = split;
     [self drawScene:scene encoder:enc view:view];
+    _skipSkyAlpha = false;
     // Particles, skid marks, light flares (MetalPrelit.mm).
-    PortMetalPrelitDraw((__bridge void *)enc, (__bridge void *)_device, scene.view_proj, samples, (int)_colorFormat, (int)_depthFormat);
+    PortMetalPrelitDraw((__bridge void *)enc, (__bridge void *)_device, scene.view_proj, samples, (int)_colorFormat, (int)_depthFormat,
+                        split ? 0 : -1);
+    if (split) {
+        [enc endEncoding];
+        // sub_6DBB20: StretchRect the frame to 0x93DE60, sub_6D2840 into
+        // 0x93DE64 and back with 4x the offsets (the frame is read in place
+        // here: it's the same image).
+        [self radialBlur:_sceneColor into:_mb[1] offsets:scene.mb.offsets scale:1.0f commandBuffer:cmd];
+        [self radialBlur:_mb[1] into:_mb[0] offsets:scene.mb.offsets scale:4.0f commandBuffer:cmd];
+        MTLRenderPassDescriptor *rp2 = [MTLRenderPassDescriptor renderPassDescriptor];
+        rp2.colorAttachments[0].texture = samples > 1 ? _sceneColorMSKept : _sceneColor;
+        rp2.colorAttachments[0].loadAction = MTLLoadActionLoad;
+        if (samples > 1) {
+            rp2.colorAttachments[0].resolveTexture = _sceneColor;
+            rp2.colorAttachments[0].storeAction = MTLStoreActionMultisampleResolve;
+        } else {
+            rp2.colorAttachments[0].storeAction = MTLStoreActionStore;
+        }
+        rp2.depthAttachment.texture = rp2.stencilAttachment.texture = _sceneDepthKept;
+        rp2.depthAttachment.loadAction = MTLLoadActionLoad;
+        rp2.depthAttachment.storeAction = MTLStoreActionDontCare;
+        rp2.stencilAttachment.loadAction = MTLLoadActionLoad;
+        rp2.stencilAttachment.storeAction = MTLStoreActionDontCare;
+        enc = [cmd renderCommandEncoderWithDescriptor:rp2];
+        enc.label = @"Scene after motion blur";
+        // sub_6D3B80(0x982A28, 0x93DEF8, BLENDFACTOR, INVBLENDFACTOR).
+        [enc setRenderPipelineState:[self motionBlurBlendPipeline:samples]];
+        [enc setDepthStencilState:_depthOff];
+        [enc setFragmentTexture:_mb[0] atIndex:0];
+        const float f = scene.mb.factor;
+        [enc setBlendColorRed:f green:f blue:f alpha:f];
+        [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+        // The rest of the frame: the sky's alpha-only pass (0x6DF3C3), the
+        // flares and the particles.
+        _onlySkyAlpha = true;
+        [self drawScene:scene encoder:enc view:view];
+        _onlySkyAlpha = false;
+        PortMetalPrelitDraw((__bridge void *)enc, (__bridge void *)_device, scene.view_proj, samples, (int)_colorFormat, (int)_depthFormat, 1);
+    }
     [self drawParticles:scene encoder:enc];
     _passSamples = 1;
     _passMask = 0;

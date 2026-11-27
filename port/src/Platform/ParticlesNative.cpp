@@ -381,10 +381,8 @@ void PortRenderSkids(eView *view) {
 }
 
 void PortRenderWorldEffects(eView *view) {
-    // ePreDisplay (0x504C50, at the start of ___eDisplayFrame's world views)
-    // adds the sun's flares to the pool and reads the flare attributes.
-    RenderSunAsFlare();
-    UpdateLightFlareParameters();
+    // (ePreDisplay, at the start of the frame, added the sun's flares to the
+    // pool and read the flare attributes: FERenderMetal.cpp.)
     // 0x6DF2A3: with 0x9017E4 set, under IDI_WORLDPRELIT_FX with
     // ZWRITEENABLE 0, the world, car and pool flares. TODO(port): with
     // g_X360EffectsEnable (0x9017E0) the PC draws them through sub_6DAE20
@@ -405,8 +403,7 @@ void PortRenderWorldEffects(eView *view) {
         std::fprintf(stderr, "[prelit] %d polys (skids, flares), %d pool flares\n", gPolysThisFrame, ActivePoolIndex);
     }
     gPolysThisFrame = 0;
-    // ePostDisplay (0x504D00, at the end of eDisplayFrame).
-    eResestLightFlarePool();
+    // (ePostDisplay resets the flare pool at the end of the frame.)
 }
 
 // ---------------------------------------------------------------------------
