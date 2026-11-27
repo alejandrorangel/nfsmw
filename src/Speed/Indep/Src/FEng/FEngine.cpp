@@ -212,7 +212,6 @@ FEPackage *FEngine::PushPackage(const char *pPackageName, const u8 Level, const 
     } else {
         u8 *pData = pInterface->GetPackageData(pPackageName, &pBlockStart, bDeleteBlock);
         if (pData == nullptr) {
-            fprintf(stderr, "DBGPKG missing %s\n", pPackageName);
             return nullptr;
         }
         pPack = LoadPackage(pData, false);
