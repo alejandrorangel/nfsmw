@@ -138,7 +138,7 @@ bool WWorldPos::FindClosestFace(const WCollisionTriList &triList, const UMath::V
                         this->fFaceValid = 1;
                         this->fFace = tri;
                         foundFace = true;
-                        this->fSurface = reinterpret_cast<const Attrib::Collection *>(tri.fSurfaceRef);
+                        this->fSurface = reinterpret_cast<const Attrib::Collection *>(static_cast<const SimSurface *>(tri.fSurfaceRef));
                         bestDist = dist;
                         if (!this->fFace.fSurface.HasFlag(4))
                             break;

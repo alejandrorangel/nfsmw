@@ -42,12 +42,19 @@ struct WCollisionTri {
     }
 
     UMath::Vector3 fPt0;                  // offset 0x0, size 0xC
-    const struct SimSurface *fSurfaceRef; // offset 0xC, size 0x4
+    // The points are read as a Vector4[3] (WWorldMath::InTri etc.), so the
+    // surface pointer has to stay 4 bytes natively too.
+    PORT_PTR32(const struct SimSurface) fSurfaceRef; // offset 0xC, size 0x4
     UMath::Vector3 fPt1;                  // offset 0x10, size 0xC
     unsigned int fFlags;                  // offset 0x1C, size 0x4
     UMath::Vector3 fPt2;                  // offset 0x20, size 0xC
     WSurface fSurface;                    // offset 0x2C, size 0x2
     unsigned short PAD;                   // offset 0x2E, size 0x2
 };
+
+#if defined(EA_PORT_NATIVE)
+static_assert(sizeof(WCollisionTri) == 0x30 && offsetof(WCollisionTri, fPt1) == 0x10 && offsetof(WCollisionTri, fPt2) == 0x20,
+              "WCollisionTri points are read as a Vector4 array");
+#endif
 
 #endif
