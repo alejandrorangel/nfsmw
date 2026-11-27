@@ -42,6 +42,7 @@ class IStateManager : public UTL::COM::IUnknown {
 bool Exists();
 void StartProfile();
 void Suspend();
+void Update();
 float GetTime();
 SimRandom &GetRandom();
 unsigned int GetTick();
