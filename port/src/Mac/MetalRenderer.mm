@@ -164,6 +164,7 @@ struct Draw3D {
     id<MTLBuffer> index_buffer;
     id<MTLTexture> texture;
     id<MTLTexture> texture2;
+    id<MTLTexture> texture3;
     uint32_t first_index;
     uint32_t num_indices;
     uint32_t flags;
@@ -328,6 +329,7 @@ void PortMetal3DAdd(const Port3DDraw *draw) {
         d.index_buffer = (__bridge id<MTLBuffer>)draw->index_buffer;
         d.texture = (__bridge id<MTLTexture>)draw->texture;
         d.texture2 = (__bridge id<MTLTexture>)draw->texture2;
+        d.texture3 = (__bridge id<MTLTexture>)draw->texture3;
         d.first_index = draw->first_index;
         d.num_indices = draw->num_indices;
         d.flags = draw->flags;
@@ -395,7 +397,7 @@ fragment float4 fe_fs(FEOut in [[stage_in]], texture2d<float> tex [[texture(0)]]
 // matrix, so dot(world normal, view_x) is the WorldView x of a model normal).
 struct MeshConst { float4x4 mvp; float4x4 world; uint stride; uint shade; uint effect; uint pad; float4 eye; float4 view_x; };
 struct MeshOut { float4 pos [[position]]; float2 uv; float4 color; float3 normal; float3 world_pos; float3 local_normal; float3 local_pos;
-                 float4 d0; float4 d1; float3 inscatter; float2 uv1; float spec; };
+                 float4 d0; float4 d1; float3 inscatter; float2 uv1; float spec; float3 tlight; float3 tview; };
 
 // PortWorldFog (MetalBridge.h).
 struct WorldFog {
@@ -404,7 +406,15 @@ struct WorldFog {
     uint enabled;
     float4 ambient, diffuse;
     uint lit;
+    float4 specular;
+    float specular_power;
 };
+
+// shade bit 7: the draw has the normal and specular maps and 60-byte
+// vertices (tangent at float 11) the WORLDNORMALMAP/WORLDREFLECT shaders need.
+bool NormalMapped(constant MeshConst &c) {
+    return (c.effect == 1 || c.effect == 3) && (c.shade & 128) != 0;
+}
 
 // Effects with the PC scattering and AmbientColour/DiffuseColour lighting
 // terms (IDI_WORLD/WORLDREFLECT/WORLDNORMALMAP/GLOSSYWINDOW/TREE_FX);
@@ -464,7 +474,29 @@ vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffe
     o.inscatter = 0;
     o.uv1 = 0;
     o.spec = 0;
-    if (c.effect == 5) {
+    o.tlight = 0;
+    o.tview = 0;
+    if (NormalMapped(c)) {
+        // IDI_WORLDNORMALMAP_FX vs #13 / IDI_WORLDREFLECT_FX vs #13 (technique
+        // #0): tangent frame T (tangent), B = (N x T) T.w, N. oT2/oT3 =
+        // normalize(L) and V = normalize(eye - v) in it; oD0 = (AmbientColour.rgb
+        // * AmbientColour.w, 1) colour; oT5 = min(E, 1), oT4 = in-scatter.
+        float4 tangent = float4(v[11], v[12], v[13], v[14]);
+        float3 t = (c.world * float4(tangent.xyz, 0)).xyz;
+        float3 n = o.normal;
+        float3 b = cross(n, t) * tangent.w;
+        float3 l = fog.light_dir.xyz;
+        float3 vv = normalize(c.eye.xyz - o.world_pos);
+        o.tlight = normalize(float3(dot(t, l), dot(b, l), dot(n, l)));
+        o.tview = float3(dot(t, vv), dot(b, vv), dot(n, vv));
+        float3 extinction = 1;
+        if (fog.enabled) {
+            Scatter(o.world_pos, c.eye.xyz, fog, extinction, o.inscatter);
+        }
+        float3 ambient = fog.lit ? fog.ambient.rgb * fog.ambient.w : float3(1);
+        o.d0 = saturate(float4(ambient, 1) * o.color);
+        o.d1 = float4(min(extinction, 1.0), 0);
+    } else if (c.effect == 5) {
         // IDI_GLOSSYWINDOW_FX technique #0 'world' shader=1 (vs #11). L =
         // LocalLightVec, V = normalize(eye - v), R = 2 (N.L) N - L.
         float3 n = o.normal;
@@ -510,6 +542,7 @@ float3 EnvColour(float3 r) {
 }
 
 // EnvMapMatrix rows (Port3DDraw::envmap).
+
 struct EnvMatrix { float4 row[3]; };
 
 // PC CAR effect, technique 'car' shader=1 (IDI_CAR_FX vs #11 / ps #10), per
@@ -587,7 +620,8 @@ float4 CarShade(MeshOut in, float4 t, constant MeshConst &c, constant Material &
 // lit (model-space lights), bit 3 an environment cube is bound, bit 4 the
 // draw has an EnvMapMatrix.
 fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(0)]], texturecube<float> env_map [[texture(1)]],
-                        texture2d<float> tex2 [[texture(2)]],
+                        texture2d<float> tex2 [[texture(2)]], texture2d<float> tex3 [[texture(3)]],
+                        constant WorldFog &fog [[buffer(4)]],
                         constant MeshConst &c [[buffer(0)]], constant Material &m [[buffer(1)]], constant Lights &l [[buffer(2)]],
                         constant EnvMatrix &em [[buffer(3)]], sampler s [[sampler(0)]]) {
     float4 t = tex.sample(s, in.uv);
@@ -596,6 +630,24 @@ fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(
         out = t;
     } else if (c.effect == 4) {
         out = CarShade(in, t, c, m, l, (c.shade & 4) != 0, env_map, em);
+    } else if (NormalMapped(c)) {
+        // ps #12 of IDI_WORLDNORMALMAP_FX / IDI_WORLDREFLECT_FX: N from the
+        // normal map, L = normalize(oT2), R = 2 (N.L) N - L, V = normalize(oT3);
+        // spec = (R.V)^SpecularPower SpecularColour x specular map (x2 for
+        // WORLDREFLECT); c = (t (sat(N.L) DiffuseColour) + spec + t oD0) oT5,
+        // out 2c + oT4. WORLDNORMALMAP alpha t.a oD0.a; WORLDREFLECT alpha 1
+        // and + reflection x t.a oD0.a spec.r 2 SpecularColour.w (no reflection
+        // pass yet: SpecularColour.w = 0).
+        float3 nm = normalize((tex2.sample(s, in.uv).rgb - 0.5) * 2.0);
+        float3 sm = tex3.sample(s, in.uv).rgb;
+        float3 lt = normalize(in.tlight);
+        float ndl = dot(nm, lt);
+        float rv = saturate(dot(2.0 * ndl * nm - lt, normalize(in.tview)));
+        bool world_reflect = c.effect == 1;
+        float3 spec = pow(rv, fog.specular_power) * fog.specular.rgb * sm * (world_reflect ? 2.0 : 1.0);
+        float3 diffuse = fog.lit ? fog.diffuse.rgb : float3(0);
+        float3 col = (t.rgb * (saturate(ndl) * diffuse) + spec + t.rgb * in.d0.rgb) * in.d1.rgb;
+        out = float4(saturate(2.0 * col + in.inscatter), world_reflect ? 1.0 : t.a * in.d0.a);
     } else if (c.effect == 5) {
         // IDI_GLOSSYWINDOW_FX ps #10: 2 t.a spec + t oD0 + 2 t oD1 +
         // t.a reflection (WindowReflection, wrap, LOD bias -1) + in-scatter;
@@ -957,6 +1009,9 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 if (d.flags & PORT_3D_ENVMAP) {
                     c.shade |= 16;
                 }
+                if ((d.effect == 1 || d.effect == 3) && d.texture2 && d.texture3 && d.vertex_stride >= 60) {
+                    c.shade |= 128;
+                }
                 // IDI_CAR_FX technique: #1 (shader=3, PC's higher car detail)
                 // unless NFSMW_CAR_SHADER=1 asks for technique #0 (shader=1).
                 // TODO(port): follow the PC car-shader video setting.
@@ -984,6 +1039,8 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 [enc setFragmentSamplerState:_meshSamplers[gTextureFiltering.load() % 3] atIndex:0];
                 [enc setFragmentTexture:(env_map ? env_map : _blackCube) atIndex:1];
                 [enc setFragmentTexture:(d.texture2 ? d.texture2 : _black) atIndex:2];
+                [enc setFragmentTexture:(d.texture3 ? d.texture3 : _black) atIndex:3];
+                [enc setFragmentBytes:&fog length:sizeof(fog) atIndex:4];
                 [enc setFragmentBytes:d.envmap length:sizeof(d.envmap) atIndex:3];
                 [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
                 [enc setFragmentBytes:d.material length:sizeof(d.material) atIndex:1];

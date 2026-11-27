@@ -55,7 +55,9 @@ struct Port3DDraw {
     uint32_t vertex_stride; // bytes (multiple of 4, >= 36)
     void *index_buffer;  // 16-bit triangle list
     void *texture;       // id<MTLTexture>, or null for white
-    void *texture2;      // effect's second texture (GLOSSYWINDOW: WindowReflection), or null
+    void *texture2;      // effect's second texture (GLOSSYWINDOW: WindowReflection;
+                         // WORLDNORMALMAP/WORLDREFLECT: NormalMapTexture), or null
+    void *texture3;      // WORLDNORMALMAP/WORLDREFLECT: SpecularMapTexture, or null
     uint32_t first_index;
     uint32_t num_indices;
     uint32_t flags;  // PORT_3D_*
@@ -121,6 +123,12 @@ struct PortWorldFog {
     float diffuse[4];       // DiffuseColour: rgb (<= 1), w
     uint32_t lit;           // ambient/diffuse lighting on (else ambient 1x, no diffuse)
     float pad2[3];
+    // The normal-mapped world effects' SpecularColour (TimeOfDay +0x40, the
+    // blended 'timeofdaylighting' SpecularColour; sub_6D6AA0) and
+    // SpecularPower (0x8FADC0 = 11).
+    float specular[4];
+    float specular_power;
+    float pad3[3];
 };
 // Scattering and lighting for this 3D frame (call after PortMetal3DBeginFrame; null = off).
 void PortMetal3DSetFog(const PortWorldFog *fog);

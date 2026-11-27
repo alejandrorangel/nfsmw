@@ -163,6 +163,10 @@ void DrawSolid(eSolid *solid, const M44 world, const eDynamicLightContext *light
         d.effect = group.Effect;
         if (group.Effect == PORT_EFFECT_GLOSSYWINDOW) {
             d.texture2 = WindowReflectionTexture();
+        } else if (group.Effect == PORT_EFFECT_WORLDNORMALMAP || group.Effect == PORT_EFFECT_WORLDREFLECT) {
+            // sub_6C6D10: texture slots 1 (NormalMapTexture) and 3 (SpecularMapTexture).
+            d.texture2 = MetalTextureOf(PortSolidTexture(solid, group.TextureSlots[1]));
+            d.texture3 = MetalTextureOf(PortSolidTexture(solid, group.TextureSlots[3]));
         }
         int light_index = group.TextureSlots[5];
         const eLightMaterial *light_material = nullptr;
@@ -408,6 +412,18 @@ void SetTimeOfDayLighting(V3 sun, float cloud, PortWorldFog &f) {
     blend(la.AmbientColour(), lb.AmbientColour(), ha.AmbientColour(), hb.AmbientColour(), f.ambient);
     f.diffuse[3] = 1.0f;
     f.ambient[3] = 4.0f;
+    {
+        // SpecularColour (TimeOfDay +0x40, not clamped); w (eView +0x36A0,
+        // the reflection strength) stays 0 until a reflection pass exists.
+        const UMath::Vector4 &a0 = la.SpecularColour(), &a1 = lb.SpecularColour(), &b0 = ha.SpecularColour(), &b1 = hb.SpecularColour();
+        const float lo[3] = {a0.x + (a1.x - a0.x) * cloud, a0.y + (a1.y - a0.y) * cloud, a0.z + (a1.z - a0.z) * cloud};
+        const float hi[3] = {b0.x + (b1.x - b0.x) * cloud, b0.y + (b1.y - b0.y) * cloud, b0.z + (b1.z - b0.z) * cloud};
+        for (int i = 0; i < 3; i++) {
+            f.specular[i] = hi[i] + (lo[i] - hi[i]) * low_weight;
+        }
+        f.specular[3] = 0.0f;
+        f.specular_power = 11.0f; // 0x8FADC0
+    }
     {
         float lo = la.CarSpecScale() + (lb.CarSpecScale() - la.CarSpecScale()) * cloud;
         float hi = ha.CarSpecScale() + (hb.CarSpecScale() - ha.CarSpecScale()) * cloud;
