@@ -491,11 +491,25 @@ float4 CarShade(MeshOut in, float4 t, constant MeshConst &c, constant Material &
     for (int i = 0; i < 3; i++) {
         lights += saturate(dot(n, light_dir[i]) + 0.1) * light_col[i];
     }
-    float4 diffuse = m.diffuse_min + ndotv * m.diffuse_range;
-    float3 d = ao * lights * diffuse.rgb;
-    float3 h = normalize(v + light_dir[0]);
-    float nh = saturate(dot(n, h));
-    float highlight = 2.0 * pow(nh, 8.0);
+    float4 diffuse = saturate(m.diffuse_min + ndotv * m.diffuse_range);
+    // vs_1_1 colour outputs are clamped: oD0 = diffuse lighting, oD1.xyz =
+    // specular colour, oD1.w = env-map strength.
+    float3 d = saturate(ao * lights * diffuse.rgb);
+    spec = saturate(spec);
+    env_strength = saturate(env_strength);
+    float highlight;
+    bool technique1 = (c.shade & 64) != 0;
+    if (technique1) {
+        // technique #1 'car' shader=3 (ps #8): Phong highlight from the key
+        // light reflected about N, against the eye vector: 2 (R.V)^16.
+        float3 refl = 2.0 * dot(n, light_dir[0]) * n - light_dir[0];
+        float rv = saturate(dot(refl, v));
+        highlight = 2.0 * pow(rv, 16.0);
+    } else {
+        // technique #0 'car' shader=1 (ps #10): 2 (N.H)^8.
+        float3 h = normalize(v + light_dir[0]);
+        highlight = 2.0 * pow(saturate(dot(n, h)), 8.0);
+    }
     // vs #11: oT0 = (2 (N.V) N - V) * WorldView; ps #10: t0 = texCUBE(oT0),
     // env term t0 * oD1.w * oD0.w.
     float3 r = 2.0 * ndotv * n - v;
@@ -514,7 +528,10 @@ float4 CarShade(MeshOut in, float4 t, constant MeshConst &c, constant Material &
     if (c.shade & 32) {
         return float4(env, 1); // NFSMW_SHADE=envmap: the cube lookup alone
     }
-    float3 rgb = t.rgb * d + highlight * diffuse.a * spec + env * env_strength * diffuse.a;
+    // ps #8 also scales the env term by 0.5 and the lit colour by the shadow
+    // map factor (no car shadow map natively yet: 1).
+    float env_scale = technique1 ? 0.5 : 1.0;
+    float3 rgb = t.rgb * d + highlight * diffuse.a * spec + env * env_strength * diffuse.a * env_scale;
     return float4(rgb, t.a * diffuse.a);
 }
 
@@ -841,6 +858,13 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 }
                 if (d.flags & PORT_3D_ENVMAP) {
                     c.shade |= 16;
+                }
+                // IDI_CAR_FX technique: #1 (shader=3, PC's higher car detail)
+                // unless NFSMW_CAR_SHADER=1 asks for technique #0 (shader=1).
+                // TODO(port): follow the PC car-shader video setting.
+                static const char *car_shader = getenv("NFSMW_CAR_SHADER");
+                if (!(car_shader && strcmp(car_shader, "1") == 0)) {
+                    c.shade |= 64;
                 }
                 // mvp = world * view_proj (row vectors).
                 for (int i = 0; i < 4; i++) {
