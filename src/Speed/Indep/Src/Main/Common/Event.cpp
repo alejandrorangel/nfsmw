@@ -141,6 +141,34 @@ void *Event::operator new(size_t size) {
 void Event::operator delete(void *ptr, size_t size) {
     // EventManager::RunEvents advances gDeletionPoint.
 }
+
+// PC EmbedField(char const *) 0x629A90; the Hermes::Message overload is inlined
+// into EDeliverMessage's ctor (0x62BA50). Copies the object into the queue right
+// behind the event being constructed and grows that event's stride to cover it.
+static void *EmbedBytes(Event *event, const void *src, std::size_t size) {
+    char *dst = gCreationPoint;
+    std::size_t padded = (size + 0xF) & ~static_cast<std::size_t>(0xF);
+
+    memcpy(dst, src, size);
+    event->fEventSize += padded;
+    *reinterpret_cast<size_t *>(reinterpret_cast<char *>(event) - kNativeEventHeader) += padded;
+    gCreationPoint += padded;
+    return dst;
+}
+
+const char *EventManager::EmbedField(Event *event, const char *ptr) {
+    if (ptr == nullptr) {
+        return nullptr;
+    }
+    return static_cast<const char *>(EmbedBytes(event, ptr, GetEmbeddedObjectSize(ptr)));
+}
+
+Hermes::Message *EventManager::EmbedField(Event *event, Hermes::Message *ptr) {
+    if (ptr == nullptr) {
+        return nullptr;
+    }
+    return static_cast<Hermes::Message *>(EmbedBytes(event, ptr, GetEmbeddedObjectSize(ptr)));
+}
 #else
 void *Event::operator new(size_t size) {
     void *result = gCreationPoint;

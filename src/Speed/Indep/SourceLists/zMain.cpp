@@ -11,6 +11,8 @@
 #include "Speed/Indep/Src/Generated/Events/ECommitAudioAssets.cpp"
 
 #include "Speed/Indep/Src/Generated/Events/ECommitRenderAssets.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EDeliverMessage.cpp"
 #endif
 
 #include "Speed/Indep/Src/Input/Common/action.cpp"
