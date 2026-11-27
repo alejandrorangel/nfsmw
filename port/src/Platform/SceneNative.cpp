@@ -379,8 +379,13 @@ void SetTimeOfDayLighting(V3 sun, float cloud, PortWorldFog &f) {
     }
 }
 
+bool gHaveSun = false;
+V3 gSunDirection;
+
 void SetupFrameLighting(eView *view) {
     V3 sun = TickSunDirection();
+    gSunDirection = sun;
+    gHaveSun = true;
     PortWorldFog f = {};
     SetWorldFog(sun, f);
     float cloud = view && view->Precipitation ? view->Precipitation->GetCloudIntensity() : 0.0f;
@@ -389,6 +394,18 @@ void SetupFrameLighting(eView *view) {
 }
 
 } // namespace
+
+// The time-of-day sun direction for elSetupLights' sun lights (PC reads
+// TimeOfDayPointer +0x180); false until the first world frame.
+bool PortGetSunDirection(float out[3]) {
+    if (!gHaveSun) {
+        return false;
+    }
+    out[0] = gSunDirection.x;
+    out[1] = gSunDirection.y;
+    out[2] = gSunDirection.z;
+    return true;
+}
 
 namespace {
 

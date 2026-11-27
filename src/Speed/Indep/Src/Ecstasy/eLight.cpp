@@ -242,9 +242,11 @@ void elResetLightContext(eDynamicLightContext *light_context) {
 // three directional lights -- directions (unit, pointing at the light) in
 // the columns of LocalDirectionMatrix, colours (rgb * scale) in the rows of
 // LocalColourMatrix -- in the space of local_world when given, else world.
-// Directions come from (theta + 180, 90 - phi) in degrees. World-space and
-// world-position lights follow the PC; camera-space and sun lights are
-// approximated (camera rotation, a fixed high sun) until the sky is ported.
+// Directions come from (theta + 180, 90 - phi) in degrees. Sun lights are
+// offset by the time-of-day sun direction (TimeOfDayPointer +0x180, kept by
+// SceneNative); camera-space lights are rotated out of the view.
+bool PortGetSunDirection(float out[3]); // SceneNative.cpp
+
 int elSetupLights(eDynamicLightContext *light_context, eShaperLightRig *shaper_lights, bVector3 *local_pos, bMatrix4 *local_world,
                   bMatrix4 *world_view, eView *view) {
     if (light_context == nullptr) {
@@ -253,7 +255,8 @@ int elSetupLights(eDynamicLightContext *light_context, eShaperLightRig *shaper_l
     if (shaper_lights == nullptr) {
         return 1;
     }
-    static const bVector3 kSun(0.3f, 0.35f, 0.88f);
+    float sun[3] = {0.3f, 0.35f, 0.88f};
+    PortGetSunDirection(sun);
     bVector3 dirs[3];
     for (int i = 0; i < 3; i++) {
         eShaperLight &light = shaper_lights->Lights[i + 1];
@@ -269,19 +272,25 @@ int elSetupLights(eDynamicLightContext *light_context, eShaperLightRig *shaper_l
             case LIGHT_OPPOSITE_SUN_DIRECTION: {
                 bVector3 sun_angles;
                 float sign = light.CameraSpace == LIGHT_SUN_DIRECTION ? 1.0f : -1.0f;
-                CartesianToSpherical(&sun_angles, sign * kSun.x, sign * kSun.y, sign * kSun.z);
-                SphericalToCartesian(&d, light.Theta + 180.0f + sun_angles.x * (360.0f / 65536.0f), 90.0f - light.Phi, 1.0f);
+                CartesianToSpherical(&sun_angles, sign * sun[0], sign * sun[1], sign * sun[2]);
+                // 0x5022F8: angles truncated to bAngle, in degrees.
+                float theta = static_cast<float>(static_cast<uint16>(static_cast<int>(sun_angles.x))) * (360.0f / 65536.0f) + light.Theta;
+                float phi = static_cast<float>(static_cast<uint16>(static_cast<int>(sun_angles.y))) * (360.0f / 65536.0f) + 90.0f + light.Phi;
+                SphericalToCartesian(&d, theta + 180.0f, 90.0f - phi, 1.0f);
                 break;
             }
             case LIGHT_CAMERA_SPACE: {
                 bVector3 c;
                 SphericalToCartesian(&c, light.Theta + 180.0f, 90.0f - light.Phi, 1.0f);
-                // Camera space -> world: rows of the world->camera rotation.
-                bMatrix4 *wc = (view && view->GetCamera()) ? view->GetCamera()->GetWorldToCameraMatrix() : nullptr;
+                // 0x502235: (x forward, y left, z up) -> camera (-y, -z, x),
+                // then out of the view by the inverse world->view rotation
+                // (v * transpose(R): dot with R's rows).
+                bVector3 v(-c.y, -c.z, c.x);
+                bMatrix4 *wc = (view && view->GetCamera()) ? view->GetCamera()->GetWorldToCameraMatrix() : world_view;
                 if (wc) {
-                    d.x = -c.x * wc->v0.x + -c.y * wc->v0.y + c.z * wc->v0.z;
-                    d.y = -c.x * wc->v1.x + -c.y * wc->v1.y + c.z * wc->v1.z;
-                    d.z = -c.x * wc->v2.x + -c.y * wc->v2.y + c.z * wc->v2.z;
+                    d.x = v.x * wc->v0.x + v.y * wc->v0.y + v.z * wc->v0.z;
+                    d.y = v.x * wc->v1.x + v.y * wc->v1.y + v.z * wc->v1.z;
+                    d.z = v.x * wc->v2.x + v.y * wc->v2.y + v.z * wc->v2.z;
                 } else {
                     d = c;
                 }
