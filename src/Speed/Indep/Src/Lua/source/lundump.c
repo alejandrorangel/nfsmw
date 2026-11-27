@@ -6,6 +6,11 @@
 
 #define lundump_c
 
+#if defined(EA_PORT_NATIVE) && !defined(TRUST_BINARIES)
+/* speed.exe has no luaG_checkcode: the game trusts its compiled chunks. */
+#define TRUST_BINARIES
+#endif
+
 #include "lua.h"
 
 #include "ldebug.h"
@@ -76,7 +81,12 @@ static int LoadInt(LoadState *S) {
 }
 
 static size_t LoadSize(LoadState *S) {
+#if defined(EA_PORT_NATIVE)
+    /* The game's chunks were compiled for a 32-bit VM. */
+    unsigned int x;
+#else
     size_t x;
+#endif
     LoadBlock(S, &x, sizeof(x));
     return x;
 }
@@ -226,7 +236,11 @@ static void LoadHeader(LoadState *S) {
                       S->name, V(version), V(VERSION0));
     S->swap = (luaU_endianness() != LoadByte(S)); /* need to swap bytes? */
     TESTSIZE(sizeof(int), "int");
+#if defined(EA_PORT_NATIVE)
+    TESTSIZE(sizeof(unsigned int), "size_t");
+#else
     TESTSIZE(sizeof(size_t), "size_t");
+#endif
     TESTSIZE(sizeof(Instruction), "Instruction");
     TESTSIZE(SIZE_OP, "OP");
     TESTSIZE(SIZE_A, "A");

@@ -110,7 +110,8 @@ typedef LUA_UACNUMBER l_uacNumber;
 ** type for virtual-machine instructions
 ** must be an unsigned with (at least) 4 bytes (see details in lopcodes.h)
 */
-#ifdef EA_PLATFORM_PLAYSTATION2
+#if defined(EA_PLATFORM_PLAYSTATION2) || defined(EA_PORT_NATIVE)
+/* 4 bytes, as in the game's compiled chunks. */
 typedef unsigned int Instruction;
 #else
 typedef unsigned long Instruction;

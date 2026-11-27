@@ -78,7 +78,12 @@ typedef LUA_NUMBER lua_Number;
 
 /* mark for all API functions */
 #ifndef LUA_API
+#if defined(__cplusplus)
+/* The VM is built with C linkage (zLua.cpp); let C++ game code call it. */
+#define LUA_API extern "C"
+#else
 #define LUA_API extern
+#endif
 #endif
 
 /*
