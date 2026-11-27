@@ -11,6 +11,8 @@
 DECLARE_CONTAINER_TYPE(LuaLargeFreeBlock);
 DECLARE_CONTAINER_TYPE(LuaEmergencyAlloc);
 
+// The game's Lua VM. On PC it lives in a fixed memory pool that is snapshotted
+// after the bindings are made, so the heap can be reset to that point.
 // total size: 0x7C
 class LuaRuntime {
   public:
@@ -28,6 +30,8 @@ class LuaRuntime {
     static void Shutdown();
 
     void TakeResetSnapshot();
+    void BeginDelivery();
+    void EndDelivery();
 
     static LuaRuntime &Get() {
         return *mObj;
@@ -42,7 +46,15 @@ class LuaRuntime {
         return mState;
     }
 
+    static void DumpStack(lua_State *luaState);
+    static int HandleGlobalIndex(lua_State *luaState);
+
   private:
+    LuaRuntime(unsigned int memPoolSize);
+    ~LuaRuntime();
+
+    void CreateState();
+
     static LuaRuntime *mObj;
 
     lua_State *mState;                                                             // offset 0x0, size 0x4

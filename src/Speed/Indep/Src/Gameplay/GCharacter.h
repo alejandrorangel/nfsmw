@@ -10,10 +10,35 @@
 #include "Speed/Indep/Src/Interfaces/Simables/IVehicle.h"
 #include "Speed/Indep/Src/Sim/SimAttachable.h"
 
+class GMarker;
+
+// A scripted driver (race opponent, scripted cop or traffic car); once spawned
+// it owns a vehicle.
 // total size: 0x80
 class GCharacter : public GRuntimeInstance, public UTL::COM::Object, public IAttachable {
   public:
+    enum { kType = kGameplayObjType_Character };
+
     GCharacter(const Attrib::Key &triggerKey);
+    ~GCharacter() override;
+
+    GameplayObjType GetType() const override {
+        return kGameplayObjType_Character;
+    }
+
+    IVehicle *GetSpawnedVehicle() const {
+        return mVehicle;
+    }
+
+    void Unspawn();
+
+    // IAttachable
+    bool Attach(UTL::COM::IUnknown *pOther) override;
+    bool Detach(UTL::COM::IUnknown *pOther) override;
+    bool IsAttached(const UTL::COM::IUnknown *pOther) const override;
+    void OnAttached(IAttachable *pOther) override;
+    void OnDetached(IAttachable *pOther) override;
+    const IAttachable::List *GetAttachments() const override;
 
   private:
     UMath::Vector3 mSpawnPos;       // offset 0x40, size 0xC

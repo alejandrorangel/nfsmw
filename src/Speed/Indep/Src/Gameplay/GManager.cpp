@@ -1,5 +1,6 @@
 #include "Speed/Indep/Src/Gameplay/GManager.h"
 
+#include "Speed/Indep/Src/Gameplay/GActivity.h"
 #include "Speed/Indep/Src/Gameplay/GRaceDatabase.h"
 #include "Speed/Indep/Src/Gameplay/GRaceStatus.h"
 #include "Speed/Indep/Src/Gameplay/GVault.h"
@@ -12,6 +13,12 @@
 #include "Speed/Indep/bWare/Inc/bWare.hpp"
 
 #include <algorithm>
+#if defined(EA_PORT_NATIVE)
+#include "Speed/Indep/Src/Interfaces/Simables/ISimable.h"
+#include "Speed/Indep/Src/Sim/Simulation.h"
+#include <cstdio>
+#include <cstdlib>
+#endif
 
 // Only the vault side of GManager is implemented here so far: loading the
 // gameplay vault pack, the vault table and vault lookup, which the race
@@ -255,8 +262,9 @@ void GManager::LoadVaultSync(GVault *vault) {
     mVaultPackFile = nullptr;
 
     vault->InitTransient(binBlock, mTempLoadData);
-    // PC: if (mInGameplay) ConnectRuntimeInstances(); -- runtime instances
-    // aren't ported yet.
+    if (mInGameplay) {
+        ConnectRuntimeInstances();
+    }
 }
 
 // PC: 0x5F1780. The smallest right shift that keeps the top uniqueBits of every
@@ -369,6 +377,12 @@ void GManager::PreBeginGameplay() {
 
 // PC: 0x603500.
 void GManager::BeginGameplay() {
+#if defined(EA_PORT_NATIVE)
+    // InitializeRaceStreaming normally sized the instance map first.
+    if (mKeyToInstanceMap == nullptr) {
+        AllocateInstanceMap();
+    }
+#endif
     for (unsigned int onVault = 0; onVault < mVaultCount; onVault++) {
         if (mVaults[onVault].IsLoaded()) {
             mVaults[onVault].CreateGameplayObjects();
@@ -378,8 +392,7 @@ void GManager::BeginGameplay() {
     if (startupRace != nullptr) {
         startupRace->CreateRaceActivity();
     }
-    // TODO(port): ConnectRuntimeInstances (PC: 0x5F18A0); the gameplay
-    // runtime instances aren't ported.
+    ConnectRuntimeInstances();
     StartActivities();
     // TODO(port): WCollisionAssets::AddPackLoadCallback(NotifyCollisionPackLoaded)
     // (icons per collision pack aren't ported).
@@ -407,10 +420,10 @@ void GManager::StartActivities() {
     GRaceCustom *startupRace = GRaceDatabase::Get().GetStartupRace();
     GRaceBin *raceBin = GRaceStatus::Get().GetCurrentBin();
     if (startupRace != nullptr) {
-        // TODO(port): startupRace->GetRaceActivity()->Run() (PC: 0x5F93D0).
-        // GActivity and the Lua race scripts it drives aren't ported, so
-        // nothing calls Game_SetRaceActivity/Game_AddPlayer/Game_StartRace and
-        // the race status gets no race parameters or racers.
+        GActivity *raceActivity = startupRace->GetRaceActivity();
+        if (raceActivity != nullptr) {
+            raceActivity->Run();
+        }
         GRace::Context context = GRaceDatabase::Get().GetStartupRaceContext();
         GRaceStatus::Get().SetRaceContext(context);
         startWorld = context == GRace::kRaceContext_Career && startWorld;
@@ -422,9 +435,200 @@ void GManager::StartActivities() {
         }
     }
     if (startWorld) {
-        // TODO(port): StartWorldActivities(startupRace == nullptr) and running
-        // the bin's GActivity when !binChanged; not ported.
-        (void)binChanged;
+        StartWorldActivities(startupRace == nullptr);
+        if (!binChanged && raceBin != nullptr) {
+            GActivity *binActivity = GRuntimeInstance::FindObject<GActivity>(raceBin->GetCollectionKey());
+            if (binActivity != nullptr && !binActivity->GetIsRunning()) {
+                binActivity->Run();
+            }
+        }
+    }
+}
+
+// PC: 0x5F95F0. Runs the auto-start activities (the free-roam-only ones only
+// when there's no race).
+void GManager::StartWorldActivities(bool startFreeRoamOnly) {
+    for (GObjectIterator<GActivity> iter(0xffffffff); iter.IsValid(); iter.Advance()) {
+        GActivity *activity = iter.GetInstance();
+        bool autoStart = activity->AutoStart();
+        if ((!activity->FreeRoamOnly() || startFreeRoamOnly) && autoStart) {
+            activity->Run();
+        }
+    }
+}
+
+// PS2: 0x2F0EF8. Stops the activities and tears the runtime instances down
+// so the next session starts clean.
+void GManager::EndGameplay() {
+    SuspendAllActivities();
+    for (unsigned int onVault = 0; onVault < mVaultCount; onVault++) {
+        if (mVaults[onVault].GetObjectBlock() != nullptr) {
+            mVaults[onVault].DestroyGameplayObjects();
+        }
+    }
+    mInGameplay = false;
+}
+
+// PS2: inlined. Stops every running activity.
+void GManager::SuspendAllActivities() {
+    for (GObjectIterator<GActivity> iter(0xffffffff); iter.IsValid(); iter.Advance()) {
+        iter.GetInstance()->Suspend();
+    }
+}
+
+// PC: 0x5E40F0. Room for every resident object plus two transient vaults'
+// worth, with 50% slack, rounded up to a power of two (at least 0x100).
+void GManager::AllocateInstanceMap() {
+    unsigned int largestTransient = 0;
+    mMaxObjects = 0;
+    for (unsigned int onVault = 0; onVault < mVaultCount; onVault++) {
+        unsigned int count = mVaults[onVault].GetObjectCount();
+        if (mVaults[onVault].IsResident()) {
+            mMaxObjects += count;
+        } else if (count > largestTransient) {
+            largestTransient = count;
+        }
+#if defined(EA_PORT_NATIVE)
+        // Every transient vault stays loaded natively (no race streaming), so
+        // all of their instances exist at once.
+        if (!mVaults[onVault].IsResident()) {
+            mMaxObjects += count;
+        }
+#endif
+    }
+    mMaxObjects += largestTransient * 2;
+    unsigned int wanted = mMaxObjects + (mMaxObjects >> 1);
+    unsigned int size = 0x100;
+    while (size < wanted) {
+        size <<= 1;
+    }
+    mInstanceHashTableSize = size;
+    mInstanceHashTableMask = size - 1;
+    mKeyToInstanceMap = static_cast<HashEntry *>(bMalloc(static_cast<int>(size * sizeof(HashEntry)), 0));
+    bMemSet(mKeyToInstanceMap, 0, size * sizeof(HashEntry));
+    mWorstHashCollision = 0;
+}
+
+// PC: 0x5EF5B0. The bin/race stream slots and unloading the preloaded
+// transient vaults are skipped natively (every vault stays loaded from the
+// pack image, see LoadVaultSync); only the instance map is set up.
+void GManager::InitializeRaceStreaming() {
+    if (mKeyToInstanceMap == nullptr) {
+        AllocateInstanceMap();
+    }
+}
+
+// PC: 0x5E41A0. Open addressing on the reduced collection key.
+void GManager::RegisterInstance(GRuntimeInstance *instance) {
+    if (mInstanceHashTableSize == 0) {
+        return;
+    }
+    uint32 key32 = Get32BitCollectionKey(instance->GetCollection());
+    uint32 slot = key32;
+    for (unsigned int probes = 0; probes < mInstanceHashTableSize; probes++, slot++) {
+        slot &= mInstanceHashTableMask;
+        if (mKeyToInstanceMap[slot].mInstance == nullptr) {
+            if (probes > mWorstHashCollision) {
+                mWorstHashCollision = probes;
+            }
+            mKeyToInstanceMap[slot].mKey32 = key32;
+            mKeyToInstanceMap[slot].mInstance = instance;
+            return;
+        }
+    }
+}
+
+// PS2: 0x2F0C30 (guess at the details). The key stays in the slot so later
+// probes still step over it.
+void GManager::UnregisterInstance(GRuntimeInstance *instance) {
+    for (unsigned int slot = 0; slot < mInstanceHashTableSize; slot++) {
+        if (mKeyToInstanceMap[slot].mInstance == instance) {
+            mKeyToInstanceMap[slot].mInstance = nullptr;
+        }
+    }
+}
+
+// PC: 0x5DD930.
+GRuntimeInstance *GManager::FindInstance(Attrib::Key key) const {
+    if (mInstanceHashTableSize == 0) {
+        return nullptr;
+    }
+    uint32 key32 = Get32BitCollectionKey(key);
+    uint32 slot = key32;
+    for (unsigned int probes = 0; probes <= mWorstHashCollision; probes++, slot++) {
+        slot &= mInstanceHashTableMask;
+        if (mKeyToInstanceMap[slot].mKey32 == key32 && mKeyToInstanceMap[slot].mInstance != nullptr) {
+            return mKeyToInstanceMap[slot].mInstance;
+        }
+    }
+    return nullptr;
+}
+
+// PC: 0x5F18A0. Rebuilds every instance's connection table from its own and
+// its parents' GCollectionKey attributes and its children.
+void GManager::ConnectRuntimeInstances() {
+    for (unsigned int slot = 0; slot < mInstanceHashTableSize; slot++) {
+        GRuntimeInstance *instance = mKeyToInstanceMap[slot].mInstance;
+        if (instance == nullptr) {
+            continue;
+        }
+        instance->ResetConnections();
+        ConnectInstanceReferences(instance, *instance);
+        Attrib::Key parent = instance->GetParent();
+        while (parent != 0) {
+            Attrib::Gen::gameplay parentObj(parent, 0, nullptr);
+            ConnectInstanceReferences(instance, parentObj);
+            parent = parentObj.GetParent();
+        }
+        ConnectChildren(instance);
+        instance->LockConnections();
+    }
+}
+
+// PC: 0x5E4210.
+void GManager::ConnectInstanceReferences(GRuntimeInstance *runtimeInstance, const Attrib::Gen::gameplay &collection) {
+    Attrib::Type collectionKeyType = Attrib::StringToKey("GCollectionKey");
+    for (Attrib::AttributeIterator iter = collection.Iterator(); iter.Valid(); iter.Advance()) {
+        Attrib::Key attribKey = iter.GetKey();
+        if (attribKey == 0x916e0e78) { // Children
+            continue;
+        }
+        Attrib::Attribute attrib = collection.Get(attribKey);
+        if (!attrib.IsValid() || attrib.GetType() != collectionKeyType) {
+            continue;
+        }
+        const Attrib::Definition *def = mGameplayClass->GetDefinition(attribKey);
+        unsigned int count = def != nullptr && def->IsArray() ? attrib.GetLength() : 1;
+        for (unsigned int index = 0; index < count; index++) {
+            const GCollectionKey *ref = static_cast<const GCollectionKey *>(collection.GetAttributePointer(attribKey, index));
+            if (ref == nullptr) {
+                continue;
+            }
+            GRuntimeInstance *target = FindInstance(ref->mCollectionKey);
+            if (target != nullptr) {
+                runtimeInstance->ConnectToInstance(attribKey, index, target);
+            }
+        }
+    }
+}
+
+// PC: 0x5E43D0. Children are connected under their name (the last component
+// of the collection name).
+void GManager::ConnectChildren(GRuntimeInstance *runtimeInstance) {
+    unsigned int numChildren = runtimeInstance->Num_Children();
+    for (unsigned int index = 0; index < numChildren; index++) {
+        GRuntimeInstance *child = FindInstance(runtimeInstance->Children(index).mCollectionKey);
+        if (child == nullptr) {
+            continue;
+        }
+        const char *name = child->CollectionName();
+        for (const char *p = name + bStrLen(name) - 1; p >= name; p--) {
+            if (*p == '/' || *p == '\\') {
+                name = p + 1;
+                break;
+            }
+        }
+        runtimeInstance->ConnectToInstance(Attrib::StringToKey(name), 0, child);
     }
 }
 
@@ -441,6 +645,26 @@ void GManager::Update(float dT) {
     // TODO(port): UnspawnUselessCharacters, ServicePendingCharacters and
     // UpdatePursuit (characters and the pursuit bookkeeping aren't ported).
     UpdateTimers(dT);
+#if defined(EA_PORT_NATIVE)
+    void PortUpdateRaceCountdownFallback(); // EShowRaceCountdown.cpp
+    PortUpdateRaceCountdownFallback();
+    // NFSMW_TRACE_LUA: the race status every 5 s of sim time.
+    static float sNextTrace = 0.0f;
+    if (std::getenv("NFSMW_TRACE_LUA") != nullptr && Sim::GetTime() >= sNextTrace) {
+        sNextTrace = Sim::GetTime() + 5.0f;
+        GRaceStatus &raceStatus = GRaceStatus::Get();
+        GRaceParameters *parms = raceStatus.GetRaceParameters();
+        std::fprintf(stderr, "[race] t=%.1f mode=%d race=%s racers=%d clock=%.2f\n", Sim::GetTime(), static_cast<int>(raceStatus.GetPlayMode()),
+                     parms != nullptr ? parms->GetEventID() : "-", raceStatus.GetRacerCount(), raceStatus.GetRaceTimeElapsed());
+        for (int i = 0; i < raceStatus.GetRacerCount(); i++) {
+            GRacerInfo &info = raceStatus.GetRacerInfo(i);
+            ISimable *isim = info.GetSimable();
+            UMath::Vector3 pos = isim != nullptr ? isim->GetPosition() : UMath::Vector3::kZero;
+            std::fprintf(stderr, "[race]   %d %-12s rank=%d pct=%.1f pos=(%.1f %.1f %.1f)%s\n", i, info.GetName() != nullptr ? info.GetName() : "?",
+                         info.GetRanking(), info.GetPctRaceComplete(), pos.x, pos.y, pos.z, isim == nullptr ? " (no car)" : "");
+        }
+    }
+#endif
     // TODO(port): UpdatePendingSMS, UpdateTriggerAvailability and
     // UpdateIconVisibility (SMS, triggers and icons aren't ported).
 }

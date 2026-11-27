@@ -25,6 +25,9 @@ struct LuaAttribAccessors {
     void (*mSetAttrib)(const LuaAttribAccessInfo &);  // offset 0x4, size 0x4
 };
 
+// Lets scripts read a runtime instance's attributes as fields
+// (activity.NumLaps, activity.Checkpoint[2], activity.Checkpoint.Count);
+// GCollectionKey attributes and children read as the connected instances.
 // total size: 0x14
 class LuaAttributes {
   public:
@@ -37,7 +40,14 @@ class LuaAttributes {
         return *fObj;
     }
 
+    void PushAttributeValue(const LuaAttribAccessInfo &info, bool arrayAccess);
+
   private:
+    LuaAttributes();
+    ~LuaAttributes();
+
+    void BuildAttributeTypeTable();
+
     static LuaAttributes *fObj;
 
     Attrib::Class *fGameplayClass;                                             // offset 0x0, size 0x4

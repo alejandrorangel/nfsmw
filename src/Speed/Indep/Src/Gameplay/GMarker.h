@@ -3,11 +3,18 @@
 
 #include "Speed/Indep/Src/Gameplay/GRuntimeInstance.h"
 
+// A position and heading in the world (spawn points, shortcuts...).
+// total size: 0x40
 class GMarker : public GRuntimeInstance {
   public:
-    GMarker(const unsigned int &markerKey);
+    enum { kType = kGameplayObjType_Marker };
 
-    GameplayObjType GetType() const override {}
+    GMarker(const unsigned int &markerKey);
+    ~GMarker() override;
+
+    GameplayObjType GetType() const override {
+        return kGameplayObjType_Marker;
+    }
 
     const UMath::Vector3 &GetPosition() const {
         return mPosition;

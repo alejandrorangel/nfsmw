@@ -4,6 +4,7 @@
 #include "Speed/Indep/Libs/Support/Utility/UMath.h"
 #include "Speed/Indep/Src/Frontend/HUD/feMinimap.hpp"
 #include "Speed/Indep/Src/Gameplay/GManager.h"
+#include "Speed/Indep/Src/Gameplay/GObjectBlock.h"
 #include "Speed/Indep/Src/Gameplay/GRaceStatus.h"
 #include "Speed/Indep/Src/Gameplay/GVault.h"
 #include "Speed/Indep/Src/Misc/Config.h"
@@ -68,10 +69,9 @@ template <typename T> bool SetCollectionAttribute(Attrib::Gen::gameplay &record,
 }
 
 // PC: GRuntimeInstance ring lists (0x5E1820 activity, 0x5E1880 character,
-// 0x5E18C0 marker). Runtime instances aren't created by the port yet (no
-// GObjectBlock), so there is nothing to find.
+// 0x5E18C0 marker).
 template <typename T> T *FindRuntimeInstance(Attrib::Key key) {
-    return nullptr;
+    return GRuntimeInstance::FindObject<T>(key);
 }
 
 } // namespace
@@ -859,10 +859,11 @@ void GRaceCustom::CreateRaceActivity() {
         }
     }
 
-    // The PC build now creates the race's GActivity from the record
-    // (new GActivity(collectionKey), then GObjectBlock::CalcNumConnections for
-    // its connection table). The gameplay runtime instances aren't ported yet,
-    // so mRaceActivity stays null.
+    // The race's activity runs on the customized record (a dynamic collection
+    // whose parent is the race); GManager connects it with the rest.
+    Attrib::Key activityKey = mRaceRecord->GetCollection();
+    mRaceActivity = new GActivity(activityKey);
+    mRaceActivity->AllocateConnectionBuffer(GObjectBlock::CalcNumConnections(activityKey));
 }
 
 // ---------------------------------------------------------------------------

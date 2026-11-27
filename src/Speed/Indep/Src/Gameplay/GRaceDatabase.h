@@ -295,6 +295,9 @@ class GRaceBin {
 
     GRaceBin *GetBin(unsigned int index);
     int GetBinNumber() const;
+    const BinStats &GetStats() const {
+        return mStats;
+    }
     int GetBinNumber(int index);
 
     int GetBossReputation() const;

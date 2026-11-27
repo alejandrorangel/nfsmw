@@ -1,6 +1,7 @@
 #include "Speed/Indep/Src/Gameplay/GVault.h"
 
 #include "Speed/Indep/Src/Gameplay/GManager.h"
+#include "Speed/Indep/Src/Gameplay/GObjectBlock.h"
 #include "Speed/Indep/Src/Gameplay/GRaceDatabase.h"
 #include "Speed/Indep/Src/Misc/AttribAsset.h"
 #include "Speed/Indep/Src/Misc/AttribVaultPack.h"
@@ -67,11 +68,8 @@ GVault::GVault(const AttribVaultPackEntry &packEntry, const char *vaultName)
       mGameObjBlock(nullptr),                         //
       mGameObjData(nullptr) {}
 
-// The gameplay runtime objects (GObjectBlock and the GRuntimeInstance types it
-// creates) aren't ported yet, so vaults have no object footprint.
 static unsigned int CalcGameObjectSpace(GVault *vault, unsigned int *outObjCount) {
-    *outObjCount = 0;
-    return 0;
+    return GObjectBlock::CalcSpaceRequired(vault, outObjCount);
 }
 
 // PC: 0x5F65F0.
@@ -152,10 +150,24 @@ void GVault::LoadSyncTransient() {
     GManager::Get().LoadVaultSync(this);
 }
 
-// PC: 0x5FA520 / 0x5EE090. Needs GObjectBlock, which isn't ported yet.
-void GVault::CreateGameplayObjects() {}
+// PC: 0x5FA520. The block is built in place at the start of the vault's
+// object data on PC; natively it (and its objects) are heap allocated.
+void GVault::CreateGameplayObjects() {
+#if defined(EA_PORT_NATIVE)
+    mGameObjBlock = new GObjectBlock(this, mGameObjData);
+#else
+    mGameObjBlock = new (mGameObjData) GObjectBlock(this, mGameObjData + sizeof(GObjectBlock));
+#endif
+    mGameObjBlock->Initialize(mGameObjSize);
+}
 
+// PC: 0x5EE090.
 void GVault::DestroyGameplayObjects() {
+#if defined(EA_PORT_NATIVE)
+    delete mGameObjBlock;
+#else
+    mGameObjBlock->~GObjectBlock();
+#endif
     mGameObjBlock = nullptr;
 }
 

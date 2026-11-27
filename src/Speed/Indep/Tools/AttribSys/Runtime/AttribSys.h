@@ -994,6 +994,15 @@ class RefSpec {
 // TODO where is this in the file?
 // total size: 0x8
 class Blob {
+  public:
+    uint32_t GetSize() const {
+        return mSize;
+    }
+
+    const void *GetData() const {
+        return mData;
+    }
+
   private:
     uint32_t mSize;    // offset 0x0, size 0x4
     PORT_PTR32(const void) mData; // offset 0x4, size 0x4

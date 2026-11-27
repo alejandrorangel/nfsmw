@@ -20,13 +20,15 @@ typedef UTL::Std::vector<ISimable *, _type_ID_SimObjList> SimObjList;
 // Decl: 31
 class GTrigger : public GRuntimeInstance {
   public:
+    enum { kType = kGameplayObjType_Trigger };
+
     GTrigger(const Attrib::Key &triggerKey);
     ~GTrigger() override;
 
     // Overrides: GRuntimeInstance
     // Decl: 36
     GameplayObjType GetType() const override {
-        return kGameplayObjType_State;
+        return kGameplayObjType_Trigger;
     }
 
     void NotifySimableTrigger(ISimable *isim, int triggerStimulus);
@@ -55,7 +57,9 @@ class GTrigger : public GRuntimeInstance {
 
     void RefreshParticleEffects();
 
-    // const UMath::Vector3 &GetDirection() const {} // Decl: 57
+    const UMath::Vector3 &GetDirection() const {
+        return mDirection;
+    } // Decl: 57
 
     float GetRadius();
 
