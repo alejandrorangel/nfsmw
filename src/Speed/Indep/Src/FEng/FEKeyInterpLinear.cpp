@@ -3,6 +3,16 @@
 #include "Speed/Indep/Src/FEng/FETypes.h"
 #include "Speed/Indep/Src/FEng/FEngStandard.h"
 
+// A key's value lives after its time stamp (FEKeyData::Val, +0x10 in a PC
+// FEKeyNode). The decomp passed GetKeyData() -- the time stamp -- so every
+// interpolated value was read one field early (position deltas landed on the
+// next component, colours/rotations shifted). PC reads Val (FEInterpLinear 0x5B9D10).
+#if defined(EA_PORT_NATIVE)
+#define FE_KEY_VALUE(key) (&(key)->GetKeyData()->Val)
+#else
+#define FE_KEY_VALUE(key) ((key)->GetKeyData())
+#endif
+
 void FEInterpLinear(FEScript *pScript, u8 TrackNum, i32 tTime, void *pOutData) {
     FEKeyTrack *pTrack = &pScript->pTracks[TrackNum];
     u8 *pOutDataPtr = reinterpret_cast<u8 *>(pOutData);
@@ -125,9 +135,9 @@ write_base:
     }
 
     if (t == 0.0f || t == 1.0f) {
-        void *pValPtr = pKey->GetKeyData();
+        void *pValPtr = FE_KEY_VALUE(pKey);
         if (t == 0.0f) {
-            pValPtr = pPrevKey->GetKeyData();
+            pValPtr = FE_KEY_VALUE(pPrevKey);
         }
         switch (pTrack->ParamType) {
             case 1: {
@@ -167,27 +177,27 @@ write_base:
     } else {
         switch (pTrack->ParamType) {
             case 1:
-                FELerpInteger(*reinterpret_cast<i32 *>(pPrevKey->GetKeyData()), *reinterpret_cast<i32 *>(pKey->GetKeyData()), t,
+                FELerpInteger(*reinterpret_cast<i32 *>(FE_KEY_VALUE(pPrevKey)), *reinterpret_cast<i32 *>(FE_KEY_VALUE(pKey)), t,
                               reinterpret_cast<i32 *>(pBaseValue), reinterpret_cast<i32 *>(pOutDataPtr));
                 break;
             case 2:
-                FELerpFloat(*reinterpret_cast<float *>(pPrevKey->GetKeyData()), *reinterpret_cast<float *>(pKey->GetKeyData()), t,
+                FELerpFloat(*reinterpret_cast<float *>(FE_KEY_VALUE(pPrevKey)), *reinterpret_cast<float *>(FE_KEY_VALUE(pKey)), t,
                             reinterpret_cast<float *>(pBaseValue), reinterpret_cast<float *>(pOutDataPtr));
                 break;
             case 3:
-                FELerpVector2(*reinterpret_cast<FEVector2 *>(pPrevKey->GetKeyData()), *reinterpret_cast<FEVector2 *>(pKey->GetKeyData()), t,
+                FELerpVector2(*reinterpret_cast<FEVector2 *>(FE_KEY_VALUE(pPrevKey)), *reinterpret_cast<FEVector2 *>(FE_KEY_VALUE(pKey)), t,
                               reinterpret_cast<FEVector2 *>(pBaseValue), reinterpret_cast<FEVector2 *>(pOutDataPtr));
                 break;
             case 4:
-                FELerpVector3(*reinterpret_cast<FEVector3 *>(pPrevKey->GetKeyData()), *reinterpret_cast<FEVector3 *>(pKey->GetKeyData()), t,
+                FELerpVector3(*reinterpret_cast<FEVector3 *>(FE_KEY_VALUE(pPrevKey)), *reinterpret_cast<FEVector3 *>(FE_KEY_VALUE(pKey)), t,
                               reinterpret_cast<FEVector3 *>(pBaseValue), reinterpret_cast<FEVector3 *>(pOutDataPtr));
                 break;
             case 5:
-                FELerpQuaternion(*reinterpret_cast<FEQuaternion *>(pPrevKey->GetKeyData()), *reinterpret_cast<FEQuaternion *>(pKey->GetKeyData()), t,
+                FELerpQuaternion(*reinterpret_cast<FEQuaternion *>(FE_KEY_VALUE(pPrevKey)), *reinterpret_cast<FEQuaternion *>(FE_KEY_VALUE(pKey)), t,
                                  reinterpret_cast<FEQuaternion *>(pBaseValue), reinterpret_cast<FEQuaternion *>(pOutDataPtr));
                 break;
             case 6:
-                FELerpColor(*reinterpret_cast<FEColor *>(pPrevKey->GetKeyData()), *reinterpret_cast<FEColor *>(pKey->GetKeyData()), t,
+                FELerpColor(*reinterpret_cast<FEColor *>(FE_KEY_VALUE(pPrevKey)), *reinterpret_cast<FEColor *>(FE_KEY_VALUE(pKey)), t,
                             reinterpret_cast<FEColor *>(pBaseValue), reinterpret_cast<FEColor *>(pOutDataPtr));
                 break;
         }
