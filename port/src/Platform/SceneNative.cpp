@@ -552,10 +552,15 @@ void SetViewClip(eView *view, const M44 view_proj) {
         std::memcpy(gViewClip[view->ID], view_proj, sizeof(M44));
         gViewClipValid[view->ID] = true;
     }
-    // Focal length in pixels for eView::GetPixelSize (480-line screen).
+    // Focal length in pixels for eView::GetPixelSize (car/scenery LOD
+    // choice): half the PC render width over tan(fov/2), at the video
+    // options' resolution as PC renders at it (not the 640-wide FE screen,
+    // which put the front-end car at ~100 px, below the 120 px LOD A swap).
     Camera *camera = view->GetCamera();
     float fov_h = camera->GetFieldOfView() * (2.0f * 3.1415927f / 65536.0f);
-    view->H = 320.0f / std::tan(fov_h * 0.5f);
+    int width = 640, height = 480;
+    PCGetResolution(gPCGraphicsOptions.RacingResolution, &width, &height);
+    view->H = (0.5f * static_cast<float>(width)) / std::tan(fov_h * 0.5f);
 }
 
 // Frustum test of local-space points against a view: all outside one clip
