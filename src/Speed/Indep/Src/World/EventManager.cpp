@@ -50,7 +50,21 @@ int LoaderEventManager(bChunk *bchunk) {
     for (; chunk != last_chunk; chunk = chunk->GetNext()) {
         switch (chunk->GetID()) {
             case BCHUNK_SPEED_EMTRIGGER_PACK_HEADER: {
+#if defined(EA_PORT_NATIVE)
+                // The 0x20-byte disk record starts with a 32-bit bTNode and holds two
+                // 32-bit pointers; natively the class is bigger, so filling it in place
+                // runs into the following chunk header. Use a native copy, remembered
+                // in the record's (unused) list node for the unloader.
+                {
+                    char *disk = chunk->GetAlignedData(16);
+                    trigger_pack = static_cast<EventTriggerPack *>(bMalloc(sizeof(EventTriggerPack), "EventTriggerPack (native)", 0, 0));
+                    bMemSet(trigger_pack, 0, sizeof(*trigger_pack));
+                    bMemCpy(&trigger_pack->Version, disk + 0x8, 0x10); // Version, ScenerySectionNumber, NumEventTriggers, EndianSwapped
+                    bMemCpy(disk, &trigger_pack, sizeof(trigger_pack));
+                }
+#else
                 trigger_pack = reinterpret_cast<EventTriggerPack *>(chunk->GetAlignedData(16));
+#endif
                 if (!trigger_pack->EndianSwapped) {
                     bPlatEndianSwap(&trigger_pack->ScenerySectionNumber);
                     bPlatEndianSwap(&trigger_pack->Version);
@@ -120,7 +134,12 @@ int UnloaderEventManager(bChunk *bchunk) {
     // The loop doesn't make sense (we don't do chunk = chunk->GetNext())
     while (chunk != last_chunk) {
         if (chunk->GetID() == BCHUNK_SPEED_EMTRIGGER_PACK_HEADER) {
+#if defined(EA_PORT_NATIVE)
+            EventTriggerPack *trigger_pack;
+            bMemCpy(&trigger_pack, chunk->GetAlignedData(16), sizeof(trigger_pack)); // the native copy (see the loader)
+#else
             EventTriggerPack *trigger_pack = reinterpret_cast<EventTriggerPack *>(chunk->GetAlignedData(16));
+#endif
             if (trigger_pack->Version == 2) {
                 trigger_pack->Remove();
             }
@@ -128,6 +147,9 @@ int UnloaderEventManager(bChunk *bchunk) {
             VisibleSectionUserInfo *user_info = TheVisibleSectionManager.GetUserInfo(trigger_pack->ScenerySectionNumber);
             user_info->pEventTriggerPack = nullptr;
             TheVisibleSectionManager.UnallocateUserInfo(trigger_pack->ScenerySectionNumber);
+#if defined(EA_PORT_NATIVE)
+            bFree(trigger_pack);
+#endif
             break;
         }
     }

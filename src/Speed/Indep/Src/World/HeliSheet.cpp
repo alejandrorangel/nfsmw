@@ -134,8 +134,20 @@ int HeliSheetManager::Loader(bChunk *chunk) {
         return 0;
     }
 
+#if defined(EA_PORT_NATIVE)
+    // The 0x18-byte disk record starts with a 32-bit bTNode and ends with a
+    // 32-bit pointer, then the polys. Natively the header is bigger, so use a
+    // native copy (remembered in the record's unused list node for the unloader).
+    char *disk = chunk->GetAlignedData(16);
+    HeliSection *heli_section = static_cast<HeliSection *>(bMalloc(sizeof(HeliSection), "HeliSection (native)", 0, 0));
+    bMemSet(heli_section, 0, sizeof(*heli_section));
+    bMemCpy(&heli_section->SectionNumber, disk + 0x8, 0xC); // SectionNumber, NumPolys, EndianSwapped
+    heli_section->PolyTable = reinterpret_cast<HeliPoly *>(disk + 0x18);
+    bMemCpy(disk, &heli_section, sizeof(heli_section));
+#else
     HeliSection *heli_section = reinterpret_cast<HeliSection *>(chunk->GetAlignedData(16));
     heli_section->PolyTable = reinterpret_cast<HeliPoly *>(heli_section + 1);
+#endif
     if (heli_section->EndianSwapped == 0) {
         heli_section->EndianSwap();
     }
@@ -149,8 +161,15 @@ int HeliSheetManager::Unloader(bChunk *chunk) {
         return 0;
     }
 
+#if defined(EA_PORT_NATIVE)
+    HeliSection *heli_section;
+    bMemCpy(&heli_section, chunk->GetAlignedData(16), sizeof(heli_section)); // the native copy (see the loader)
+    this->HeliSectionList.Remove(heli_section);
+    bFree(heli_section);
+#else
     HeliSection *heli_section = reinterpret_cast<HeliSection *>(chunk->GetAlignedData(16));
     this->HeliSectionList.Remove(heli_section);
+#endif
     return 1;
 }
 

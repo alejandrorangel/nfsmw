@@ -77,7 +77,7 @@ class vAABBTree {
     vAABB *QueryLeafHelper(vAABB *aabb, float x, float y, float z); // Decl: 104
 
   public:
-    vAABB *NodeArray; // offset 0x0, size 0x4, Decl: 108
+    PORT_PTR32(vAABB) NodeArray; // offset 0x0, size 0x4, Decl: 108 (used in place from track data)
 
     int16 NumLeafNodes;   // offset 0x4, size 0x2, Decl: 110
     int16 NumParentNodes; // offset 0x6, size 0x2, Decl: 111
@@ -86,5 +86,9 @@ class vAABBTree {
 
     int32 pad1; // offset 0xC, size 0x4, Decl: 115
 };
+
+#if defined(EA_PORT_NATIVE)
+static_assert(sizeof(vAABBTree) == 0x10, "vAABBTree is read in place");
+#endif
 
 #endif
