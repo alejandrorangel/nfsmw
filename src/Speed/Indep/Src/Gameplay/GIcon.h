@@ -76,10 +76,25 @@ class GIcon {
         return mCombSectionID;
     }
 
+#if defined(EA_PORT_NATIVE)
+    bool GetVisibleInWorld() const { // Decl: 78
+        return IsFlagSet(1);
+    }
+    bool GetVisibleOnMap() const { // Decl: 79
+        return IsFlagSet(2);
+    }
+    bool GetIsDisposable() const { // Decl: 80
+        return IsFlagSet(0x10);
+    }
+    bool GetIsSnapped() const { // Decl: 81
+        return IsFlagSet(0x20);
+    }
+#else
     bool GetVisibleInWorld() const {} // Decl: 78
     bool GetVisibleOnMap() const {}   // Decl: 79
     bool GetIsDisposable() const {}   // Decl: 80
     bool GetIsSnapped() const {}      // Decl: 81
+#endif
     bool GetIsGPSing() const {        // Decl: 82
         return IsFlagSet(0x80);
     }
@@ -162,6 +177,9 @@ class GIcon {
     uint16 mPad;
 
     static EffectInfo kEffectInfo[];
+#if defined(EA_PORT_NATIVE)
+    static int sNumSpawned; // PC: 0x91E018
+#endif
 };
 
 #endif

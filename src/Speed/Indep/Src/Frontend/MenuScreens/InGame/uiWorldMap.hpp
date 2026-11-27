@@ -211,7 +211,13 @@ class WorldMap : public UIWidgetMenu {
 
     void NotificationMessage(u32 msg, FEObject *obj, u32 param1, u32 param2) override;
 
+#if defined(EA_PORT_NATIVE)
+    static GIcon *GetGPSingIcon() { // Decl: 272
+        return mGPSingIcon;
+    }
+#else
     static GIcon *GetGPSingIcon() {} // Decl: 272
+#endif
     static void SetGPSing(GIcon *icon);
     static void ClearGPSing();
 

@@ -466,6 +466,11 @@ class VisibleSectionManager {
     int GetLODOffset() {
         return this->pInfo->LODOffset;
     }
+#if defined(EA_PORT_NATIVE)
+    VisibleSectionManagerInfo *GetInfo() const {
+        return this->pInfo;
+    }
+#endif
 
   private:
     bTList<VisibleSectionBoundary> DrivableBoundaryList;               // offset 0x0, size 0x8

@@ -45,7 +45,33 @@ bool MinimapShowNonPursuitCops = false; // PC: 0x91CF00 (bss)
 bool MinimapShowPursuitCops = true;   // PC: 0x8F3AAC
 #endif
 
+#if defined(EA_PORT_NATIVE)
+// PC: 0x8F3AB8. Each icon type's map item (eWorldMapItemType bit), its
+// minimap element(s), world map title and icon texture.
+#define MINIMAP_ICON(type, item, element, title, tex) {GIcon::type, static_cast<eWorldMapItemType>(item), element, title, tex}
+Minimap::GameplayIconInfo Minimap::kGameplayIconInfo[GIcon::kType_Count] = {
+    MINIMAP_ICON(kType_Invalid, 0, "", 0, 0),
+    MINIMAP_ICON(kType_RaceSprint, 0x100, "MMICON_SPRINT_%d", 0xb94fd70e, 0x2521e5eb),
+    MINIMAP_ICON(kType_RaceCircuit, 0x80, "MMICON_CIRCUIT_%d", 0x034fa2c1, 0xe9638d3e),
+    MINIMAP_ICON(kType_RaceDrag, 0x400, "MMICON_DRAG_%d", 0x6f547e4c, 0xaaab31e9),
+    MINIMAP_ICON(kType_RaceKnockout, 0x200, "MMICON_KNOCKOUT_%d", 0x4930f5fc, 0x3a015595),
+    MINIMAP_ICON(kType_RaceTollbooth, 0x1000, "MMICON_TOLLBOOTH_%d", 0xa15e4505, 0x1a091045),
+    MINIMAP_ICON(kType_RaceSpeedtrap, 0x800, "MMICON_SPEEDTRAP_%d", 0xee7386ea, 0x66c9a7b6),
+    MINIMAP_ICON(kType_RaceRival, 0x8000, "MINIMAP_ICON_EVENT_RIVAL", 0x213cc8d1, 0x9f562d57),
+    MINIMAP_ICON(kType_GateSafehouse, 0x200000, "SAFEHOUSEINDICATOR_%d", 0xded7b298, 0x0ed39f69),
+    MINIMAP_ICON(kType_GateCarLot, 0x800000, "CAR_LOT_%d", 0xb9d71959, 0x4eaee18b),
+    MINIMAP_ICON(kType_GateCustomShop, 0x400000, "SHOP_%d", 0xe0c8090f, 0x0cf07089),
+    MINIMAP_ICON(kType_HidingSpot, 0x2000000, "HIDING_SPOT_%d", 0xa31e817a, 0xf172b456),
+    MINIMAP_ICON(kType_PursuitBreaker, 0x4000000, "PURSUIT_BREAKER_%d", 0xdac9d619, 0xd01a771e),
+    MINIMAP_ICON(kType_SpeedTrap, 0x100000, "SPEED_TRAP_CAM_%d", 0x5bdcf050, 0x66c9a7b6),
+    MINIMAP_ICON(kType_SpeedTrapInRace, 0x100000, "SPEED_TRAP_RACE_CAM_%d", 0xee7386ea, 0x66c9a7b6),
+    MINIMAP_ICON(kType_AreaUnlock, 0x1000000, "MMICON_CHECKPOINT", 0, 0),
+    MINIMAP_ICON(kType_Checkpoint, 0, "", 0, 0),
+};
+#undef MINIMAP_ICON
+#else
 Minimap::GameplayIconInfo Minimap::kGameplayIconInfo[GIcon::kType_Count]; // size: 0x0, address: 0x8041BCA0, Decl: 69
+#endif
 
 void GetVehicleVectors(bVector2 *pos, bVector2 *dir, ISimable *isimable) {
     UMath::Vector3 position = isimable->GetPosition();

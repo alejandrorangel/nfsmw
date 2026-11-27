@@ -337,6 +337,11 @@ class TrackStreamer {
         return this->PermFileLoading;
     }
 
+#if defined(EA_PORT_NATIVE)
+    friend class GIcon;    // FindSection (PC 0x5DE590)
+    friend class GManager; // the section icon functions (inlined FindSection)
+#endif
+
   private:
     void ClearCurrentZones();
     bool DetermineCurrentZones(int16 *current_zones);

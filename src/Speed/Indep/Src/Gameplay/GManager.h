@@ -285,6 +285,9 @@ class GManager : public UTL::COM::Object, public IVehicleCache {
     void UnspawnSectionIcons(int section);
     void UnspawnAllIcons();
     static bool AddIconForTrackMarker(TrackPositionMarker *marker, uint32 tag);
+#if defined(EA_PORT_NATIVE)
+    static bool IconSectionLoaded(GIcon *icon);
+#endif
     static void NotifyCollisionPackLoaded(int sectionID, bool loaded);
 #ifndef EA_BUILD_A124
     void RecursivePreloadCharacterCars(GRuntimeInstance *instance, bool forcePreload);

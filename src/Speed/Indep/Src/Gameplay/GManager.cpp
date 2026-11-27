@@ -4,6 +4,13 @@
 #include "Speed/Indep/Src/Gameplay/GRaceDatabase.h"
 #include "Speed/Indep/Src/Gameplay/GRaceStatus.h"
 #include "Speed/Indep/Src/Gameplay/GTrigger.h"
+#if defined(EA_PORT_NATIVE)
+#include "Speed/Indep/Src/Frontend/MenuScreens/InGame/uiWorldMap.hpp"
+#include "Speed/Indep/Src/Interfaces/SimActivities/INIS.h"
+#include "Speed/Indep/Src/World/TrackPath.hpp"
+#include "Speed/Indep/Src/World/TrackStreamer.hpp"
+#include "Speed/Indep/Src/World/WCollisionAssets.h"
+#endif
 #include "Speed/Indep/Src/Interfaces/SimEntities/IPlayer.h"
 #include "Speed/Indep/Src/Gameplay/GVault.h"
 #include "Speed/Indep/Src/Generated/Hash.hpp"
@@ -144,10 +151,13 @@ void GManager::InitializeVaults() {
     // The PC build then sets up the icons (0x320 bytes from FastMem), the
     // milestones, speed traps and bounty spawn points and the section icon
     // callback.
-    // TODO(port): icons, milestones, bounty spawn points and the section icon
-    // callback aren't ported yet.
+    // TODO(port): milestones and bounty spawn points aren't ported yet.
 #if defined(EA_PORT_NATIVE)
+    AllocateIcons();
     AllocateSpeedTraps();
+    // 0x5F8189: the zone icons, then the track marker ones (sub_5EF6D0).
+    RefreshZoneIcons();
+    RefreshTrackMarkerIcons();
 #endif
 }
 
@@ -396,29 +406,47 @@ void GManager::BeginGameplay() {
         AllocateInstanceMap();
     }
 #endif
+#if defined(EA_PORT_NATIVE)
+    // Natively every vault stays loaded (no race streaming, see
+    // LoadVaultSync); on PC only the resident vaults and the two stream
+    // slots' are: the current bin's and the startup race's. Without this
+    // every race's triggers (and their icons, 200 at most) exist in free roam.
+    GRaceCustom *slotRace = GRaceDatabase::Get().GetStartupRace();
+    GRaceBin *slotBin = GRaceStatus::Get().GetCurrentBin();
+    for (unsigned int onVault = 0; onVault < mVaultCount; onVault++) {
+        GVault *vault = &mVaults[onVault];
+        const bool inSlot = (slotBin != nullptr && vault == slotBin->GetChildVault()) ||
+                            (slotRace != nullptr && (vault == slotRace->GetChildVault() || vault == slotRace->GetParentVault()));
+        if (vault->IsLoaded() && (vault->IsResident() || inSlot)) {
+            vault->CreateGameplayObjects();
+        }
+    }
+#else
     for (unsigned int onVault = 0; onVault < mVaultCount; onVault++) {
         if (mVaults[onVault].IsLoaded()) {
             mVaults[onVault].CreateGameplayObjects();
         }
     }
+#endif
     GRaceCustom *startupRace = GRaceDatabase::Get().GetStartupRace();
     if (startupRace != nullptr) {
         startupRace->CreateRaceActivity();
     }
     ConnectRuntimeInstances();
     StartActivities();
-    // TODO(port): WCollisionAssets::AddPackLoadCallback(NotifyCollisionPackLoaded)
-    // (icons per collision pack aren't ported).
+#if defined(EA_PORT_NATIVE)
+    WCollisionAssets::Get().AddPackLoadCallback(NotifyCollisionPackLoaded);
+#endif
     mPursuitBreakerIconsShown = false;
     mHidingSpotIconsShown = false;
     mEventIconsShown = false;
     mMenuGateIconsShown = false;
     mSpeedTrapIconsShown = false;
     mSpeedTrapRaceIconsShown = false;
-    // TODO(port): RefreshEngageTriggerIcons, SpawnAllLoadedSectionIcons
-    // (icons aren't ported).
 #if defined(EA_PORT_NATIVE)
+    RefreshEngageTriggerIcons();
     RefreshSpeedTrapIcons();
+    SpawnAllLoadedSectionIcons();
 #endif
     if (startupRace == nullptr && GRaceStatus::Get().GetCurrentBin() != nullptr) {
         GRaceStatus::Get().GetCurrentBin()->EnableBarriers();
@@ -477,6 +505,11 @@ void GManager::StartWorldActivities(bool startFreeRoamOnly) {
 // so the next session starts clean.
 void GManager::EndGameplay() {
     SuspendAllActivities();
+#if defined(EA_PORT_NATIVE)
+    // PC sub_5F6050: the icons unspawned and the section callback removed.
+    UnspawnAllIcons();
+    WCollisionAssets::Get().RemovePackLoadCallback(NotifyCollisionPackLoaded);
+#endif
     for (unsigned int onVault = 0; onVault < mVaultCount; onVault++) {
         if (mVaults[onVault].GetObjectBlock() != nullptr) {
             mVaults[onVault].DestroyGameplayObjects();
@@ -702,9 +735,11 @@ void GManager::Update(float dT) {
         }
     }
 #endif
-    // TODO(port): UpdatePendingSMS and UpdateIconVisibility (SMS and icons
-    // aren't ported).
+    // TODO(port): UpdatePendingSMS (SMS isn't ported).
     UpdateTriggerAvailability();
+#if defined(EA_PORT_NATIVE)
+    UpdateIconVisibility();
+#endif
 }
 
 // PC: 0x5EB9E0. The local player's pursuit (its vehicle AI's) and
@@ -748,13 +783,347 @@ GSpeedTrap *GManager::GetSpeedTrap(unsigned int index) {
     return &mSpeedTraps[index];
 }
 
-// PC: 0x5EBD90. Every trigger's particle effects again (as enabled).
-// TODO(port): then each icon's GIcon::RefreshEffects (icons aren't ported).
+// PC: 0x5EBD90. Every trigger's particle effects again (as enabled), then
+// the icons' effects.
 void GManager::RefreshWorldParticleEffects() {
     for (GObjectIterator<GTrigger> iter(0xffffffff); iter.IsValid(); iter.Advance()) {
         iter.GetInstance()->RefreshParticleEffects();
     }
+#if defined(EA_PORT_NATIVE)
+    for (unsigned int i = 0; i < mNumIcons; i++) {
+        mIcons[i]->RefreshEffects();
+    }
+#endif
 }
+
+#if defined(EA_PORT_NATIVE)
+// ---------------------------------------------------------------------------
+// Icons (GIcon.cpp): the world and map markers of the gameplay objects. The
+// first mNumVisibleIcons of mIcons are the visible ones (UpdateIconVisibility).
+// ---------------------------------------------------------------------------
+
+// PC: inlined in InitializeVaults (0x5F8080): room for 200.
+void GManager::AllocateIcons() {
+    mNumIcons = 0;
+    mNumVisibleIcons = 0;
+    mIcons = static_cast<GIcon **>(gFastMem.Alloc(200 * sizeof(GIcon *), nullptr));
+}
+
+// PC: 0x5E9EC0.
+GIcon *GManager::AllocIcon(GIcon::Type iconType, const UMath::Vector3 &pos, float rotDeg, bool disposable) {
+    if (mNumIcons >= 200) {
+        return nullptr;
+    }
+    void *mem = gFastMem.Alloc(sizeof(GIcon), nullptr);
+    if (mem == nullptr) {
+        return nullptr;
+    }
+    GIcon *icon = new (mem) GIcon(iconType, pos, rotDeg);
+    mIcons[mNumIcons] = icon;
+    mNumIcons++;
+    if (disposable) {
+        icon->SetFlag(0x10);
+    }
+    return icon;
+}
+
+// PC: 0x5EDD60. The icon goes (and with it the GPS target); the last visible
+// icon takes its place, and the last icon that one's.
+void GManager::FreeIconAt(unsigned int index) {
+    if (mNumIcons == 0) {
+        return;
+    }
+    GIcon *icon = mIcons[index];
+    if (icon != nullptr) {
+        if (icon == WorldMap::GetGPSingIcon()) {
+            WorldMap::ClearGPSing();
+        }
+        icon->~GIcon();
+        gFastMem.Free(icon, sizeof(GIcon), nullptr);
+        mIcons[index] = nullptr;
+    }
+    if (index + 1 < mNumIcons) {
+        if (index + 1 < mNumVisibleIcons) {
+            mIcons[index] = mIcons[mNumVisibleIcons - 1];
+            if (mNumVisibleIcons < mNumIcons) {
+                mIcons[mNumVisibleIcons - 1] = mIcons[mNumIcons - 1];
+            }
+        } else {
+            mIcons[index] = mIcons[mNumIcons - 1];
+        }
+    }
+    if (index < mNumVisibleIcons) {
+        mNumVisibleIcons--;
+    }
+    mNumIcons--;
+}
+
+// PC: inlined.
+void GManager::FreeIcon(GIcon *icon) {
+    for (unsigned int i = 0; i < mNumIcons; i++) {
+        if (mIcons[i] == icon) {
+            FreeIconAt(i);
+            return;
+        }
+    }
+}
+
+// PC: 0x5EEF00.
+void GManager::FreeDisposableIcons(GIcon::Type iconType) {
+    for (unsigned int i = 0; i < mNumIcons;) {
+        GIcon *icon = mIcons[i];
+        if (icon->IsFlagSet(0x10) && icon->GetType() == iconType) {
+            FreeIconAt(i);
+        } else {
+            i++;
+        }
+    }
+}
+
+// PC: 0x5EF640. A disposable hiding spot icon on each zone of type 8.
+void GManager::RefreshZoneIcons() {
+    FreeDisposableIcons(GIcon::kType_HidingSpot);
+    for (TrackPathZone *zone = TheTrackPathManager.FindZone(nullptr, static_cast<eTrackPathZoneType>(8), nullptr); zone != nullptr;
+         zone = TheTrackPathManager.FindZone(nullptr, static_cast<eTrackPathZoneType>(8), zone)) {
+        UMath::Vector3 pos = {zone->Position.x, zone->Position.y, zone->Elevation};
+        GIcon *icon = AllocIcon(GIcon::kType_HidingSpot, pos, 0.0f, true);
+        if (icon != nullptr) {
+            icon->SetFlag(3);
+        }
+    }
+    if (mInGameplay) {
+        SpawnAllLoadedSectionIcons();
+    }
+}
+
+// PC: 0x5EBE70. A disposable pursuit breaker icon on each "IconMarker".
+bool GManager::AddIconForTrackMarker(TrackPositionMarker *marker, uint32 tag) {
+    if (marker->NameHash == tag) {
+        UMath::Vector3 pos = {marker->Position.x, marker->Position.y, marker->Position.z};
+        GIcon *icon = GManager::Get().AllocIcon(GIcon::kType_PursuitBreaker, pos, 0.0f, true);
+        if (icon != nullptr) {
+            icon->SetFlag(3);
+        }
+    }
+    return true;
+}
+
+// PC: 0x5EF6D0.
+void GManager::RefreshTrackMarkerIcons() {
+    FreeDisposableIcons(GIcon::kType_PursuitBreaker);
+    ForEachTrackPositionMarker(AddIconForTrackMarker, bStringHash("IconMarker"));
+    if (mInGameplay) {
+        SpawnAllLoadedSectionIcons();
+    }
+}
+
+// PC: 0x602840. An event trigger's icon shows while its race is unlocked
+// and not yet won in the career.
+void GManager::RefreshEngageTriggerIcons() {
+    for (GObjectIterator<GTrigger> iter(GTrigger::kFlag_TriggerEngage); iter.IsValid(); iter.Advance()) {
+        GTrigger *trigger = iter.GetInstance();
+        GRuntimeInstance *activity = trigger->GetTargetActivity();
+        if (activity == nullptr) {
+            continue;
+        }
+        GRaceParameters *race = GRaceDatabase::Get().GetRaceFromKey(activity->GetCollection());
+        const unsigned int eventHash = race->GetEventHash();
+        if (!GRaceDatabase::Get().IsCareerRaceUnlocked(eventHash) || GRaceDatabase::Get().IsCareerRaceComplete(eventHash)) {
+            trigger->HideIcon();
+        } else {
+            trigger->ShowIcon();
+        }
+    }
+}
+
+// PC: inlined (GIcon::FindSection): whether the icon's section (or its
+// combined section) is loaded.
+bool GManager::IconSectionLoaded(GIcon *icon) {
+    icon->FindSection();
+    if (icon->GetSectionID() < 0) {
+        return false;
+    }
+    TrackStreamingSection *section = TheTrackStreamer.FindSection(icon->GetSectionID());
+    if (section != nullptr && section->Status == TrackStreamingSection::ACTIVATED) {
+        return true;
+    }
+    section = TheTrackStreamer.FindSection(icon->GetCombinedSectionID());
+    return section != nullptr && section->Status == TrackStreamingSection::ACTIVATED;
+}
+
+// PC: 0x5EDE20.
+void GManager::SpawnAllLoadedSectionIcons() {
+    for (unsigned int i = 0; i < mNumIcons; i++) {
+        if (IconSectionLoaded(mIcons[i])) {
+            mIcons[i]->Spawn();
+        }
+    }
+}
+
+// PC: 0x5EDEF0.
+void GManager::SpawnSectionIcons(int section) {
+    for (unsigned int i = 0; i < mNumIcons; i++) {
+        GIcon *icon = mIcons[i];
+        icon->FindSection();
+        if (icon->GetSectionID() == section || icon->GetCombinedSectionID() == section) {
+            icon->Spawn();
+        }
+    }
+}
+
+// PC: 0x5E9F70.
+void GManager::UnspawnSectionIcons(int section) {
+    for (unsigned int i = 0; i < mNumIcons; i++) {
+        GIcon *icon = mIcons[i];
+        icon->FindSection();
+        if (icon->GetSectionID() == section || icon->GetCombinedSectionID() == section) {
+            icon->Unspawn();
+        }
+    }
+}
+
+// PC: inlined in sub_5F6050 (EndGameplay).
+void GManager::UnspawnAllIcons() {
+    for (unsigned int i = 0; i < mNumIcons; i++) {
+        mIcons[i]->Unspawn();
+    }
+}
+
+// PC: 0x5EED60 (WCollisionAssets pack callback).
+void GManager::NotifyCollisionPackLoaded(int sectionID, bool loaded) {
+    if (mObj == nullptr) {
+        return;
+    }
+    if (loaded) {
+        mObj->SpawnSectionIcons(sectionID);
+    } else {
+        mObj->UnspawnSectionIcons(sectionID);
+    }
+}
+
+// PC: 0x5FDAE0. Which icon types show: events and speed traps while events
+// may be engaged, gates while the menu gates may, the safehouse while it
+// may, speed trap race cameras in a speed trap race; nothing during an NIS.
+// The icons shown in the world (flag 1) of a shown type are enabled and
+// moved to the front (the visible ones), the rest disabled.
+void GManager::UpdateIconVisibility() {
+    mEventIconsShown = mAllowEngageEvents;
+    mMenuGateIconsShown = mAllowMenuGates;
+    mSpeedTrapIconsShown = mAllowEngageEvents;
+    GRaceParameters *race = GRaceStatus::Exists() ? GRaceStatus::Get().GetRaceParameters() : nullptr;
+    mSpeedTrapRaceIconsShown = race != nullptr && race->GetRaceType() == GRace::kRaceType_SpeedTrap;
+    // Types 0..15, and 16 (checkpoints) reads the byte after them on PC: the
+    // show-all tweak.
+    const bool showAll = false; // TWEAK_ShowAllGameplayIcons
+    bool show[GIcon::kType_Count];
+    for (int i = 0; i < GIcon::kType_Count; i++) {
+        show[i] = showAll;
+    }
+    if (!showAll && !INIS::Exists()) {
+        show[GIcon::kType_Invalid] = false;
+        for (int i = GIcon::kType_RaceSprint; i <= GIcon::kType_RaceRival; i++) {
+            show[i] = mEventIconsShown;
+        }
+        show[GIcon::kType_GateSafehouse] = mAllowEngageSafehouse;
+        show[GIcon::kType_GateCarLot] = mMenuGateIconsShown;
+        show[GIcon::kType_GateCustomShop] = mMenuGateIconsShown;
+        show[GIcon::kType_HidingSpot] = mHidingSpotIconsShown;
+        show[GIcon::kType_PursuitBreaker] = mPursuitBreakerIconsShown;
+        show[GIcon::kType_SpeedTrap] = mSpeedTrapIconsShown;
+        show[GIcon::kType_SpeedTrapInRace] = mSpeedTrapRaceIconsShown;
+        show[GIcon::kType_AreaUnlock] = true;
+    }
+    mNumVisibleIcons = 0;
+    for (unsigned int i = 0; i < mNumIcons; i++) {
+        GIcon *icon = mIcons[i];
+        const bool enabled = icon->IsFlagSet(8);
+        if (!icon->IsFlagSet(1) || !show[icon->GetType()]) {
+            if (enabled) {
+                icon->Disable();
+            }
+        } else {
+            if (!enabled && icon->IsFlagSet(4)) {
+                icon->Enable();
+            }
+            mIcons[i] = mIcons[mNumVisibleIcons];
+            mIcons[mNumVisibleIcons] = icon;
+            mNumVisibleIcons++;
+        }
+    }
+}
+
+// PC: 0x5DDB30.
+bool GManager::GetIsIconVisible(GIcon *icon) {
+    for (unsigned int i = 0; i < mNumVisibleIcons; i++) {
+        if (mIcons[i] == icon) {
+            return true;
+        }
+    }
+    return false;
+}
+
+namespace {
+struct IconSort {
+    GIcon *icon;
+    int key;
+};
+
+// PC: 0x5DDB20.
+int CompareIcons(const void *a, const void *b) {
+    return static_cast<const IconSort *>(a)->key - static_cast<const IconSort *>(b)->key;
+}
+} // namespace
+
+// PC: 0x5E4940. The visible icons shown on the map, nearest the player's
+// car first. The key is PC's: icon x against the car's z and icon z
+// (height) against its y, i.e. bWare x and z, not the ground plane.
+int GManager::GatherVisibleIcons(GIcon **iconArray, IPlayer *player) {
+    ISimable *simable = player != nullptr ? player->GetSimable() : nullptr;
+    float carY = 0.0f;
+    float carZ = 0.0f;
+    if (simable != nullptr) {
+        const UMath::Vector3 &pos = simable->GetPosition();
+        carY = pos.y;
+        carZ = pos.z;
+    }
+    IconSort sorted[200];
+    int count = 0;
+    for (unsigned int i = 0; i < mNumVisibleIcons; i++) {
+        GIcon *icon = mIcons[i];
+        if (icon->IsFlagSet(1) && icon->IsFlagSet(2)) {
+            sorted[count].icon = icon;
+            if (simable == nullptr) {
+                sorted[count].key = 0;
+            } else {
+                const float dx = icon->GetPosition().x - carZ;
+                const float dz = icon->GetPosition().z - carY;
+                sorted[count].key = static_cast<int>(dz * dz + dx * dx);
+            }
+            count++;
+        }
+    }
+    if (simable != nullptr) {
+        std::qsort(sorted, count, sizeof(IconSort), CompareIcons);
+    }
+    for (int i = 0; i < count; i++) {
+        iconArray[i] = sorted[i].icon;
+    }
+    return count;
+}
+
+// PC: 0x5F19D0 / 0x5F19C0.
+void NotifyTrackMarkersChanged() {
+    if (GManager::Exists()) {
+        GManager::Get().RefreshTrackMarkerIcons();
+    }
+}
+
+void NotifyGameZonesChanged() {
+    if (GManager::Exists()) {
+        GManager::Get().RefreshZoneIcons();
+    }
+}
+#endif
 
 #if defined(EA_PORT_NATIVE)
 // Milestone value tracking and the pursuit notifications. The milestone type

@@ -1,6 +1,8 @@
 #include "Speed/Indep/Src/Gameplay/GTrigger.h"
 
 #include "Speed/Indep/Src/Gameplay/GManager.h"
+#include "Speed/Indep/Src/Frontend/Database/FEDatabase.hpp"
+#include "Speed/Indep/Src/Gameplay/GIcon.h"
 #include "Speed/Indep/Src/Generated/Hash.hpp"
 #include "Speed/Indep/Src/Generated/Messages/MTriggerEnter.h"
 #include "Speed/Indep/Src/Generated/Messages/MTriggerExit.h"
@@ -105,25 +107,73 @@ GTrigger::GTrigger(const Attrib::Key &triggerKey)
     reinterpret_cast<unsigned int *>(mTriggerEventData)[1] = GetCollection();
     mWorldTrigger.fEvents = &mEventList;
 
-    // TODO(port): the PC allocates the trigger's map icon here
-    // (GManager::AllocIcon by race type / trigger template); icons aren't
-    // ported, only the template flags are kept.
+    // The template's flag and the trigger's icon (at the vault position):
+    // an event's by its race type (the rival's for a boss race), the gates',
+    // the speed traps' (in a speed trap race unless OpenWorldSpeedTrap), an
+    // area unlock's. A gate / speed trap / area icon with a BinIndex shows
+    // while the career is at that bin or a lower one.
+    GIcon::Type iconType = GIcon::kType_Invalid;
     if (IsDerivedFromTemplate(0xf05931ab)) { // engagetrigger
         SetFlag(kFlag_TriggerEngage);
+        GRaceParameters *race = GRaceDatabase::Get().GetRaceFromKey(TargetActivity().mCollectionKey);
+        if (race == nullptr) {
+            return;
+        }
+        if (race->GetIsBossRace()) {
+            iconType = GIcon::kType_RaceRival;
+        } else {
+            switch (race->GetRaceType()) {
+            case GRace::kRaceType_P2P:
+                iconType = GIcon::kType_RaceSprint;
+                break;
+            case GRace::kRaceType_Circuit:
+                iconType = GIcon::kType_RaceCircuit;
+                break;
+            case GRace::kRaceType_Drag:
+                iconType = GIcon::kType_RaceDrag;
+                break;
+            case GRace::kRaceType_Knockout:
+                iconType = GIcon::kType_RaceKnockout;
+                break;
+            case GRace::kRaceType_Tollbooth:
+                iconType = GIcon::kType_RaceTollbooth;
+                break;
+            case GRace::kRaceType_SpeedTrap:
+                iconType = GIcon::kType_RaceSpeedtrap;
+                break;
+            default:
+                return;
+            }
+        }
+        mIcon = GManager::Get().AllocIcon(iconType, vaultPos, 0.0f, false);
+        return;
     } else if (IsDerivedFromTemplate(0x73049919)) {
         SetFlag(kFlag_TriggerCarLot);
+        iconType = GIcon::kType_GateCarLot;
     } else if (IsDerivedFromTemplate(0x4698966b)) {
         SetFlag(kFlag_TriggerCustomShop);
+        iconType = GIcon::kType_GateCustomShop;
     } else if (IsDerivedFromTemplate(0x326427bb)) {
         SetFlag(kFlag_TriggerSafeHouse);
+        iconType = GIcon::kType_GateSafehouse;
     } else if (IsDerivedFromTemplate(0xb05871d3)) {
         SetFlag(kFlag_TriggerSpeedTrap);
+        iconType = OpenWorldSpeedTrap() ? GIcon::kType_SpeedTrap : GIcon::kType_SpeedTrapInRace;
     } else if (IsDerivedFromTemplate(0x45e28759)) {
         SetFlag(kFlag_TriggerFinishLine);
     } else if (IsDerivedFromTemplate(0x76720f56)) {
         SetFlag(kFlag_TriggerTimeBonus);
     } else if (IsDerivedFromTemplate(0xa3e939e9)) {
         SetFlag(kFlag_TriggerCashBag);
+    } else if (IsDerivedFromTemplate(0x98217dbf)) {
+        iconType = GIcon::kType_AreaUnlock;
+    }
+    if (iconType != GIcon::kType_Invalid) {
+        mIcon = GManager::Get().AllocIcon(iconType, vaultPos, 0.0f, false);
+    }
+    if (mIcon != nullptr && BinIndex() > 0 && FEDatabase->GetCareerSettings()->GetCurrentBin() <= BinIndex()) {
+        mIcon->Show();
+        mIcon->ShowOnMap();
     }
 }
 
@@ -132,6 +182,11 @@ GTrigger::~GTrigger() {
     if (mTriggerEnabled != 0) {
         RemoveWorldTrigger(&mWorldTrigger);
         mTriggerEnabled = 0;
+    }
+    ClearParticleEffects();
+    if (mIcon != nullptr) {
+        GManager::Get().FreeIcon(mIcon);
+        mIcon = nullptr;
     }
     // The event list is the trigger's own (the WTrigger dtor leaves it alone
     // because of flag 0x100).
@@ -338,7 +393,17 @@ void GTrigger::RefreshParticleEffects() {
     EnableParticleEffects(mEnabled);
 }
 
-// PC: 0x5E2D10 / 0x5E2D30. Icons aren't ported.
-void GTrigger::ShowIcon() {}
+// PC: 0x5E2D10 / 0x5E2D30.
+void GTrigger::ShowIcon() {
+    if (mIcon != nullptr) {
+        mIcon->Show();
+        mIcon->ShowOnMap();
+    }
+}
 
-void GTrigger::HideIcon() {}
+void GTrigger::HideIcon() {
+    if (mIcon != nullptr) {
+        mIcon->Hide();
+        mIcon->HideOnMap();
+    }
+}

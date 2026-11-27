@@ -1002,8 +1002,28 @@ void Game_ChallengeCompleted() {
     MNotifyChallengePassed("").Post(UCrc32(UCRC32_Gameplay));
 }
 
-// PC: 0x612140. TODO(port): career unlocks.
-void Game_UnlockRace(GRuntimeInstance *activity) {}
+// PC: 0x612140. The activity's race unlocks in the career (and in quick
+// race unless it never shows there); the minimap and the event icons follow.
+void Game_UnlockRace(GRuntimeInstance *activity) {
+    if (activity == nullptr) {
+        return;
+    }
+    GRaceParameters *race = GRaceDatabase::Get().GetRaceFromActivity(static_cast<GActivity *>(activity));
+    if (race == nullptr) {
+        return;
+    }
+    GRaceSaveInfo *info = GRaceDatabase::Get().GetScoreInfo(race->GetEventHash());
+    if (!race->GetNeverInQuickRace()) {
+        info->mFlags |= GRaceDatabase::kUnlocked_QuickRace;
+    }
+    info->mFlags |= GRaceDatabase::kUnlocked_Career;
+    IPlayer *player = IPlayer::First(PLAYER_LOCAL);
+    IHud *hud = player != nullptr ? player->GetHud() : nullptr;
+    if (hud != nullptr) {
+        hud->RefreshMiniMapItems();
+    }
+    GManager::Get().RefreshEngageTriggerIcons();
+}
 
 // PC: 0x60E160. Go: every racer launches.
 void Game_NotifyCountdownDone() {
