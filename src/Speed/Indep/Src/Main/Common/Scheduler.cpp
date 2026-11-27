@@ -251,6 +251,21 @@ float Scheduler::Run(bool full_speed) {
     mTimer = target_timer;
 
     float elapsed = time_delta_seconds > 0.0f ? time_delta_seconds : 0.0f;
+#if defined(EA_PORT_NATIVE)
+    // On PC the loop is locked to vsync, so each frame runs a steady number
+    // of sim ticks. Natively frames are paced to a 60 Hz grid by sleeping,
+    // whose wake-up jitter around one step tipped the tick bank into 0- and
+    // 2-tick frames (visible judder). Snap a frame that is within a quarter
+    // step of a whole number of steps to exactly that many.
+    if (!full_speed) {
+        float steps = elapsed / fTimeStep;
+        float whole = static_cast<float>(static_cast<int>(steps + 0.5f));
+        if (whole >= 1.0f && bAbs(steps - whole) < 0.25f) {
+            elapsed = whole * fTimeStep;
+            mTickBank = 0.0f;
+        }
+    }
+#endif
     mTime += elapsed;
     float delta_tick = elapsed / fTimeStep + mTickBank;
     unsigned int ticks_to_run = static_cast<unsigned int>(delta_tick);
@@ -261,6 +276,10 @@ float Scheduler::Run(bool full_speed) {
         mTickBank = 0.0f;
     }
 
+#if defined(EA_PORT_NATIVE)
+    extern int gPortLastSchedulerTicks; // FERenderMetal.cpp (NFSMW_TRACE_FRAMETIME)
+    gPortLastSchedulerTicks = static_cast<int>(ticks_to_run);
+#endif
     RunNormalSpeed(ticks_to_run);
     return static_cast<float>(ticks_to_run) * fTimeStep;
 }

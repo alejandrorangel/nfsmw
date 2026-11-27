@@ -14,6 +14,7 @@
 
 #include "../Mac/MetalBridge.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -115,12 +116,54 @@ static void PaceFrame() {
 void PortRenderScene(int frame);           // SceneNative.cpp
 void PortVisualTreatmentFrame(int frame); // VisualTreatmentNative.cpp
 
+// NFSMW_TRACE_FRAMETIME: logs frames whose period exceeds 20 ms, split into
+// the game loop (since the last frame was presented) and the render build,
+// plus a once-a-second summary.
+int gPortLastSchedulerTicks = 0; // set by Scheduler::Run
+
+struct FrameTimer {
+    bool on = std::getenv("NFSMW_TRACE_FRAMETIME") != nullptr;
+    int ticks[3] = {};
+    uint64_t last_end = 0, second_start = 0;
+    double worst = 0, sum = 0;
+    int count = 0, slow = 0;
+};
+
+static double MsSince(uint64_t t) {
+    return (clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - t) / 1e6;
+}
+
 void eDisplayFrame() {
     static int frame = 0;
+    static FrameTimer ft;
     frame++;
+    uint64_t render_start = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+    double game_ms = ft.last_end ? (render_start - ft.last_end) / 1e6 : 0;
     PortRenderScene(frame);
+    double scene_ms = MsSince(render_start);
     PortVisualTreatmentFrame(frame);
     int quads = RenderFrontend();
+    if (ft.on) {
+        double render_ms = MsSince(render_start);
+        double period = game_ms + render_ms;
+        if (ft.last_end && period > 20.0) {
+            std::fprintf(stderr, "[frametime] frame %d: %.1f ms (game %.1f, scene %.1f, render %.1f)\n", frame, period, game_ms, scene_ms,
+                         render_ms);
+            ft.slow++;
+        }
+        ft.ticks[std::min(gPortLastSchedulerTicks, 2)]++;
+        ft.worst = std::max(ft.worst, period);
+        ft.sum += period;
+        ft.count++;
+        if (ft.second_start == 0) {
+            ft.second_start = render_start;
+        } else if (MsSince(ft.second_start) >= 1000.0) {
+            std::fprintf(stderr, "[frametime] 1s: %d frames, avg work %.1f ms, worst %.1f ms, %d over 20 ms, sim ticks/frame 0:%d 1:%d 2+:%d\n",
+                         ft.count, ft.sum / ft.count, ft.worst, ft.slow, ft.ticks[0], ft.ticks[1], ft.ticks[2]);
+            ft = FrameTimer();
+            ft.second_start = render_start;
+        }
+    }
     // The PC frame ends by recycling the per-frame scratch memory
     // (eFrameMalloc), which matrices for this frame's draws came from.
     void eSwapFrameMallocBuffers();
@@ -131,6 +174,7 @@ void eDisplayFrame() {
     extern uint32 eFrameCounter;
     eFrameCounter++;
     PaceFrame();
+    ft.last_end = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
 
     if (std::getenv("NFSMW_TRACE_FLOW") && frame % 60 == 0) {
         PortTraceGameFlow(frame);
