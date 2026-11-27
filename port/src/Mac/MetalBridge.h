@@ -106,6 +106,17 @@ struct PortVisualTreatment {
 // Applies the treatment to this 3D frame (call after PortMetal3DBeginFrame).
 void PortMetal3DSetTreatment(const PortVisualTreatment *treatment);
 
+// PC OVERBRIGHT (speed.exe 1.3 sub_6DC040, with the Over Bright option):
+// IDI_OVERBRIGHT_FX pContrast on a quarter-size copy of the frame
+// (saturate(2 (c - offset)) times its grey level), the bloom blur, then
+// added over the treated frame scaled by intensity (D3DRS_BLENDFACTOR / 255).
+struct PortOverBright {
+    float offset;    // OverBrightOffset (sub_6D2CD0 0x6D3230)
+    float intensity; // 0..1
+};
+// Null = off for this frame (call after PortMetal3DBeginFrame).
+void PortMetal3DSetOverBright(const PortOverBright *overbright);
+
 // PC world atmospheric scattering (IDI_WORLD_FX family vertex shaders:
 // extinction and Rayleigh + Henyey-Greenstein Mie in-scattering), with the
 // constants speed.exe 1.3 sub_6D6CF0 sets each frame from the 'effects'

@@ -196,6 +196,8 @@ struct Frame3D {
     PortVisualTreatment vt;
     id<MTLTexture> gain_map;
     PortWorldFog fog = {};
+    bool overbright = false;
+    PortOverBright ob = {};
     // PC shadow map pass (PortMetal3DBeginShadow).
     bool shadow_active = false;
     float shadow_view_proj[16];
@@ -228,10 +230,18 @@ void PortMetal3DBeginFrame(const float view_proj[16]) {
     g3DBuilding.treatment = false;
     g3DBuilding.gain_map = nil;
     g3DBuilding.fog = {};
+    g3DBuilding.overbright = false;
     g3DBuilding.shadow_active = false;
     g3DBuilding.shadow_draws.clear();
     g3DBuilding.shadow_transform_set = false;
     g3DBuilding.inv_shadow_strength = 0;
+}
+
+void PortMetal3DSetOverBright(const PortOverBright *overbright) {
+    g3DBuilding.overbright = overbright != nullptr;
+    if (overbright) {
+        g3DBuilding.ob = *overbright;
+    }
 }
 
 void PortMetal3DBeginShadow(const float view_proj[16]) {
@@ -878,6 +888,23 @@ fragment float4 treatment_fs(QuadOut in [[stage_in]], texture2d<float> scene [[t
     return float4(g.b * rgb, 1);
 }
 
+// IDI_OVERBRIGHT_FX pContrast (ps #0, ps_1_1): c = saturate(2 (t - offset)),
+// grey = dot(c, OverBrightGreyScale (0x8F9B38: 0.5)), out (c grey, 0).
+fragment float4 overbright_fs(QuadOut in [[stage_in]], texture2d<float> src [[texture(0)]], constant float &offset [[buffer(0)]]) {
+    constexpr sampler s(filter::linear, address::clamp_to_edge);
+    float3 c = saturate(2.0 * (src.sample(s, in.uv).rgb - offset));
+    float grey = dot(c, float3(0.5));
+    return float4(c * grey, 0);
+}
+
+// sub_6D3B80 with IDI_FILTER_FX p0 (t0 FilterWeights[0] = 1) and blending
+// BLENDFACTOR, ONE (sub_6C6810(0xE, 2)): the blurred over-bright added over
+// the frame scaled by the blend factor.
+fragment float4 overbright_add_fs(QuadOut in [[stage_in]], texture2d<float> src [[texture(0)]], constant float &intensity [[buffer(0)]]) {
+    constexpr sampler s(filter::linear, address::clamp_to_edge);
+    return float4(src.sample(s, in.uv).rgb * intensity, 0);
+}
+
 fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear);
     float4 c = tex.sample(s, in.uv);
@@ -905,6 +932,10 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     id<MTLRenderPipelineState> _treatmentPipeline;
     id<MTLTexture> _sceneColor, _sceneDepth; // the frame (PC 0x93DEF8)
     id<MTLTexture> _bloom[2];                // quarter size (PC 0x982964, 0x982968)
+    // Over bright: the quarter-size copy (PC 0x98296C) and its contrast/blur
+    // targets (on PC 0x982964/0x982968 again, after the treatment used them).
+    id<MTLTexture> _obSource, _ob[2];
+    id<MTLRenderPipelineState> _overbrightPipeline, _overbrightAddPipeline;
     // Dynamic environment cube (PC 0x982A30) and its depth (0x982A4C).
     id<MTLTexture> _envCube, _envDepth;
     id<MTLTexture> _blackCube; // bound when there is none
@@ -1007,6 +1038,11 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
             if (!_filterPipeline) {
                 NSLog(@"NFSMW: filter pipeline failed: %@", error);
             }
+            pd.fragmentFunction = [lib newFunctionWithName:@"overbright_fs"];
+            _overbrightPipeline = [_device newRenderPipelineStateWithDescriptor:pd error:&error];
+            if (!_overbrightPipeline) {
+                NSLog(@"NFSMW: overbright pipeline failed: %@", error);
+            }
             pd.fragmentFunction = [lib newFunctionWithName:@"treatment_fs"];
             pd.colorAttachments[0].pixelFormat = view.colorPixelFormat;
             pd.depthAttachmentPixelFormat = view.depthStencilPixelFormat;
@@ -1014,6 +1050,14 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
             _treatmentPipeline = [_device newRenderPipelineStateWithDescriptor:pd error:&error];
             if (!_treatmentPipeline) {
                 NSLog(@"NFSMW: treatment pipeline failed: %@", error);
+            }
+            pd.fragmentFunction = [lib newFunctionWithName:@"overbright_add_fs"];
+            pd.colorAttachments[0].blendingEnabled = YES;
+            pd.colorAttachments[0].sourceRGBBlendFactor = pd.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorOne;
+            pd.colorAttachments[0].destinationRGBBlendFactor = pd.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOne;
+            _overbrightAddPipeline = [_device newRenderPipelineStateWithDescriptor:pd error:&error];
+            if (!_overbrightAddPipeline) {
+                NSLog(@"NFSMW: overbright add pipeline failed: %@", error);
             }
         }
         // PC 0x6C5EE9: texture filtering 0 linear min/mag with point mips,
@@ -1395,7 +1439,9 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     cd.height = h / 4 > 0 ? h / 4 : 1;
     for (int i = 0; i < 2; i++) {
         _bloom[i] = [_device newTextureWithDescriptor:cd];
+        _ob[i] = [_device newTextureWithDescriptor:cd];
     }
+    _obSource = [_device newTextureWithDescriptor:cd];
 }
 
 // One IDI_FILTER_FX pass (sub_6D2CD0): taps of (weight, dx, dy) in source
@@ -1460,6 +1506,30 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         [self filter:_bloom[0] into:_bloom[1] taps:blur_h count:4 lumAlpha:false commandBuffer:cmd];
         [self filter:_bloom[1] into:_bloom[0] taps:blur_v count:4 lumAlpha:false commandBuffer:cmd];
     }
+    if (scene.overbright && _overbrightPipeline && _overbrightAddPipeline) {
+        // sub_6DBEC0 with Over Bright on: the frame down to 0x98296C with the
+        // 2x2 kernel 0x8F9560 (IDI_FILTER_FX p5, rgb times the weighted alpha;
+        // guess: the frame's alpha is 1, as the PC back buffer is cleared to
+        // and drawn with ColorWriteMode 7, except the sky's alpha-only pass,
+        // which isn't ported). Then sub_6DC040: pContrast into 0x982964 and
+        // the 0x8F9474 rounds of the 0x8F9530 / 0x8F9500 blur.
+        [self filter:_sceneColor into:_obSource taps:down count:4 lumAlpha:false commandBuffer:cmd];
+        MTLRenderPassDescriptor *op = [MTLRenderPassDescriptor renderPassDescriptor];
+        op.colorAttachments[0].texture = _ob[0];
+        op.colorAttachments[0].loadAction = MTLLoadActionDontCare;
+        op.colorAttachments[0].storeAction = MTLStoreActionStore;
+        id<MTLRenderCommandEncoder> oe = [cmd renderCommandEncoderWithDescriptor:op];
+        [oe setRenderPipelineState:_overbrightPipeline];
+        [oe setFragmentTexture:_obSource atIndex:0];
+        float offset = scene.ob.offset;
+        [oe setFragmentBytes:&offset length:sizeof(offset) atIndex:0];
+        [oe drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+        [oe endEncoding];
+        for (int i = 0; i < 2; i++) {
+            [self filter:_ob[0] into:_ob[1] taps:blur_h count:4 lumAlpha:false commandBuffer:cmd];
+            [self filter:_ob[1] into:_ob[0] taps:blur_v count:4 lumAlpha:false commandBuffer:cmd];
+        }
+    }
 }
 
 // PC sub_6D53D0: the treatment from the offscreen frame into the drawable.
@@ -1485,6 +1555,14 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     [enc setFragmentBytes:vt.spline length:sizeof(vt.spline) atIndex:1];
     [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
     [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+    if (scene.overbright && _overbrightPipeline && _overbrightAddPipeline) {
+        // sub_6DC040's composite over the treated frame (0x93DE60[0x982C60]).
+        [enc setRenderPipelineState:_overbrightAddPipeline];
+        [enc setFragmentTexture:_ob[0] atIndex:0];
+        float intensity = scene.ob.intensity;
+        [enc setFragmentBytes:&intensity length:sizeof(intensity) atIndex:0];
+        [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+    }
 }
 
 - (void)drawInMTKView:(MTKView *)view {

@@ -18,6 +18,8 @@
 #include "Speed/Indep/Src/Ecstasy/Ecstasy.hpp"
 #include "Speed/Indep/Src/Ecstasy/Texture.hpp"
 #include "Speed/Indep/Src/World/VisualTreatment.h"
+#include "Speed/Indep/Src/World/Rain.hpp"
+#include "Speed/Indep/Src/World/ScreenEffects.hpp"
 
 #include "../Mac/MetalBridge.h"
 
@@ -136,6 +138,35 @@ void PortVisualTreatmentFrame(int frame) {
         gVisualTreatment->Trace();
         TextureInfo *gain = GetTextureInfo(bStringHash("UVESVIGNETTE"), 0, 0);
         std::fprintf(stderr, "[vt]   gain map UVESVIGNETTE %p (%dx%d)\n", (void *)gain, gain ? gain->Width : 0, gain ? gain->Height : 0);
+    }
+    // ___eDisplayFrame 0x6DF5A4: over bright (sub_6DC040) with the Over Bright
+    // option (0x9017FC, byte 0x982B26). Natively it rides on the treatment's
+    // offscreen frame. TODO(port): with Visual Treatment off the PC adds it
+    // to the back buffer directly; not done here.
+    if (!off && gPCGraphicsOptions.OverBrightEnable != 0) {
+        PortOverBright ob;
+        ScreenEffectDB *se = view->ScreenEffects;
+        float cloud = view->Precipitation ? view->Precipitation->GetCloudIntensity() : 0.0f; // Rain +0x290
+        float intensity;
+        if (se != nullptr && se->IsActive(SE_GLARE)) {
+            // Glare (SE_inf[3].active, view ScreenEffects +0x30): offset
+            // (1 - intensity) (0.3 + 0.2 cloud) (0x8F9B48/4C), at least 0;
+            // blend factor intensity x 1 (0x8FAE64) x 200 (0x8970CC).
+            float glare = se->GetIntensity(SE_GLARE);
+            ob.offset = (1.0f - glare) * (0.3f + 0.2f * cloud);
+            ob.offset = ob.offset > 0.0f ? ob.offset : 0.0f;
+            intensity = glare * 200.0f;
+        } else {
+            // 0.35 + 0.5 cloud (0x8F9B50/54); blend factor 0.6 (0x8F9B30) with
+            // the visual treatment, else 0.8 (0x8F9B2C), of 255.
+            ob.offset = 0.35f + 0.5f * cloud;
+            intensity = (gPCGraphicsOptions.VisualTreatment != 0 ? 0.6f : 0.8f) * 255.0f;
+            intensity = intensity < 255.0f ? intensity : 255.0f;
+        }
+        ob.offset = ob.offset < 1.0f ? ob.offset : 1.0f;
+        // __ftol2, then the low byte replicated into D3DRS_BLENDFACTOR.
+        ob.intensity = static_cast<float>(static_cast<int>(intensity) & 0xFF) / 255.0f;
+        PortMetal3DSetOverBright(&ob);
     }
     // sub_6D57C0: the treatment (sub_6D53D0) only with the Visual Treatment
     // option (0x901828) on.
