@@ -203,6 +203,7 @@ struct Frame3D {
     id<MTLTexture> sky_misc[3];
     // PC shadow map pass (PortMetal3DBeginShadow).
     bool shadow_active = false;
+    int shadow_detail = 1;
     float shadow_view_proj[16];
     std::vector<Draw3D> shadow_draws;
     bool shadow_transform_set = false;
@@ -320,8 +321,9 @@ void PortMetal3DSetOverBright(const PortOverBright *overbright) {
     }
 }
 
-void PortMetal3DBeginShadow(const float view_proj[16]) {
+void PortMetal3DBeginShadow(const float view_proj[16], int shadow_detail) {
     g3DBuilding.shadow_active = true;
+    g3DBuilding.shadow_detail = shadow_detail;
     g3DBuilding.shadow_draws.clear();
     memcpy(g3DBuilding.shadow_view_proj, view_proj, sizeof(g3DBuilding.shadow_view_proj));
     g3DTarget = &g3DBuilding.shadow_draws;
@@ -515,7 +517,7 @@ fragment float4 fe_fs(FEOut in [[stage_in]], texture2d<float> tex [[texture(0)]]
 // shadow_level > 0; shadow_map: a shadow map was drawn this frame (else
 // every tap reads lit).
 struct MeshConst { float4x4 mvp; float4x4 world; uint stride; uint shade; uint effect; uint pad; float4 eye; float4 view_x;
-                   float4x4 shadow; float inv_shadow; uint shadow_level; uint shadow_map; float pad2; };
+                   float4x4 shadow; float inv_shadow; uint shadow_level; uint shadow_map; float shadow_texel; };
 struct MeshOut { float4 pos [[position]]; float2 uv; float4 color; float3 normal; float3 world_pos; float3 local_normal; float3 local_pos;
                  float4 d0; float4 d1; float3 inscatter; float2 uv1; float spec; float3 tlight; float3 tview; float4 shadow_pos;
                  float2 uv2; float4 clip; };
@@ -715,7 +717,9 @@ float3 EnvColour(float3 r) {
 // hardware depth compare, bilinearly filtered; ZFUNC LESSEQUAL).
 // ShadowMapScale = 1/1024 (sub_6C86B0); the four-tap techniques offset
 // the projected coordinate by +-0.5 ShadowMapScale w in x and y.
-constant float kShadowMapScale = 1.0 / 1024.0;
+// Port deviation: PC's map is a fixed 1024x1024 (a 2005 GPU limit); natively
+// its size follows the render height and Shadow Detail (see drawShadowMap),
+// and MeshConst::shadow_texel (1 / size) keeps PC's +-0.5 texel tap pattern.
 constant float2 kShadowTaps[4] = { float2(-0.5, -0.5), float2(0.5, -0.5), float2(-0.5, 0.5), float2(0.5, 0.5) };
 
 float ShadowCompare(depth2d<float> sm, float4 p) {
@@ -728,8 +732,8 @@ float ShadowColour(texture2d<float> cm, float4 p) {
     return cm.sample(cs, p.xy / p.w).r;
 }
 
-float4 ShadowTap(float4 p, int i) {
-    return float4(p.xy + kShadowTaps[i] * (kShadowMapScale * p.w), p.zw);
+float4 ShadowTap(float4 p, int i, float texel) {
+    return float4(p.xy + kShadowTaps[i] * (texel * p.w), p.zw);
 }
 
 // World effects (IDI_WORLD_FX ps #10 / ps #8 and the WORLDNORMALMAP,
@@ -746,7 +750,7 @@ float WorldShadow(constant MeshConst &c, float4 p, depth2d<float> sm) {
     } else {
         lit = 0;
         for (int i = 0; i < 4; i++) {
-            lit += ShadowCompare(sm, ShadowTap(p, i));
+            lit += ShadowCompare(sm, ShadowTap(p, i, c.shadow_texel));
         }
         lit *= 0.25;
     }
@@ -768,7 +772,7 @@ float CarShadow(constant MeshConst &c, float4 p, depth2d<float> sm, texture2d<fl
     } else {
         float depth = 0, colour = 0;
         for (int i = 0; i < 4; i++) {
-            float4 t = ShadowTap(p, i);
+            float4 t = ShadowTap(p, i, c.shadow_texel);
             depth += ShadowCompare(sm, t);
             colour += ShadowColour(cm, t);
         }
@@ -1115,6 +1119,8 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     // PC shadow map (sub_6E44C0): 1024x1024 depth (0x982CF8) and colour
     // (0x982CF0) targets; pipelines for car (red) and world (depth only) draws.
     id<MTLTexture> _shadowDepth, _shadowColour;
+    NSUInteger _shadowSize;
+    CGFloat _drawableHeight;
     id<MTLTexture> _shadowDepthLit; // 1x1 depth 1, bound when no map was drawn
     id<MTLRenderPipelineState> _shadowPipelines[2];
     bool _shadowValid;        // this frame's scene has a shadow map
@@ -1403,7 +1409,19 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     if (!scene.shadow_active || !scene.shadow_transform_set || !_shadowPipelines[0] || !_shadowPipelines[1]) {
         return;
     }
-    const NSUInteger size = 1024; // sub_6C8770, sub_6C86B0
+    // PC: 1024 (sub_6C8770, sub_6C86B0). Natively about the render height
+    // (Shadow Detail 1) or twice it (2), a power of two in 1024..4096.
+    CGFloat height = _drawableHeight > 0 ? _drawableHeight : 1024;
+    NSUInteger want = (NSUInteger)(height * (scene.shadow_detail >= 2 ? 2.0 : 1.0));
+    NSUInteger size = 1024;
+    while (size < want && size < 4096) {
+        size *= 2;
+    }
+    if (_shadowDepth != nil && _shadowDepth.width != size) {
+        _shadowDepth = nil;
+        _shadowColour = nil;
+    }
+    _shadowSize = size;
     if (_shadowDepth == nil) {
         MTLTextureDescriptor *dd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float
                                                                                       width:size
@@ -1548,7 +1566,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                     float inv_shadow;
                     uint32_t shadow_level;
                     uint32_t shadow_map;
-                    float pad2;
+                    float shadow_texel;
                 } c = {};
                 c.stride = d.vertex_stride;
                 c.effect = d.effect;
@@ -1595,6 +1613,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 // texture matrix (sub_6C82B0).
                 c.shadow_level = d.shadow_level;
                 c.shadow_map = _shadowValid ? 1 : 0;
+                c.shadow_texel = 1.0f / (float)(_shadowSize ? _shadowSize : 1024);
                 c.inv_shadow = _invShadowStrength;
                 if (d.shadow_level != 0) {
                     for (int i = 0; i < 4; i++) {
@@ -1948,6 +1967,7 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
 }
 
 - (void)drawInMTKView:(MTKView *)view {
+    _drawableHeight = view.drawableSize.height;
     MTLRenderPassDescriptor *pass = view.currentRenderPassDescriptor;
     if (!pass) {
         return;

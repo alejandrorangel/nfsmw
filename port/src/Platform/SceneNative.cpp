@@ -35,6 +35,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <set>
 
 TextureInfo *PortSolidTexture(eSolid *solid, int index); // SolidNative.cpp
 extern bTList<FrontEndRenderingCar> FrontEndRenderingCarList; // CarRender.cpp
@@ -1286,7 +1287,7 @@ bool RenderWorldScene(int frame) {
         // TODO(port): the shadow-map meshes (sub_6D7F70, list 0x982D10,
         // IDI_SHADOW_MAP_MESH_FX) and the caster test against the narrower
         // frustum and its sweep along the light (sub_6D7A40) are not ported.
-        PortMetal3DBeginShadow(shadow_proj);
+        PortMetal3DBeginShadow(shadow_proj, shadow_detail);
         RenderWorldModels(shadow_view, 0);
         gWorldCullInfo.StuffScenery(shadow_view, shadow_detail == 1 ? 0x2000 : 0x200);
         VehicleRenderConn::RenderAll(shadow_view, 0);

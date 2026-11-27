@@ -186,7 +186,7 @@ void PortMetal3DEndEnvFace();
 // view_proj (world -> shadow clip). CAR draws use IDI_CAR_SHADOW_MAP_FX
 // (depth, and red = 1 in the colour map); everything else writes depth only
 // (ColorWriteMode 0). Depth bias 4 / 2^24, slope scale 4 (sub_6E54E0).
-void PortMetal3DBeginShadow(const float view_proj[16]);
+void PortMetal3DBeginShadow(const float view_proj[16], int shadow_detail);
 void PortMetal3DEndShadow();
 // The effects' ShadowTransform (world -> shadow texture, projective) and
 // InvShadowStrength for the shadowed techniques this frame.
