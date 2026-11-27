@@ -18,6 +18,11 @@ NFSMW_DATA=~/Games/NFSMW port/tools/crashtrace.sh   # stubs hit + backtrace unde
 python3 port/tools/port_report.py          # categorised native compile errors
 ```
 
+Debug builds the game code at -O0 (it hangs at -O2: undefined behaviour in
+decompiled code) but the drawing-only port sources (the renderer, the frame
+build, culling) at -O2; `-DNFSMW_PORT_OPTIMIZE_RENDERER=OFF` builds them at
+-O0 too, for debugging. Neither changes a frame.
+
 The app owns `main()` and runs the game's (renamed) `NFSMW_GameMain` on a
 64 MB-stack thread, with `NFSMW_DATA` as the working directory.
 
