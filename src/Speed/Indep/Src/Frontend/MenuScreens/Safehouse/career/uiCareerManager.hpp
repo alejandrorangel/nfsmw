@@ -35,7 +35,13 @@ class CResumeCareer : public IconOption {
 
             if (FEDatabase->GetCareerSettings()->GetCurrentBin() != 16 && !should_go_into_epic_pursuit) {
                 GManager::Get().SetStartingFreeRoamFromSafeHouse();
+#ifdef EA_PLATFORM_WIN32
+                // PC (0x532650) switches to MainMenu_Sub.fng, the career menu
+                // that is now the safehouse's (IG_SafehouseMain.fng crashes).
+                cFEng::Get()->QueuePackageSwitch("MainMenu_Sub.fng", 0, 0, false);
+#else
                 cFEng::Get()->QueuePackageSwitch("IG_SafehouseMain.fng", 0, 0, false);
+#endif
             }
         }
     }
