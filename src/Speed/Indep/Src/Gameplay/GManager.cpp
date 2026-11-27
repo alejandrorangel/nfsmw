@@ -1,7 +1,11 @@
 #include "Speed/Indep/Src/Gameplay/GManager.h"
 
 #include "Speed/Indep/Src/Gameplay/GRaceDatabase.h"
+#include "Speed/Indep/Src/Gameplay/GRaceStatus.h"
 #include "Speed/Indep/Src/Gameplay/GVault.h"
+#include "Speed/Indep/Src/Generated/Hash.hpp"
+#include "Speed/Indep/Src/Generated/Messages/MEnteringGameplay.h"
+#include "Speed/Indep/Src/Misc/Config.h"
 #include "Speed/Indep/Src/Misc/LZCompress.hpp"
 #include "Speed/Indep/Src/Misc/bFile.hpp"
 #include "Speed/Indep/bWare/Inc/bMemory.hpp"
@@ -336,4 +340,107 @@ void GManager::OnRemovedVehicleCache(IVehicle *ivehicle) {
             return;
         }
     }
+}
+
+// PC: 0x5EBF30.
+bool GManager::StockCarsLoaded() {
+    for (StockCarMap::iterator iter = mStockCars.begin(); iter != mStockCars.end(); ++iter) {
+        IVehicle *ivehicle;
+        if (iter->second->QueryInterface(&ivehicle) && ivehicle->IsLoading()) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// PC: 0x6035F0. A queued restart event becomes the startup race.
+void GManager::PreBeginGameplay() {
+    if (mRestartEventHash == 0) {
+        return;
+    }
+    GRaceDatabase &raceDatabase = GRaceDatabase::Get();
+    GRaceCustom *custom = raceDatabase.AllocCustomRace(raceDatabase.GetRaceFromHash(mRestartEventHash));
+    raceDatabase.SetStartupRace(custom, GRace::kRaceContext_Career);
+    if (custom != nullptr) {
+        raceDatabase.FreeCustomRace(custom);
+    }
+    mRestartEventHash = 0;
+}
+
+// PC: 0x603500.
+void GManager::BeginGameplay() {
+    for (unsigned int onVault = 0; onVault < mVaultCount; onVault++) {
+        if (mVaults[onVault].IsLoaded()) {
+            mVaults[onVault].CreateGameplayObjects();
+        }
+    }
+    GRaceCustom *startupRace = GRaceDatabase::Get().GetStartupRace();
+    if (startupRace != nullptr) {
+        startupRace->CreateRaceActivity();
+    }
+    // TODO(port): ConnectRuntimeInstances (PC: 0x5F18A0); the gameplay
+    // runtime instances aren't ported.
+    StartActivities();
+    // TODO(port): WCollisionAssets::AddPackLoadCallback(NotifyCollisionPackLoaded)
+    // (icons per collision pack aren't ported).
+    mPursuitBreakerIconsShown = false;
+    mHidingSpotIconsShown = false;
+    mEventIconsShown = false;
+    mMenuGateIconsShown = false;
+    mSpeedTrapIconsShown = false;
+    mSpeedTrapRaceIconsShown = false;
+    // TODO(port): RefreshEngageTriggerIcons, RefreshSpeedTrapIcons,
+    // SpawnAllLoadedSectionIcons (icons aren't ported).
+    if (startupRace == nullptr && GRaceStatus::Get().GetCurrentBin() != nullptr) {
+        GRaceStatus::Get().GetCurrentBin()->EnableBarriers();
+    }
+    MEnteringGameplay().Post(UCrc32(UCRC32_Gameplay));
+    mStartFreeRoamFromSafeHouse = false;
+    mInGameplay = true;
+}
+
+// PC: 0x5F9E70. Runs the startup race's activity (or the free roam and bin
+// activities) and hands the race context to the race status.
+void GManager::StartActivities() {
+    bool startWorld = SkipFE == 0;
+    bool binChanged = false;
+    GRaceCustom *startupRace = GRaceDatabase::Get().GetStartupRace();
+    GRaceBin *raceBin = GRaceStatus::Get().GetCurrentBin();
+    if (startupRace != nullptr) {
+        // TODO(port): startupRace->GetRaceActivity()->Run() (PC: 0x5F93D0).
+        // GActivity and the Lua race scripts it drives aren't ported, so
+        // nothing calls Game_SetRaceActivity/Game_AddPlayer/Game_StartRace and
+        // the race status gets no race parameters or racers.
+        GRace::Context context = GRaceDatabase::Get().GetStartupRaceContext();
+        GRaceStatus::Get().SetRaceContext(context);
+        startWorld = context == GRace::kRaceContext_Career && startWorld;
+        if (raceBin != nullptr && startupRace->GetChildVault() != raceBin->GetChildVault()) {
+            binChanged = true;
+            if (context == GRace::kRaceContext_Career) {
+                GRaceStatus::Get().RefreshBinAfterRace();
+            }
+        }
+    }
+    if (startWorld) {
+        // TODO(port): StartWorldActivities(startupRace == nullptr) and running
+        // the bin's GActivity when !binChanged; not ported.
+        (void)binChanged;
+    }
+}
+
+// PC: 0x5E4C10.
+void GManager::UpdateTimers(float dT) {
+    for (int i = 0; i < 8; i++) {
+        mTimers[i].Update(dT);
+    }
+}
+
+// PC: 0x6036C0.
+void GManager::Update(float dT) {
+    GRaceStatus::Get().Update(dT);
+    // TODO(port): UnspawnUselessCharacters, ServicePendingCharacters and
+    // UpdatePursuit (characters and the pursuit bookkeeping aren't ported).
+    UpdateTimers(dT);
+    // TODO(port): UpdatePendingSMS, UpdateTriggerAvailability and
+    // UpdateIconVisibility (SMS, triggers and icons aren't ported).
 }
