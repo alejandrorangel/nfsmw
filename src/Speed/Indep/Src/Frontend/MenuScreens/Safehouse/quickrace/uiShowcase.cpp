@@ -14,7 +14,11 @@ const char *Showcase::FromPackage;
 uint32 Showcase::FromArgs;
 uint32 Showcase::FromIndex;
 uint32 Showcase::BlackListNumber;
+#if defined(EA_PORT_NATIVE)
+int32 Showcase::FromFilter = -1; // speed.exe 0x905E38 (.data): "no filter to restore"
+#else
 int32 Showcase::FromFilter;
+#endif
 #ifndef EA_BUILD_A124
 void *Showcase::FromColor[3];
 #endif

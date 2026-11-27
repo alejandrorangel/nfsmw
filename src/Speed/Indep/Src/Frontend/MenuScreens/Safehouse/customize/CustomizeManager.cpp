@@ -1227,7 +1227,12 @@ void CarCustomizeManager::GetCarPartList(int car_slot, bTList<SelectablePart> &t
                 break;
             case CARSLOTID_VINYL_LAYER0: {
                 bool exists = StreamingTexturePackLoader.GetStreamingEntry(GetVinylLayerHash(part, car_type, 1)) != nullptr;
+#if defined(EA_PORT_NATIVE)
+                // speed.exe 0x7AF4F0: the PC collector's edition vinyls are branded "CEO".
+                bool is_collectors = part->GetBrandNameHash() == bStringHash("CEO");
+#else
                 bool is_collectors = part->GetBrandNameHash() == bStringHash("SPECIAL");
+#endif
                 if (!exists) {
                     continue;
                 }
