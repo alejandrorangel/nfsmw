@@ -227,6 +227,7 @@ class Scrollerina {
         pScrollRegion = region;
         FindSize();
     }
+    void UpdateMouse();
 #endif
 
   protected:

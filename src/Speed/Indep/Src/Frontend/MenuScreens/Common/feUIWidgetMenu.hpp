@@ -65,6 +65,7 @@ class UIWidgetMenu : public MenuScreen {
 #ifdef EA_PLATFORM_WIN32
     FEWidget *GetWidgetAt(float x, float y);
     void UpdateMouse();
+    void UpdateScrollBarMouse();
 #endif
     FEInputWidget *GetCurrentInputWidget() {};
 

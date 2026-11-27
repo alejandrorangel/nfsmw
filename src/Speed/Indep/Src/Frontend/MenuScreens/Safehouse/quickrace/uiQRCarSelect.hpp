@@ -111,6 +111,9 @@ class UIQRCarSelect : public MenuScreen {
     void ClearCarList();
     void ScrollCars(eScrollDir dir);
     void ScrollLists(eScrollDir dir);
+#ifdef EA_PLATFORM_WIN32
+    bool UpdateMouse();
+#endif
     void RefreshHeader();
     void UpdateSliders();
     void ChooseTransmission();

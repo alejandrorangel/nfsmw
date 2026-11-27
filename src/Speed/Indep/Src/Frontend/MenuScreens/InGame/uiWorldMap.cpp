@@ -28,6 +28,9 @@
 #include "Speed/Indep/Src/Interfaces/SimEntities/IPlayer.h"
 #include "Speed/Indep/Src/Misc/Timer.hpp"
 #include "Speed/Indep/Src/Physics/PVehicle.h"
+#ifdef EA_PLATFORM_WIN32
+#include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngMouse.hpp"
+#endif
 #include "Speed/Indep/bWare/Inc/bMath.hpp"
 
 extern int iCurrentViewBin;
@@ -171,12 +174,21 @@ WorldMap::WorldMap(ScreenConstructorData *sd)
     int player_port = FEDatabase->GetPlayersJoystickPort(0);
     mActionQ = new ActionQueue(player_port, 0x82d21520, "WorldMapMain", false);
     mActionQ->Enable(true);
+#ifdef EA_PLATFORM_WIN32
+    // PC (speed.exe 1.3 @ 0x5614D0)
+    bCursorOn = !gFEMouseCursorHidden;
+#endif
     iMaxWidgetsOnScreen = 10;
     Setup();
     RefreshHeader();
 }
 
 WorldMap::~WorldMap() {
+#ifdef EA_PLATFORM_WIN32
+    // The PC leaves the frontend cursor hidden if the map closes while the
+    // mouse is over it (until the mouse next leaves a map); don't.
+    gFEMouseCursorHidden = false;
+#endif
     delete mActionQ;
     delete MapStreamer;
     MapStreamer = nullptr;
@@ -205,9 +217,28 @@ void WorldMap::NotificationMessage(u32 msg, FEObject *obj, u32 param1, u32 param
         }
     }
     if (msg != __BUTTON_PRESSED__) {
+#ifdef EA_PLATFORM_WIN32
+        // PC (speed.exe 1.3 @ 0x55B0C0): outside toggle mode the mouse is the
+        // map's, not the widget menu's
+        if (!bInToggleMode && msg == FEMSG_MOUSE_CHANGED) {
+            goto after_base_message;
+        }
+#endif
         UIWidgetMenu::NotificationMessage(msg, obj, param1, param2);
     }
 after_base_message:
+#ifdef EA_PLATFORM_WIN32
+    if (msg == FEMSG_MOUSE_CHANGED) {
+        // PC (speed.exe 1.3 @ 0x55B35E): the wheel zooms, a drag pans
+        if (static_cast<float>(gFEMouseState.Wheel) > 0.0f) {
+            ScrollZoom(eSD_PREV);
+        } else if (static_cast<float>(gFEMouseState.Wheel) < 0.0f) {
+            ScrollZoom(eSD_NEXT);
+        }
+        UpdateMouseDrag();
+        return;
+    }
+#endif
     if (msg == 0xa16ca7bd) {
         goto handle_gps;
     }
@@ -314,9 +345,16 @@ update_map:
         bVector2 pan;
         bVector2 *pPan = &pan;
 
+#ifdef EA_PLATFORM_WIN32
+        // PC (speed.exe 1.3 @ 0x55B6F6): the mouse moves the cursor; the PC
+        // never calls the analog UpdateCursor(bool) (0x552F40 is unreferenced)
+        MapStreamer->UpdateAnimation();
+        UpdateMouseCursor();
+#else
         UpdateCursor(false);
         MapStreamer->UpdateAnimation();
         UpdateCursor(true);
+#endif
         zoom = MapStreamer->GetZoomFactor();
         max_zoom = GetZoomFactor(WMZ_LEVEL_4);
         pPan->x = 0.0f;
@@ -405,6 +443,10 @@ handle_toggle_or_dialog:
         if (isimable == nullptr) {
             return;
         }
+#ifdef EA_PLATFORM_WIN32
+        // PC (speed.exe 1.3 @ 0x55B227): the dialog wants the frontend cursor
+        gFEMouseCursorHidden = false;
+#endif
 
         unsigned int title_hash;
         unsigned int message_hash;
@@ -427,6 +469,11 @@ handle_toggle_or_dialog:
     return;
 
 handle_gps:
+#ifdef EA_PLATFORM_WIN32
+    if (!bCursorOn) { // PC (speed.exe 1.3 @ 0x55B4E6)
+        gFEMouseCursorHidden = true;
+    }
+#endif
     if (GPS_IsEngaged()) {
         GPS_Disengage();
         ClearGPSing();
@@ -527,6 +574,21 @@ world_map_off:
 
 void WorldMap::ScrollZoom(eScrollDir dir) {
     int zoom = CurrentZoom;
+#ifdef EA_PLATFORM_WIN32
+    // PC (speed.exe 1.3 @ 0x552CB0): the zoom stops at the ends instead of
+    // wrapping
+    if (dir == eSD_PREV) {
+        zoom--;
+        if (zoom < 0) {
+            zoom = 0;
+        }
+    } else if (dir == eSD_NEXT) {
+        zoom++;
+        if (zoom > WMZ_MAX_ZOOM) {
+            zoom = WMZ_MAX_ZOOM;
+        }
+    }
+#else
     if (dir == eSD_PREV) {
         zoom--;
         if (zoom < 0) {
@@ -538,6 +600,7 @@ void WorldMap::ScrollZoom(eScrollDir dir) {
             zoom = 0;
         }
     }
+#endif
     if (zoom != CurrentZoom) {
         CurrentZoom = zoom;
         RefreshHeader();
@@ -717,6 +780,70 @@ void WorldMap::UpdateCursor(bool zoom_thing) {
     }
 }
 
+#ifdef EA_PLATFORM_WIN32
+// PC (speed.exe 1.3 @ 0x552DA0; name is a guess), every tick: over the map
+// the mouse is the map cursor (the frontend cursor hides), snapping to the
+// nearest item; holding the left button off an item starts a drag, releasing
+// it over the map with an item selected presses it.
+void WorldMap::UpdateMouseCursor() {
+    if (!bInToggleMode) {
+        float x, y;
+        FEngGetMousePos(x, y);
+        bVector2 top_left(MapTopLeft.x + 8.0f, MapTopLeft.y + 26.0f);
+        bVector2 size(MapSize.x - 16.0f, MapSize.y - 58.0f);
+        if (FEngTestForIntersection(x, y, top_left, size)) {
+            gFEMouseCursorHidden = true;
+            FEngSetVisible(Cursor);
+            if (SnapCursor()) {
+                RefreshHeader();
+            }
+            if (SelectedItem == nullptr) {
+                FEngSetCenter(Cursor, x, y);
+                if (gFEMouseState.LeftDown) {
+                    bLeftHeldOnMap = true;
+                }
+            }
+            if (SelectedItem != nullptr && FEngMouseLeftReleasedIn(top_left, size)) {
+                cFEng::Get()->QueueGameMessage(__BUTTON_PRESSED__, GetPackageName(), 0xFF);
+            }
+        } else {
+            gFEMouseCursorHidden = false;
+            FEngSetInvisible(Cursor);
+        }
+    }
+    if (!gFEMouseState.LeftDown) {
+        bLeftHeldOnMap = false;
+    }
+}
+
+// PC (speed.exe 1.3 @ 0x511B80; name is a guess), on FEMSG_MOUSE_CHANGED:
+// dragging pans a zoomed-in map against the mouse, eased like MoveCursor.
+void WorldMap::UpdateMouseDrag() {
+    if (!bLeftHeldOnMap) {
+        return;
+    }
+    bVector2 delta(static_cast<float>(-gFEMouseState.DeltaX), static_cast<float>(-gFEMouseState.DeltaY));
+    float scale = 1.0f / MapStreamer->GetZoomFactor();
+    delta.x *= scale + scale;
+    delta.y *= scale + scale;
+    if (CurrentZoom == 0 || (delta.x == 0.0f && delta.y == 0.0f)) {
+        return;
+    }
+    bVector2 pan;
+    MapStreamer->GetPan(pan);
+    pan.x += delta.x / MapSize.x;
+    pan.y += delta.y / MapSize.y;
+    float max_pan = 0.5f - scale * 0.5f;
+    pan.x = bClamp(pan.x, -max_pan, max_pan);
+    pan.y = bClamp(pan.y, -max_pan, max_pan);
+    bVector2 prev_pan;
+    MapStreamer->GetPan(prev_pan);
+    pan.x = (pan.x + prev_pan.x) * 0.5f + 0.5f;
+    pan.y = (pan.y + prev_pan.y) * 0.5f + 0.5f;
+    MapStreamer->SetPan(pan);
+}
+#endif
+
 void WorldMap::MoveCursor(float x, float y) {
     float dx = FEngGetCenterX(Cursor) + x;
     float dy = FEngGetCenterY(Cursor) + y;
@@ -766,7 +893,12 @@ void WorldMap::MoveCursor(float x, float y) {
 
 bool WorldMap::SnapCursor() {
     bVector2 cursor;
+#ifdef EA_PLATFORM_WIN32
+    // PC (speed.exe 1.3 @ 0x530A60): snaps to the item nearest the mouse
+    FEngGetMousePos(cursor.x, cursor.y);
+#else
     FEngGetCenter(Cursor, cursor.x, cursor.y);
+#endif
     bVector2 item_pos;
     MapItem *snap_to = nullptr;
     float last_closest = 100000000.0f;

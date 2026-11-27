@@ -67,6 +67,9 @@ class GarageMainScreen : public MenuScreen {
     void HandleShowPackage(uint32 msg);
     void HandleHidePackage(uint32 msg);
     void HandleJoyEvents();
+#ifdef EA_PLATFORM_WIN32
+    void HandleMouseInput();
+#endif
     float GetCarRotationX();
     float GetCarRotationY();
     float GetCarRotationZ();

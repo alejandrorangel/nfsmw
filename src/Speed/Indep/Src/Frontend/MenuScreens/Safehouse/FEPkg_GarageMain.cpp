@@ -32,6 +32,9 @@
 #include "Speed/Indep/Src/Frontend/FECarViewer.hpp"
 #include "Speed/PSX2/Src/Ecstasy/EcstasyE.hpp"
 #include "Speed/Indep/Src/Misc/GameFlow.hpp"
+#ifdef EA_PLATFORM_WIN32
+#include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngMouse.hpp"
+#endif
 
 // TODO: esolidplat
 extern bTList<eSolid> SolidList;
@@ -766,10 +769,34 @@ void GarageMainScreen::NotificationMessage(u32 Message, FEObject *pObject, u32 P
             HandleJoyEvents();
             break;
         case FEMSG_SCREEN_TICK:
+#ifdef EA_PLATFORM_WIN32
+            HandleMouseInput(); // PC (speed.exe 1.3 @ 0x7BA179)
+#endif
             HandleTick(FEMSG_SCREEN_TICK);
             break;
     }
 }
+
+#ifdef EA_PLATFORM_WIN32
+// PC (speed.exe 1.3 @ 0x7A2010; name is a guess), every tick where the user
+// may move the camera: the wheel zooms, dragging with the left button orbits
+// (a pixel a tick is a degree a tick).
+void GarageMainScreen::HandleMouseInput() {
+    if (bUserRotate || CarGuysCamera) {
+        FEngGetMouseWheel(mZoom);
+        pCameraMover->SetZoomSpeed(mZoom * -0.016f);
+        sNumTicksSinceUserMovedCamera = sNumTicksBeforeCamMovesBackToScreenPosition;
+        if (gFEMouseState.LeftDown) {
+            mOrbitH = static_cast<float>(gFEMouseState.DeltaX);
+            pCameraMover->SetHRotateSpeed(mOrbitH);
+            sNumTicksSinceUserMovedCamera = sNumTicksBeforeCamMovesBackToScreenPosition;
+            mOrbitV = static_cast<float>(gFEMouseState.DeltaY);
+            pCameraMover->SetVRotateSpeed(mOrbitV);
+            sNumTicksSinceUserMovedCamera = sNumTicksBeforeCamMovesBackToScreenPosition;
+        }
+    }
+}
+#endif
 
 MenuScreen *CreateGarageMainScreen(ScreenConstructorData *sd) {
     return new ("GarageMainScreen", 0) GarageMainScreen(sd, 1, &TopOrFullScreenRide, 0);

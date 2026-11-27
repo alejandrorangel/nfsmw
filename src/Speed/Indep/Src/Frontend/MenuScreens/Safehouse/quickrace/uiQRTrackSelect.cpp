@@ -9,6 +9,10 @@
 #include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/quickrace/uiQRBrief.hpp"
 #include "Speed/Indep/Src/Gameplay/GRaceDatabase.h"
 #include "Speed/Indep/Src/Frontend/Careers/UnlockSystem.hpp"
+#ifdef EA_PLATFORM_WIN32
+#include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterfaceFEObjects.hpp"
+#include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngMouse.hpp"
+#endif
 
 UIQRTrackSelect::UIQRTrackSelect(ScreenConstructorData *sd) : MenuScreen(sd), Tracks(), pCurrentNode(nullptr), pCurrentTrack(nullptr) {
     Setup();
@@ -107,8 +111,47 @@ void UIQRTrackSelect::NotificationMessage(u32 msg, FEObject *pobj, u32 param1, u
         case FEMSG_SCREEN_TICK:
             TrackMapStreamer.UpdateAnimation();
             break;
+#ifdef EA_PLATFORM_WIN32
+        case FEMSG_MOUSE_CHANGED: // PC (speed.exe 1.3 @ 0x7C1622)
+            UpdateMouse();
+            break;
+#endif
     }
 }
+
+#ifdef EA_PLATFORM_WIN32
+// PC (speed.exe 1.3 @ 0x7BF510; name is a guess): the wheel over the track
+// list scrolls the tracks, over the region selector it cycles the regions
+// (flashing the bumper button the keyboard would use).
+bool UIQRTrackSelect::UpdateMouse() {
+    float x, y;
+    FEngGetMousePos(x, y);
+    float wheel;
+    if (FEngTestForIntersection(x, y, FEngFindObject(GetPackageName(), 0x82CF6FAD))) {
+        FEngGetMouseWheel(wheel);
+        if (wheel < 0.0f) {
+            cFEng::Get()->QueuePackageMessage(FEHASH_RIGHT, GetPackageName(), nullptr);
+            ScrollTracks(eSD_NEXT);
+        } else if (wheel > 0.0f) {
+            cFEng::Get()->QueuePackageMessage(FEHASH_LEFT, GetPackageName(), nullptr);
+            ScrollTracks(eSD_PREV);
+        }
+        return true;
+    }
+    if (FEngTestForIntersection(x, y, FEngFindObject(GetPackageName(), 0x2C077A9C))) {
+        FEngGetMouseWheel(wheel);
+        if (wheel < 0.0f) {
+            FEngSetScript(GetPackageName(), 0x2D145BE3, FEHASH_PRESSED, true);
+            ScrollRegions(eSD_NEXT);
+        } else if (wheel > 0.0f) {
+            FEngSetScript(GetPackageName(), 0x091C4A50, FEHASH_PRESSED, true);
+            ScrollRegions(eSD_PREV);
+        }
+        return true;
+    }
+    return false;
+}
+#endif
 
 void UIQRTrackSelect::SetSelectedTrack(GRaceParameters *track) {
     if (track != nullptr) {

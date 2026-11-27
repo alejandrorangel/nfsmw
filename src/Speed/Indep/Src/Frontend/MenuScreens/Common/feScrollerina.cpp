@@ -5,6 +5,10 @@
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterfaceFEImages.hpp"
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterfaceFEObjects.hpp"
 #include "Speed/Indep/Src/Frontend/MenuScreens/Common/feWidget.hpp"
+#ifdef EA_PLATFORM_WIN32
+#include "Speed/Indep/Src/Frontend/FEngHashes/ScriptHashes.hpp"
+#include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngMouse.hpp"
+#endif
 
 void ScrollerSlot::SetScript(uint32 script_hash) {
     for (ScrollerSlotNode *node = FEStrings.GetHead(); node != FEStrings.EndOfList(); node = node->GetNext()) {
@@ -524,6 +528,144 @@ void Scrollerina::SetSelected(ScrollerSlot *slot) {
         }
     }
 }
+
+#ifdef EA_PLATFORM_WIN32
+// PC (speed.exe 1.3 @ 0x59B470): scroll the view by rows without moving the
+// selection; the highlight follows the selected datum and goes when it leaves
+// the view (which then needs a sync before the selection can move).
+bool Scrollerina::ScrollView(int dir) {
+    if (Slots.IsEmpty() || Data.IsEmpty() || iNumData <= iNumSlots) {
+        return false;
+    }
+    ScrollerDatum *old_top = TopDatum;
+    ScrollerSlot *slot = SelectedSlot;
+    for (; dir > 0; dir--) {
+        if (iViewHeadDataIndex > iNumData - iNumSlots) {
+            break;
+        }
+        if (slot != nullptr) {
+            slot = slot == Slots.GetHead() ? nullptr : slot->GetPrev();
+        }
+        TopDatum = TopDatum->GetNext();
+        iViewHeadDataIndex++;
+    }
+    for (; dir < 0; dir++) {
+        if (TopDatum == Data.GetHead()) {
+            break;
+        }
+        if (slot != nullptr) {
+            SelectedSlot->UnHighlight();
+            slot = slot == Slots.GetTail() ? nullptr : slot->GetNext();
+        }
+        TopDatum = TopDatum->GetPrev();
+        iViewHeadDataIndex--;
+    }
+    if (slot != SelectedSlot) {
+        if (SelectedSlot != nullptr) { // the PC doesn't check
+            SelectedSlot->UnHighlight();
+        }
+        SelectedSlot = slot;
+        if (slot != nullptr) {
+            slot->Highlight();
+        }
+    }
+    if (old_top == TopDatum) {
+        return false;
+    }
+    uint32 selected = GetNodeIndex(SelectedDatum);
+    if (selected < iViewHeadDataIndex || selected >= iNumSlots + iViewHeadDataIndex) {
+        bViewNeedsSync = true;
+        FEngSetScript(pParentPkg, 0x06745352, 0x0016A259, true);
+    } else {
+        bViewNeedsSync = false;
+        if (SelectedSlot == nullptr) {
+            SelectedSlot = FindSlotWithDatum(SelectedDatum);
+            HighlightSelected();
+        }
+    }
+    SetDisabledScripts();
+    Print();
+    DrawScrollBar();
+    return true;
+}
+
+// PC (speed.exe 1.3 @ 0x59B7F0)
+void Scrollerina::PageUp() {
+    for (ScrollerSlot *slot = Slots.GetHead(); slot != Slots.EndOfList(); slot = slot->GetNext()) {
+        ScrollView(-1);
+    }
+}
+
+// PC (speed.exe 1.3 @ 0x59B830)
+void Scrollerina::PageDown() {
+    for (ScrollerSlot *slot = Slots.GetHead(); slot != Slots.EndOfList(); slot = slot->GetNext()) {
+        ScrollView(1);
+    }
+}
+
+// PC (speed.exe 1.3 @ 0x5A5540; the PC symbol says
+// UIEATraxScreen::ScrollTrackPlayability, but it is this), on
+// FEMSG_MOUSE_CHANGED: the wheel over the list scrolls the view; over an
+// enabled row the mouse selects it (or, in click-to-select mode, a click
+// does) and a click on the selected row sends the mouse-down message; then
+// the scroll bar.
+void Scrollerina::UpdateMouse() {
+    float x, y;
+    FEngGetMousePos(x, y);
+    if (FEngTestForIntersection(x, y, vTopLeft, vSize)) {
+        float wheel;
+        FEngGetMouseWheel(wheel);
+        if (wheel > 0.0f) {
+            ScrollView(-1);
+            cFEng::Get()->QueuePackageMessage(0x704, pParentPkg, nullptr);
+        } else if (wheel < 0.0f) {
+            ScrollView(1);
+            cFEng::Get()->QueuePackageMessage(0x148CD7, pParentPkg, nullptr);
+        }
+        ScrollerSlot *selected = SelectedSlot;
+        ScrollerDatum *datum = TopDatum;
+        for (ScrollerSlot *slot = Slots.GetHead(); slot != Slots.EndOfList() && datum != Data.EndOfList();
+             slot = slot->GetNext(), datum = datum->GetNext()) {
+            if (!datum->IsEnabled()) {
+                continue;
+            }
+            bVector2 top_left;
+            bVector2 size;
+            slot->GetTopLeft(top_left);
+            slot->GetSize(size);
+            if (!FEngTestForIntersection(x, y, top_left, size)) {
+                continue;
+            }
+            if (!bInClickToSelectMode) {
+                if (selected != slot) {
+                    SetSelected(slot);
+                }
+                if (mouseDownMsg != 0 && gFEMouseState.LeftPressed) {
+                    cFEng::Get()->QueueGameMessage(mouseDownMsg, pParentPkg, 0xFF);
+                }
+            } else if (gFEMouseState.LeftPressed) {
+                if (selected != slot) {
+                    SetSelected(slot);
+                } else if (mouseDownMsg != 0) {
+                    cFEng::Get()->QueueGameMessage(mouseDownMsg, pParentPkg, 0xFF);
+                }
+            }
+            break;
+        }
+    }
+    ScrollBar.UpdateMouse();
+    int scroll = ScrollBar.GetMouseScroll();
+    if (scroll == eSD_NONE) {
+        DrawScrollBar();
+    } else if (scroll == eSD_PAGE_NEXT) {
+        PageDown();
+    } else if (scroll == eSD_PAGE_PREV) {
+        PageUp();
+    } else {
+        ScrollView(scroll);
+    }
+}
+#endif
 
 void Scrollerina::FindSize() {
     if (pBacking == nullptr) {

@@ -25,6 +25,9 @@ class UIQRTrackSelect : public MenuScreen {
     void SetSelectedTrack(GRaceParameters *track);
     void ScrollTracks(eScrollDir dir);
     void ScrollRegions(eScrollDir dir);
+#ifdef EA_PLATFORM_WIN32
+    bool UpdateMouse();
+#endif
     bool IsRaceValidForMike(GRaceParameters *parms);
 
     void TryToAddTrack(GRaceParameters *parms, int unlock_filter, int bin_num);

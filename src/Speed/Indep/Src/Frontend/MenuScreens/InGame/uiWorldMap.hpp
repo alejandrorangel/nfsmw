@@ -222,6 +222,10 @@ class WorldMap : public UIWidgetMenu {
     void ClearItems();
     bool ClampToMapBounds(float &x, float &y);
     void UpdateCursor(bool zoom_thing);
+#ifdef EA_PLATFORM_WIN32
+    void UpdateMouseCursor();
+    void UpdateMouseDrag();
+#endif
     void UpdateAnalogInput();
     void MoveCursor(float x, float y);
     bool SnapCursor();

@@ -115,6 +115,9 @@ void UIWidgetMenu::NotificationMessage(u32 msg, FEObject *pobj, u32 param1, u32 
         case FEMSG_MOUSE_CHANGED: // PC (speed.exe 1.3 @ 0x5A96C0)
             UpdateMouse();
             return;
+        case FEMSG_SCREEN_TICK: // PC (speed.exe 1.3 @ 0x5A989A)
+            UpdateScrollBarMouse();
+            return;
 #endif
         case FEMSG_EXIT_STARTED:
         default:
@@ -581,6 +584,26 @@ void UIWidgetMenu::ScrollView(int dir) {
         uint32 top = GetWidgetIndex(pViewTop);
         bViewNeedsSync = !(top <= current && current < iMaxWidgetsOnScreen + top);
         Reposition();
+    }
+}
+
+// PC (speed.exe 1.3 @ 0x5A8F60; name is a guess), every tick: the scroll
+// bar's arrows, backing and handle scroll the view (a page is a screenful).
+void UIWidgetMenu::UpdateScrollBarMouse() {
+    ScrollBar.UpdateMouse();
+    int scroll = ScrollBar.GetMouseScroll();
+    if (scroll == eSD_NONE) {
+        ScrollBar.Update(iMaxWidgetsOnScreen, iIndexToAdd - 1, GetWidgetIndex(pViewTop), GetWidgetIndex(pCurrentOption));
+    } else if (scroll == eSD_PAGE_NEXT) {
+        for (uint32 i = 0; i < iMaxWidgetsOnScreen; i++) { // 0x5A5E70
+            ScrollView(1);
+        }
+    } else if (scroll == eSD_PAGE_PREV) {
+        for (uint32 i = 0; i < iMaxWidgetsOnScreen; i++) { // 0x5A5E40
+            ScrollView(-1);
+        }
+    } else {
+        ScrollView(scroll);
     }
 }
 

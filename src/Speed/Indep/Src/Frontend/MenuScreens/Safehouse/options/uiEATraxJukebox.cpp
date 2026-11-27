@@ -260,6 +260,13 @@ void UIEATraxScreen::NotificationMessage(u32 msg, FEObject *pObject, u32 Param1,
         case __PAD_BUTTON4__:
             PreviewSong();
             break;
+#ifdef EA_PLATFORM_WIN32
+        case FEMSG_MOUSE_CHANGED: // PC (speed.exe 1.3 @ 0x550D01)
+            if (!bTrackGrabbed) {
+                Tracks.UpdateMouse();
+            }
+            break;
+#endif
         case FEHASH_EXITCOMPLETE:
             MControlPathfinder(true, 0xFFFFFFFF, 0, 0).Send("EATraxInit");
 

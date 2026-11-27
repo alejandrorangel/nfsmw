@@ -23,6 +23,11 @@
 #include "Speed/Indep/Src/Generated/AttribSys/Classes/frontend.h"
 #include "Speed/Indep/Src/Frontend/RaceStarter.hpp"
 #include "Speed/Indep/bWare/Inc/bPrintf.hpp"
+#ifdef EA_PLATFORM_WIN32
+#include "Speed/Indep/Src/Frontend/FEngHashes/FEHash_FeBonusCards.hpp"
+#include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterfaceFEObjects.hpp"
+#include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngMouse.hpp"
+#endif
 
 extern int g_MaximumMaximumTimesBusted;
 
@@ -439,6 +444,11 @@ void UIQRCarSelect::NotificationMessage(u32 msg, FEObject *pobj, u32 param1, u32
                 tLastEventTimer.UnSet();
             }
             return;
+#ifdef EA_PLATFORM_WIN32
+        case FEMSG_MOUSE_CHANGED: // PC (speed.exe 1.3 @ 0x7C1FD1)
+            UpdateMouse();
+            return;
+#endif
         case __PAD_LEFT__:
             ScrollCars(eSD_PREV);
             return;
@@ -1415,6 +1425,40 @@ void UIQRCarSelect::ScrollCars(eScrollDir dir) {
         RefreshHeader();
     }
 }
+
+#ifdef EA_PLATFORM_WIN32
+// PC (speed.exe 1.3 @ 0x7BFA20; name is a guess): the wheel over the car
+// scrolls the cars, over the list region it switches lists (up = the next
+// list, as the PC does).
+bool UIQRCarSelect::UpdateMouse() {
+    float x, y;
+    FEngGetMousePos(x, y);
+    float wheel;
+    if (FEngTestForIntersection(x, y, FEngFindObject(GetPackageName(), 0x46CB7764))) {
+        FEngGetMouseWheel(wheel);
+        if (wheel < 0.0f) {
+            cFEng::Get()->QueuePackageMessage(FEHASH_RIGHT, GetPackageName(), nullptr);
+            ScrollCars(eSD_NEXT);
+        } else if (wheel > 0.0f) {
+            cFEng::Get()->QueuePackageMessage(FEHASH_LEFT, GetPackageName(), nullptr);
+            ScrollCars(eSD_PREV);
+        }
+        return true;
+    }
+    if (FEngTestForIntersection(x, y, FEngFindObject(GetPackageName(), __ARRAY_SCROLL_REGION__))) {
+        FEngGetMouseWheel(wheel);
+        if (wheel < 0.0f) {
+            cFEng::Get()->QueuePackageMessage(0x148CD7, GetPackageName(), nullptr);
+            ScrollLists(eSD_PREV);
+        } else if (wheel > 0.0f) {
+            cFEng::Get()->QueuePackageMessage(0x704, GetPackageName(), nullptr);
+            ScrollLists(eSD_NEXT);
+        }
+        return true;
+    }
+    return false;
+}
+#endif
 
 void UIQRCarSelect::ScrollLists(eScrollDir dir) {
     if (FEDatabase->IsCareerMode()) {
