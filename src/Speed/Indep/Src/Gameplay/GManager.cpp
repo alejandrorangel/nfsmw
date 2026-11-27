@@ -3,6 +3,8 @@
 #include "Speed/Indep/Src/Gameplay/GActivity.h"
 #include "Speed/Indep/Src/Gameplay/GRaceDatabase.h"
 #include "Speed/Indep/Src/Gameplay/GRaceStatus.h"
+#include "Speed/Indep/Src/Gameplay/GTrigger.h"
+#include "Speed/Indep/Src/Interfaces/SimEntities/IPlayer.h"
 #include "Speed/Indep/Src/Gameplay/GVault.h"
 #include "Speed/Indep/Src/Generated/Hash.hpp"
 #include "Speed/Indep/Src/Generated/Messages/MEnteringGameplay.h"
@@ -700,8 +702,58 @@ void GManager::Update(float dT) {
         }
     }
 #endif
-    // TODO(port): UpdatePendingSMS, UpdateTriggerAvailability and
-    // UpdateIconVisibility (SMS, triggers and icons aren't ported).
+    // TODO(port): UpdatePendingSMS and UpdateIconVisibility (SMS and icons
+    // aren't ported).
+    UpdateTriggerAvailability();
+}
+
+// PC: 0x5EB9E0. The local player's pursuit (its vehicle AI's) and
+// perpetrator interfaces.
+void GManager::GetPlayerPursuitInterfaces(IPursuit *&pursuit, IPerpetrator *&perp) {
+    IPlayer *player = IPlayer::First(PLAYER_LOCAL);
+    ISimable *simable = player != nullptr ? player->GetSimable() : nullptr;
+    pursuit = nullptr;
+    if (simable != nullptr) {
+        IVehicleAI *vehicleAI;
+        if (simable->QueryInterface(&vehicleAI)) {
+            pursuit = vehicleAI->GetPursuit();
+        }
+    }
+    perp = nullptr;
+    if (simable != nullptr) {
+        simable->QueryInterface(&perp);
+    }
+}
+
+// PC: 0x5EBA50. Out of races and pursuits the player may engage events and
+// enter the menu gates; the safehouse also once a pursuit is cooling down.
+void GManager::UpdateTriggerAvailability() {
+    const bool racing = GRaceStatus::Get().GetPlayMode() != GRaceStatus::kPlayMode_Roaming;
+    IPursuit *pursuit = nullptr;
+    IPerpetrator *perp;
+    GetPlayerPursuitInterfaces(pursuit, perp);
+    const bool inPursuit = pursuit != nullptr;
+    const bool coolingDown = inPursuit && pursuit->GetPursuitStatus() == PS_COOL_DOWN;
+    mAllowMenuGates = !racing && !inPursuit;
+    mAllowEngageEvents = !racing && !inPursuit;
+    mAllowEngageSafehouse = !racing && (!inPursuit || coolingDown);
+}
+
+// PC: inlined (as GetNumMilestones 0x5DDA40 / GetMilestone 0x5DDA50).
+unsigned int GManager::GetNumSpeedTraps() {
+    return mNumSpeedTraps;
+}
+
+GSpeedTrap *GManager::GetSpeedTrap(unsigned int index) {
+    return &mSpeedTraps[index];
+}
+
+// PC: 0x5EBD90. Every trigger's particle effects again (as enabled).
+// TODO(port): then each icon's GIcon::RefreshEffects (icons aren't ported).
+void GManager::RefreshWorldParticleEffects() {
+    for (GObjectIterator<GTrigger> iter(0xffffffff); iter.IsValid(); iter.Advance()) {
+        iter.GetInstance()->RefreshParticleEffects();
+    }
 }
 
 #if defined(EA_PORT_NATIVE)

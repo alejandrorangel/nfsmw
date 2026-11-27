@@ -6,6 +6,7 @@
 #include "Speed/Indep/Src/Generated/Messages/MTriggerExit.h"
 #include "Speed/Indep/Src/Generated/Messages/MTriggerInside.h"
 #include "Speed/Indep/Src/World/WCollisionAssets.h"
+#include "Speed/Indep/Src/Ecstasy/eMath.hpp"
 
 #include <algorithm>
 
@@ -252,15 +253,90 @@ void GTrigger::NotifySimableTrigger(ISimable *isim, int triggerStimulus) {
     }
 }
 
-// TODO(port): the trigger particle effects (PC 0x5E2A50..0x5E2C60, the
-// ParticleEffect attribute through EmitterSystem) aren't ported.
-void GTrigger::CreateAllParticleEffects() {}
+// PC: 0x5E2A50. The effect group at pos (sim space, made bWare's x = z,
+// y = -x, z = y), auto-updating, disabled until EnableParticleEffects.
+EmitterGroup *GTrigger::CreateParticleEffect(const char *effectName, UMath::Vector3 &pos) {
+    EmitterGroup *group = gEmitterSystem.CreateEmitterGroup(Attrib::StringKey(effectName), 0x8040000);
+    if (group != nullptr) {
+        bVector3 translation(pos.z, -pos.x, pos.y);
+        bMatrix4 localWorld;
+        eCreateTranslationMatrix(&localWorld, translation);
+        group->SetLocalWorld(&localWorld);
+        group->SetAutoUpdate(true);
+        group->SubscribeToDeletion(this, NotifyEmitterGroupDelete);
+        group->Disable();
+        gEmitterSystem.AddEmitterGroup(group);
+    }
+    return group;
+}
 
-void GTrigger::ClearParticleEffects() {}
+// PC: 0x5E2B10. The ParticleEffect at the trigger, or with a FlareSpacing a
+// pair of them that far either side across its direction.
+void GTrigger::CreateAllParticleEffects() {
+    const char *effectName = ParticleEffect();
+    if (effectName == nullptr || *effectName == '\0') {
+        return;
+    }
+    UMath::Vector3 pos = {mWorldTrigger.fPosRadius.x, mWorldTrigger.fPosRadius.y, mWorldTrigger.fPosRadius.z};
+    const float spacing = FlareSpacing();
+    if (spacing > 0.0f) {
+        const UMath::Vector3 up = {0.0f, 1.0f, 0.0f};
+        UMath::Vector3 across;
+        UMath::Cross(up, mDirection, across);
+        UMath::Scale(across, spacing);
+        UMath::Vector3 left;
+        UMath::Vector3 right;
+        UMath::ScaleAdd(across, -1.0f, pos, left);
+        UMath::ScaleAdd(across, 1.0f, pos, right);
+        mParticleEffect[0] = CreateParticleEffect(effectName, left);
+        mParticleEffect[1] = CreateParticleEffect(effectName, right);
+        return;
+    }
+    mParticleEffect[0] = CreateParticleEffect(effectName, pos);
+}
 
-void GTrigger::EnableParticleEffects(bool enabled) {}
+// PC: 0x5DB520.
+void GTrigger::ClearParticleEffects() {
+    for (int i = 0; i < 2; i++) {
+        if (mParticleEffect[i] != nullptr) {
+            mParticleEffect[i]->UnSubscribe();
+            delete mParticleEffect[i];
+        }
+    }
+    mParticleEffect[0] = nullptr;
+    mParticleEffect[1] = nullptr;
+}
 
-void GTrigger::RefreshParticleEffects() {}
+// PC: 0x5DB570.
+void GTrigger::EnableParticleEffects(bool enabled) {
+    for (int i = 0; i < 2; i++) {
+        if (mParticleEffect[i] != nullptr) {
+            if (enabled) {
+                mParticleEffect[i]->Enable();
+            } else {
+                mParticleEffect[i]->Disable();
+            }
+        }
+    }
+}
+
+// PC: 0x5DB5B0.
+void GTrigger::NotifyEmitterGroupDelete(void *obj, EmitterGroup *group) {
+    GTrigger *trigger = static_cast<GTrigger *>(obj);
+    if (trigger->mParticleEffect[0] == group) {
+        trigger->mParticleEffect[0] = nullptr;
+    }
+    if (trigger->mParticleEffect[1] == group) {
+        trigger->mParticleEffect[1] = nullptr;
+    }
+}
+
+// PC: 0x5E2C60.
+void GTrigger::RefreshParticleEffects() {
+    ClearParticleEffects();
+    CreateAllParticleEffects();
+    EnableParticleEffects(mEnabled);
+}
 
 // PC: 0x5E2D10 / 0x5E2D30. Icons aren't ported.
 void GTrigger::ShowIcon() {}
