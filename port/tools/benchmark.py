@@ -48,6 +48,7 @@ SCENARIOS = {
     'forest': 'Rosewood forest circuit, 3 opponents: trees and long views',
     'freeroam': "a new career's free roam (skip D-Day), the AI driving: traffic, cops, world events",
     'career-event': "free roam, into a bin 15 event's trigger: engage dialog, the race, rewards, back to free roam",
+    'career-milestone': "free roam, a heat 2 pursuit for the bin's milestones, escaped: rewards, into the safehouse",
 }
 DEFAULT = ['race', 'pursuit', 'frontend']
 

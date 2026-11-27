@@ -38,6 +38,10 @@
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterface.hpp"
 #include "Speed/Indep/Src/Frontend/RaceStarter.hpp"
 #include "Speed/Indep/Src/Gameplay/GActivity.h"
+#include "Speed/Indep/Src/Generated/Events/EEnterBin.hpp"
+#include "Speed/Indep/Src/Gameplay/GManager.h"
+#include "Speed/Indep/Src/Generated/AttribSys/Classes/milestonetypes.h"
+#include "Speed/Indep/Src/Lua/LuaGameHooks.h"
 #include "Speed/Indep/Src/Gameplay/GRaceDatabase.h"
 #include "Speed/Indep/Src/Gameplay/GRaceStatus.h"
 #include "Speed/Indep/Src/Gameplay/GTrigger.h"
@@ -84,6 +88,7 @@ struct Scenario {
     int frames;         // frames recorded once the race is on
     int shots[4];       // screenshot frames (1-based), 0 ends
     bool career_event;  // free roam: warp into an event's trigger and engage it
+    bool milestone;     // free roam: a pursuit for the bin's milestones, escaped to the safehouse
 };
 
 // Race IDs are the race database's event IDs (NFSMW_BENCHMARK=list-races
@@ -101,6 +106,8 @@ const Scenario kScenarios[] = {
      nullptr, 0, 0, 0, true, 0.0f, 3600, {600, 1800, 3600}},
     {"career-event", "a new career's free roam, the player warped into an event's trigger: engage it, race it (the AI driving), back to free roam", false,
      true, nullptr, nullptr, 0, 0, 0, true, 0.0f, 30000, {0}, true},
+    {"career-milestone", "a new career's free roam, a heat 2 pursuit for the bin's milestones, escaped into the safehouse: rewards, safehouse", false,
+     true, nullptr, nullptr, 0, 0, 0, true, 0.0f, 30000, {0}, false, true},
     {"frontend", "the main menu over the garage car: car shading and the frontend", true, false, nullptr, nullptr, 0, 0, 0, false, 0.0f, 3600,
      {120, 1800, 3600}},
     {"list-races", "prints the race database's events and exits", true, false, nullptr, nullptr, 0, 0, 0, false, 0.0f, 1, {0}},
@@ -387,6 +394,104 @@ void CareerEventUpdate() {
     }
 }
 
+// The milestone scenario: a pursuit from frame 120 (the debug "pursue at
+// heat level"), the bin's milestones logged as they go; at
+// NFSMW_BENCHMARK_EVADE (frame 3600) the pursuit ends the way driving into
+// the safehouse while cooling down ends it (IPursuit::EndPursuitEnteringSafehouse):
+// evaded, the milestone rewards screen (enter), then the safehouse.
+void LogMilestones(const char *when) {
+    const unsigned int bin = FEDatabase->GetCareerSettings()->GetCurrentBin();
+    std::fprintf(stderr, "[benchmark] milestones (bin %u, %s), bounty %d:\n", bin, when, Game_GetPlayerBounty());
+    for (GMilestone *m = GManager::Get().GetFirstMilestone(false, bin); m != nullptr; m = GManager::Get().GetNextMilestone(m, false, bin)) {
+        Attrib::Gen::milestonetypes type(m->GetTypeKey(), 0, nullptr);
+        const char *name = type.IsValid() ? static_cast<const char *>(type.CollectionName()) : "?";
+        std::fprintf(stderr, "[benchmark]   %-26s state %d goal %8.1f value %8.1f best %8.1f recorded %8.1f bounty %.0f\n", name ? name : "?",
+                     m->GetIsLocked() ? 1 : m->GetIsAvailable() ? 2 : m->GetIsDonePendingEscape() ? 3 : 4, m->GetRequiredValue(), m->GetCurrentValue(),
+                     GManager::Get().GetBestValue(m->GetTypeKey()), m->GetRecordedPassValue(), m->GetBounty());
+    }
+}
+
+void MilestoneUpdate() {
+    static const int evade = EnvInt("NFSMW_BENCHMARK_EVADE", 3600);
+    static int fe_frame = -1;
+    const char *control = ControlPackageName();
+    const bool hud = std::strstr(control, "HUD") != nullptr || *control == '\0';
+    const bool sms = std::strncmp(control, "SMS_", 4) == 0;
+    gEventPress = false;
+    if (gBenchFrame == 120) {
+        LogMilestones("free roam");
+        if (ICopMgr::Exists()) {
+            ICopMgr::Get()->LockoutCops(false);
+            ICopMgr::Get()->PursueAtHeatLevel(2);
+            std::fprintf(stderr, "[benchmark] pursuit at heat 2 (frame %d)\n", gBenchFrame);
+        }
+    }
+    if (gBenchFrame > 120 && gBenchFrame <= evade && gBenchFrame % 600 == 0) {
+        LogMilestones("in pursuit");
+    }
+    if (gBenchFrame == evade) {
+        IPlayer *player = FirstPlayer();
+        IVehicleAI *ai = nullptr;
+        if (player != nullptr && player->GetSimable() != nullptr) {
+            player->GetSimable()->QueryInterface(&ai);
+        }
+        IPursuit *pursuit = ai != nullptr ? ai->GetPursuit() : nullptr;
+        std::fprintf(stderr, "[benchmark] %s (frame %d)\n", pursuit ? "pursuit escaped into the safehouse" : "no pursuit to escape", gBenchFrame);
+        if (pursuit != nullptr) {
+            pursuit->EndPursuitEnteringSafehouse();
+        } else {
+            Finish();
+        }
+    }
+    if (gBenchFrame > evade) {
+        // The milestone rewards and pursuit screens: enter. Then, back in
+        // free roam with the pursuit over, into the safehouse: the player is
+        // put in its gate, enter engages it (the HUD prompt, MEnterSafeHouse,
+        // the menu gate script, Game_DoZoneMenuAction).
+        static int roaming_frame = -1;
+        static bool at_safehouse = false;
+        const bool roaming = hud && !TheGameFlowManager.IsInFrontend() && GRaceStatus::Exists() &&
+                             GRaceStatus::Get().GetPlayMode() == GRaceStatus::kPlayMode_Roaming;
+        if (roaming && roaming_frame < 0 && gBenchFrame > evade + 120) {
+            roaming_frame = gBenchFrame;
+        }
+        gEventPress = !hud && !sms && gBenchFrame % 60 < 6 && !TheGameFlowManager.IsInFrontend();
+        if (roaming_frame >= 0 && !at_safehouse && gBenchFrame - roaming_frame == 120) {
+            at_safehouse = true;
+            for (GObjectIterator<GTrigger> it(GRuntimeInstance::kFlag_TriggerSafeHouse); it.IsValid(); it.Advance()) {
+                UMath::Vector3 pos;
+                it.GetInstance()->GetPosition(pos);
+                UMath::Vector3 dir = it.GetInstance()->GetDirection();
+                if (UMath::LengthSquare(dir) < 0.01f) {
+                    dir = UMath::Vector3Make(1.0f, 0.0f, 0.0f);
+                }
+                SetHumanAI(false);
+                gEventHoldCar = true;
+                IPlayer *player = FirstPlayer();
+                IVehicle *ivehicle;
+                if (player && player->GetSimable() && player->GetSimable()->QueryInterface(&ivehicle)) {
+                    ivehicle->SetVehicleOnGround(pos, dir);
+                    ivehicle->SetSpeed(0.0f);
+                }
+                std::fprintf(stderr, "[benchmark] into the safehouse gate at %.0f %.0f %.0f (frame %d)\n", pos.x, pos.y, pos.z, gBenchFrame);
+                break;
+            }
+        }
+        if (at_safehouse && hud && !TheGameFlowManager.IsInFrontend()) {
+            gEventPress = (gBenchFrame - roaming_frame) % 60 < 6 && gBenchFrame - roaming_frame >= 240;
+        }
+        if (fe_frame < 0 && TheGameFlowManager.IsInFrontend()) {
+            fe_frame = gBenchFrame;
+            LogMilestones("escaped");
+            std::fprintf(stderr, "[benchmark] in the frontend (frame %d)\n", gBenchFrame);
+        }
+        if (fe_frame >= 0 && gBenchFrame - fe_frame == 600) {
+            std::fprintf(stderr, "[benchmark] frontend screen: %s\n", control);
+            Finish();
+        }
+    }
+}
+
 bool MainMenuUp() {
     return TheGameFlowManager.IsInFrontend() && cFEng::Get() != nullptr && cFEng::Get()->IsPackageInControl("MainMenu.fng");
 }
@@ -642,6 +747,12 @@ void PortBenchmarkEndFrame(uint64_t render_start_ns) {
             // The career menu's press would give player 1 the pad it came from.
             FEDatabase->SetPlayersJoystickPort(0, 0);
             FEDatabase->GetCareerSettings()->StartNewCareer(true);
+            // The skip-D-Day switches put the career straight into bin 15;
+            // a career that played D-Day enters bin 15 from bin 16 (EEnterBin:
+            // its milestones and speed traps become available, its baseline
+            // unlocks are awarded). Do that here too.
+            FEDatabase->GetCareerSettings()->SetCurrentBin(16);
+            new EEnterBin(15);
             RaceStarter::StartCareerFreeRoam();
             std::fprintf(stderr, "[benchmark] new career, free roam (frame %d)\n", frame);
         }
@@ -659,7 +770,10 @@ void PortBenchmarkEndFrame(uint64_t render_start_ns) {
         if (gScenario->career_event) {
             CareerEventUpdate();
         }
-        if (!gScenario->frontend && !(gScenario->career_event && gEventHoldCar)) {
+        if (gScenario->milestone) {
+            MilestoneUpdate();
+        }
+        if (!gScenario->frontend && !gEventHoldCar) {
             DriveWithAI();
         }
     }

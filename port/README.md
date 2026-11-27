@@ -153,6 +153,11 @@ game time, from the moment the race is on) it writes `<scenario>.csv`
 | `forest` | Rosewood forest circuit 15.1.1 (foliage, long views) |
 | `freeroam` | a new career's free roam from the main menu with the game's skip-D-Day switches (bin 15, the AI driving): traffic, patrolling cops and pursuits, the world's events |
 | `career-event` | the same free roam; at frame 120 the player is put in the trigger of the bin's first unlocked, unfinished event (`NFSMW_BENCHMARK_RACE` picks one), enter engages it (the HUD prompt, the engage dialog), the AI races it, `NFSMW_DEBUG_SKIP_RACE` (default `1:60`, `0` races it out) finishes it first a minute in, enter gets through the post race screens back to free roam; logs the phases, the cash before/after and the completed flag, and ends 600 frames into free roam |
+| `career-milestone` | the same free roam; a heat 2 pursuit from frame 120 with the bin's milestones logged every 10 s (type, state, goal, value); at `NFSMW_BENCHMARK_EVADE` (frame 3600) the pursuit ends as driving into the safehouse while cooling down ends it (milestone rewards and pursuit screens), then the player is put in the safehouse gate and enter takes it into the safehouse (the career menu); ends 600 frames into the frontend |
+
+The free roam scenarios start the career as one that played D-Day would be
+(bin 16, then `EEnterBin(15)`: the bin's milestones and speed traps), give
+player 1 pad 0 and close SMS screens with escape.
 | `list-races` | prints the race database's event IDs |
 
 Overrides: `NFSMW_BENCHMARK_FRAMES`, `NFSMW_BENCHMARK_SHOTS=<f>,<f>`,

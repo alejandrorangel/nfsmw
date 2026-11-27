@@ -19,6 +19,8 @@
 #include "Speed/Indep/Src/Generated/Events/EEnterEngagableTrigger.hpp"
 #include "Speed/Indep/Src/Generated/Events/EExitEngagableTrigger.hpp"
 #include "Speed/Indep/Src/Generated/Events/EFadeScreenOn.hpp"
+#include "Speed/Indep/Src/Generated/Events/EQuitToFE.hpp"
+#include "Speed/Indep/Src/Frontend/MenuScreens/Common/FEAnyMovieScreen.hpp"
 #include "Speed/Indep/Src/Generated/Events/EPause.hpp"
 #include "Speed/Indep/Src/Generated/Events/EShowMilestones.hpp"
 #include "Speed/Indep/Src/Generated/Events/EShowRaceOverMessage.hpp"
@@ -1234,7 +1236,12 @@ bool Game_IsActiveSpeedTrap(GRuntimeInstance *trigger) {
 // PC: 0x604E40. TODO(port): menu gates (career).
 
 bool Game_IsActiveMenuGate(GRuntimeInstance *trigger) {
-    return false;
+    GTrigger *gtrigger = AsTrigger(trigger);
+    if (gtrigger == nullptr ||
+        !gtrigger->GetFlag(GRuntimeInstance::kFlag_TriggerSafeHouse | GRuntimeInstance::kFlag_TriggerCarLot | GRuntimeInstance::kFlag_TriggerCustomShop)) {
+        return false;
+    }
+    return gtrigger->GetIcon() != nullptr && GManager::Get().GetIsIconVisible(gtrigger->GetIcon());
 }
 
 // PC: 0x604CD0.
@@ -1428,9 +1435,10 @@ void Game_AwardPlayerBounty(int bounty) {
     MNotifyPlayerRep(player->GetSimable()->GetInstanceHandle(), static_cast<int>(stable->GetTotalBounty())).Post(UCrc32(UCRC32_Gameplay));
 }
 
-// PC: 0x605250 / 0x6052B0. TODO(port): career car lot / safe house jumps.
+// PC: 0x605250. Out to the car lot (the D-Day's end: pick a car).
+// TODO(port): PC sets the time of day to 0 first (SetTimeOfDay).
 void Game_JumpToCarLot() {
-    LUA_HOOK_TODO("Game.JumpToCarLot");
+    new EQuitToFE(GARAGETYPE_CAR_LOT, "Car_Select.fng");
 }
 
 // PC: 0x60DEB0. Stops the race clock and takes every racer out of the race.
@@ -1452,8 +1460,9 @@ void Game_AbandonRace() {
     }
 }
 
+// PC: 0x6052B0. Out to the safehouse's career menu.
 void Game_JumpToSafeHouse() {
-    LUA_HOOK_TODO("Game.JumpToSafeHouse");
+    new EQuitToFE(GARAGETYPE_CAREER_SAFEHOUSE, "MainMenu_Sub.fng");
 }
 
 // PC: 0x605300 / 0x605320.
@@ -1515,10 +1524,38 @@ void Game_PlayTutorial() {
     MNotifyMovieFinished().Post(UCrc32(UCRC32_Gameplay));
 }
 
-// PC: 0x605560 / 0x612030. TODO(port): safe house / zone menus (career).
-void Game_DoSafeHouseIntro(GRuntimeInstance *activity) {}
+// PC: 0x605560. The career's first arrival at the safehouse (the D-Day's
+// end): free roam will start from the activity's marker, the career is in
+// bin 16, and the safehouse intro movie plays on the way into the safehouse.
+// TODO(port): PC sets the time of day to 0 first (SetTimeOfDay).
+void Game_DoSafeHouseIntro(GRuntimeInstance *activity) {
+    if (activity != nullptr) {
+        GManager::Get().SetFreeRoamStartMarker(activity->GetCollection());
+        GManager::Get().SetFreeRoamFromSafeHouseStartMarker(activity->GetCollection());
+        GManager::Get().SetStartingFreeRoamFromSafeHouse();
+    }
+    FEDatabase->GetCareerSettings()->SetCurrentBin(16);
+    FEAnyMovieScreen::PlaySafehouseIntroMovie();
+    new EQuitToFE(GARAGETYPE_CAREER_SAFEHOUSE, FEAnyMovieScreen::GetFEngPackageName());
+}
 
-void Game_DoZoneMenuAction(GRuntimeInstance *trigger) {}
+// PC: 0x612030. A menu gate's action (the HUD's: into the safehouse, the car
+// lot, the customization shop): the gate's respawn marker is where free roam
+// starts again (from the safehouse too, for the safehouse).
+void Game_DoZoneMenuAction(GRuntimeInstance *trigger) {
+    IPlayer *player = FirstPlayer();
+    if (player == nullptr || trigger == nullptr) {
+        return;
+    }
+    Attrib::Key marker = trigger->RespawnMarker().mCollectionKey;
+    GManager::Get().SetFreeRoamStartMarker(marker);
+    if (IMenuZoneTrigger *izone = FirstPlayerMenuZoneTrigger()) {
+        if (izone->IsType("safehouse")) {
+            GManager::Get().SetFreeRoamFromSafeHouseStartMarker(marker);
+        }
+        izone->RequestDoAction();
+    }
+}
 
 // PC: 0x605780. Returns false (the world doesn't need a reload) on PC.
 bool Game_SetCurrentTimeOfDay(GRuntimeInstance *activity) {
@@ -1548,10 +1585,20 @@ bool Game_IsSplitScreen() {
     return Sim::GetUserMode() == Sim::USER_SPLIT_SCREEN;
 }
 
-// PC: 0x605670 / 0x612660. TODO(port): career rap sheet / world heat.
-void Game_SetHasRapSheet() {}
+// PC: 0x605670.
+void Game_SetHasRapSheet() {
+    FEDatabase->GetCareerSettings()->SetHasRapSheet();
+}
 
-void Game_SetWorldHeat(float heat) {}
+// PC: 0x612660. The first player's heat.
+void Game_SetWorldHeat(float heat) {
+    IPlayer *player = FirstPlayer();
+    ISimable *simable = player != nullptr ? player->GetSimable() : nullptr;
+    IPerpetrator *perp;
+    if (simable != nullptr && simable->QueryInterface(&perp)) {
+        perp->SetHeat(heat);
+    }
+}
 
 // PC: 0x60E240 / 0x60E230.
 void FE_ShowWinningPostRaceScreen() {
