@@ -668,7 +668,9 @@ void FEPackageData::UnActivate() {
         delete pScreen;
     }
     pScreen = nullptr;
-    pPackage->GetName();
+#if !defined(EA_PORT_NATIVE)
+    pPackage->GetName(); // stripped debug output; pPackage can be null here (deleting the screen may close it)
+#endif
     if (pPackage != nullptr) {
         pPackage->SetUserParam(0);
     }
