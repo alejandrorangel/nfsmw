@@ -22,6 +22,8 @@ bool PortBenchmarkVSync(bool requested);
 // (InputMac.mm); false when the benchmark is off.
 struct PortInputState;
 bool PortBenchmarkInput(PortInputState *state);
+// The scenario's typed characters (WM_CHAR codes), like PortInputTakeChars.
+int PortBenchmarkTakeChars(int *out, int max);
 
 // eDisplayFrame, after the frame's draws are published; render_start_ns is
 // when the frame's render build began (CLOCK_UPTIME_RAW).

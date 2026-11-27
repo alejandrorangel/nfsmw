@@ -6,11 +6,13 @@
 #include "Speed/Indep/Src/Frontend/MenuScreens/Common/feKeyboardInput.hpp"
 
 #include "../Mac/InputBridge.h"
+#include "Benchmark.h"
 
 void PortDispatchCharMessages() {
     int chars[64];
     int count;
-    while ((count = PortInputTakeChars(chars, 64)) > 0) {
+    // NFSMW_BENCHMARK: the scenario's typing instead of the keyboard's.
+    while ((count = PortBenchmarkActive() ? PortBenchmarkTakeChars(chars, 64) : PortInputTakeChars(chars, 64)) > 0) {
         for (int i = 0; i < count; i++) {
             gKeyboardManager.NotifyChar(chars[i]);
         }

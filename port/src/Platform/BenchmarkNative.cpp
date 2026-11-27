@@ -36,6 +36,10 @@
 
 #include "Speed/Indep/Src/Frontend/Database/FEDatabase.hpp"
 #include "Speed/Indep/Src/Frontend/FEngInterfaces/FEngInterface.hpp"
+#include "Speed/Indep/Src/Frontend/Careers/UnlockSystem.hpp"
+#include "Speed/Indep/Src/Frontend/Database/VehicleDB.hpp"
+#include "Speed/Indep/Src/Frontend/MemoryCard/MemoryCard.hpp"
+#include "Speed/Indep/Src/Frontend/MenuScreens/Common/feKeyboardInput.hpp"
 #include "Speed/Indep/Src/Frontend/RaceStarter.hpp"
 #include "Speed/Indep/Src/Gameplay/GActivity.h"
 #include "Speed/Indep/Src/Generated/Events/EEnterBin.hpp"
@@ -62,6 +66,7 @@
 #include <cstring>
 #include <ctime>
 #include <string>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
 
@@ -89,6 +94,7 @@ struct Scenario {
     int shots[4];       // screenshot frames (1-based), 0 ends
     bool career_event;  // free roam: warp into an event's trigger and engage it
     bool milestone;     // free roam: a pursuit for the bin's milestones, escaped to the safehouse
+    bool career_save;   // profiles on: a career saved to disk, then loaded back (NFSMW_BENCHMARK_PHASE)
 };
 
 // Race IDs are the race database's event IDs (NFSMW_BENCHMARK=list-races
@@ -108,6 +114,8 @@ const Scenario kScenarios[] = {
      true, nullptr, nullptr, 0, 0, 0, true, 0.0f, 30000, {0}, true},
     {"career-milestone", "a new career's free roam, a heat 2 pursuit for the bin's milestones, escaped into the safehouse: rewards, safehouse", false,
      true, nullptr, nullptr, 0, 0, 0, true, 0.0f, 30000, {0}, false, true},
+    {"career-save", "a new career on a profile: an event won, saved, the game quit; then (NFSMW_BENCHMARK_PHASE=load) the profile loaded and the career checked",
+     false, true, nullptr, nullptr, 0, 0, 0, true, 0.0f, 60000, {0}, false, false, true},
     {"frontend", "the main menu over the garage car: car shading and the frontend", true, false, nullptr, nullptr, 0, 0, 0, false, 0.0f, 3600,
      {120, 1800, 3600}},
     {"list-races", "prints the race database's events and exits", true, false, nullptr, nullptr, 0, 0, 0, false, 0.0f, 1, {0}},
@@ -402,7 +410,7 @@ void CareerEventUpdate() {
             }
             break;
         case kEvent_BackRoaming:
-            if (since >= 600) {
+            if (since >= 600 && !gScenario->career_save) {
                 CheckSaveRoundTrip();
                 Finish();
             }
@@ -542,6 +550,294 @@ void MilestoneUpdate() {
     }
 }
 
+// The career save scenario (profiles on, NFSMW_SAVE_DIR a scratch folder).
+// Phase "save" (the default): the boot's "Create a new alias?" (yes), the
+// name typed (BENCH), the profile saved; a new career, an event won as in
+// career-event, the autosave the game makes back in free roam; the career's
+// state is written to <out>/career-save.state and the game quits. Phase
+// "load" (NFSMW_BENCHMARK_PHASE=load): the boot loads the profile, the
+// profile saved again in memory must match the file byte for byte, the
+// career's state must match the saved one; "Resume Career" (the safehouse,
+// "Resume Free Roam") and the state checked again in free roam.
+bool gLoadPhase = false;
+std::string gTypeQueue;
+const char kProfileName[] = "BENCH";
+int gStateMismatches = 0;
+int gStateChecks = 0;
+
+std::string ProfilePath() {
+    const char *dir = std::getenv("NFSMW_SAVE_DIR");
+    return std::string(dir ? dir : ".") + "/" + kProfileName + "/" + kProfileName;
+}
+
+long ProfileStamp() {
+    struct stat st;
+    if (stat(ProfilePath().c_str(), &st) != 0) {
+        return 0;
+    }
+    return static_cast<long>(st.st_mtimespec.tv_sec) * 1000000000L + st.st_mtimespec.tv_nsec;
+}
+
+uint32 Fnv(const void *data, size_t size) {
+    uint32 h = 2166136261u;
+    for (size_t i = 0; i < size; i++) {
+        h = (h ^ static_cast<const uint8 *>(data)[i]) * 16777619u;
+    }
+    return h;
+}
+
+// The career, one fact per line (what the save holds and the game shows).
+std::vector<std::string> CareerState() {
+    std::vector<std::string> lines;
+    char line[256];
+    auto add = [&](const char *fmt, auto... args) {
+        std::snprintf(line, sizeof(line), fmt, args...);
+        lines.push_back(line);
+    };
+    UserProfile *profile = FEDatabase->GetUserProfile(0);
+    CareerSettings *career = FEDatabase->GetCareerSettings();
+    add("profile %s loaded %d", profile->GetProfileName(), FEDatabase->bProfileLoaded ? 1 : 0);
+    add("cash %d", career->GetCash());
+    add("bin %u", career->GetCurrentBin());
+    add("current car 0x%08X", career->GetCurrentCar());
+    add("adaptive difficulty %.4f", career->GetAdaptiveDifficulty());
+    add("case file %s", career->GetCaseFileName());
+    add("career started %d rap sheet %d", career->HasCareerStarted() ? 1 : 0, career->HasRapSheet() ? 1 : 0);
+    FEPlayerCarDB *stable = FEDatabase->GetPlayerCarStable(0);
+    add("bounty %u evaded %u busted %u", stable->GetTotalBounty(), stable->GetTotalEvadedPursuits(), stable->GetTotalBustedPursuits());
+    for (int i = 0; i < 200; i++) {
+        FECarRecord *car = stable->GetCarByIndex(i);
+        if (car == nullptr || !car->IsValid()) {
+            continue;
+        }
+        FECustomizationRecord *custom = car->IsCustomized() ? stable->GetCustomizationRecordByHandle(car->Customization) : nullptr;
+        FECareerRecord *record = car->IsCareer() ? stable->GetCareerRecordByHandle(car->CareerHandle) : nullptr;
+        add("car %d handle 0x%08X key 0x%08X filter 0x%08X custom %08X career bounty %u heat %.3f", i, car->Handle, car->FEKey, car->FilterBits,
+            custom ? Fnv(custom, sizeof(*custom)) : 0, record ? record->GetBounty() : 0, record ? record->VehicleHeat : 0.0f);
+    }
+    if (GRaceDatabase::Exists()) {
+        GRaceSaveInfo *info = GRaceDatabase::Get().GetScoreInfo();
+        for (unsigned int i = 0; i < GRaceDatabase::Get().GetScoreInfoCount(); i++) {
+            if (info[i].mRaceHash == 0 || info[i].mFlags == 0) {
+                continue;
+            }
+            GRaceParameters *parms = GRaceDatabase::Get().GetRaceFromHash(info[i].mRaceHash);
+            add("race %s flags 0x%X scores %08X", parms && parms->GetEventID() ? parms->GetEventID() : "?", info[i].mFlags,
+                Fnv(&info[i].mHighScores, sizeof(info[i]) - 8));
+        }
+    }
+    for (unsigned int i = 0; i < 150; i++) {
+        SMSMessage *sms = career->GetSMSMessage(i);
+        if (sms != nullptr && sms->GetFlags() != 0) {
+            add("sms %u flags 0x%X order %u", i, sms->GetFlags(), sms->GetSortOrder());
+        }
+    }
+    add("unlocks %08X", Fnv(TheUnlockData, sizeof(UnlockDatum) * 0x39));
+    static char markers[0x1000];
+    char *end = TheFEMarkerManager.SaveToBuffer(markers);
+    add("markers %d temp %d data %08X", TheFEMarkerManager.GetNumCustomizeMarkers(), TheFEMarkerManager.GetNumTempMarkers(),
+        Fnv(markers, end - markers));
+    const unsigned int bin = career->GetCurrentBin();
+    for (GMilestone *m = GManager::Get().GetFirstMilestone(false, bin); m != nullptr; m = GManager::Get().GetNextMilestone(m, false, bin)) {
+        Attrib::Gen::milestonetypes type(m->GetTypeKey(), 0, nullptr);
+        const char *name = type.IsValid() ? static_cast<const char *>(type.CollectionName()) : "?";
+        add("milestone %s state %d goal %.1f recorded %.1f bounty %.0f", name ? name : "?",
+            m->GetIsLocked() ? 1 : m->GetIsAvailable() ? 2 : m->GetIsDonePendingEscape() ? 3 : 4, m->GetRequiredValue(), m->GetRecordedPassValue(),
+            m->GetBounty());
+    }
+    return lines;
+}
+
+std::string StatePath() {
+    return gOutDir + "/career-save.state";
+}
+
+void WriteCareerState() {
+    FILE *f = std::fopen(StatePath().c_str(), "w");
+    std::vector<std::string> lines = CareerState();
+    for (const std::string &l : lines) {
+        if (f) {
+            std::fprintf(f, "%s\n", l.c_str());
+        }
+        std::fprintf(stderr, "[benchmark]   %s\n", l.c_str());
+    }
+    if (f) {
+        std::fclose(f);
+    }
+    std::fprintf(stderr, "[benchmark] career state (%zu lines) -> %s\n", lines.size(), StatePath().c_str());
+}
+
+// The career now against the saved one: every line must match.
+void CheckCareerState(const char *when) {
+    std::vector<std::string> saved;
+    if (FILE *f = std::fopen(StatePath().c_str(), "r")) {
+        char buf[512];
+        while (std::fgets(buf, sizeof(buf), f)) {
+            buf[std::strcspn(buf, "\n")] = '\0';
+            saved.push_back(buf);
+        }
+        std::fclose(f);
+    }
+    std::vector<std::string> now = CareerState();
+    int mismatches = 0;
+    for (const std::string &l : saved) {
+        if (std::find(now.begin(), now.end(), l) == now.end()) {
+            std::fprintf(stderr, "[benchmark]   saved only: %s\n", l.c_str());
+            mismatches++;
+        }
+    }
+    for (const std::string &l : now) {
+        if (std::find(saved.begin(), saved.end(), l) == saved.end()) {
+            std::fprintf(stderr, "[benchmark]   now only:   %s\n", l.c_str());
+            mismatches++;
+        }
+    }
+    gStateChecks++;
+    gStateMismatches += mismatches;
+    std::fprintf(stderr, "[benchmark] career state %s: %zu saved lines, %d mismatches%s\n", when, saved.size(), mismatches,
+                 saved.empty() ? " (no saved state: run the save phase first)" : "");
+}
+
+// The profile as the game would save it now against the file it loaded:
+// byte for byte (the file's body follows the realmc header and the 8-byte
+// memory card header).
+void CheckProfileResave() {
+    const int size = FEDatabase->GetUserProfileSaveSize(false);
+    std::vector<char> now(size), file(size);
+    FEDatabase->SaveUserProfileToBuffer(now.data(), size);
+    FILE *f = std::fopen(ProfilePath().c_str(), "rb");
+    bool read = f && std::fseek(f, 0x1C + 8, SEEK_SET) == 0 && std::fread(file.data(), 1, size, f) == static_cast<size_t>(size);
+    if (f) {
+        std::fclose(f);
+    }
+    const int career_end = 0x10 + FEDatabase->GetCareerSettings()->GetSaveBufferSize(false);
+    int diffs = 0;
+    for (int i = 0; read && i < size; i++) {
+        if (now[i] == file[i]) {
+            continue;
+        }
+        int j = i;
+        while (j + 1 < size && (now[j + 1] != file[j + 1] || (j + 2 < size && now[j + 2] != file[j + 2]))) {
+            j++;
+        }
+        if (diffs++ < 16) {
+            std::fprintf(stderr, "[benchmark]   profile differs at 0x%X..0x%X (%s +0x%X)\n", i, j,
+                         i < 0x10 ? "version" : i < 0x4010 ? "gameplay data" : i < career_end ? "career" : "profile",
+                         i < 0x4010 ? i - 0x10 : i < career_end ? i - 0x4010 : i - career_end);
+        }
+        i = j;
+    }
+    gStateChecks++;
+    gStateMismatches += read ? diffs : 1;
+    std::fprintf(stderr, "[benchmark] profile saved again: %s (%d bytes, %d differing ranges)\n", !read ? "no profile file" : diffs ? "differs" : "identical",
+                 size, diffs);
+}
+
+// Memory card screens: enter (after left: "yes", button 1) on each
+// prompt; the profile name typed when the name entry is up.
+void MemcardScreens(int frame) {
+    const char *control = ControlPackageName();
+    static std::string last;
+    static int since = 0;
+    if (last != control) {
+        last = control;
+        since = frame;
+    }
+    if (std::strstr(control, "MC_") == nullptr) {
+        return;
+    }
+    gEventPress = false;
+    gEventLeft = false;
+    static bool typed = false;
+    if (gKeyboardManager.IsCapturing()) {
+        if (!typed) {
+            typed = true;
+            // The field starts with the default name: backspace it away.
+            gTypeQueue = std::string(16, '\b') + kProfileName + "\r";
+            std::fprintf(stderr, "[benchmark] profile name: %s (frame %d)\n", kProfileName, frame);
+        }
+        since = frame;
+        return;
+    }
+    const int t = frame - since;
+    gEventLeft = t >= 60 && t % 120 >= 60 && t % 120 < 66;
+    gEventPress = t >= 60 && t % 120 >= 90 && t % 120 < 96;
+}
+
+// Load phase, from the main menu: enter on "Career", "Resume Career" (the
+// career menu, CResumeCareer::React) and "Resume Free Roam" (the safehouse),
+// each the focused first option; "Leave the safe house?": left (yes), enter.
+void CareerSaveBoot(int frame, bool menus) {
+    MemcardScreens(frame);
+    if (!menus || std::strstr(ControlPackageName(), "MC_") != nullptr || !TheGameFlowManager.IsInFrontend()) {
+        return;
+    }
+    const char *control = ControlPackageName();
+    static std::string last;
+    static int since = 0;
+    if (last != control) {
+        last = control;
+        since = frame;
+        std::fprintf(stderr, "[benchmark] menu: %s (frame %d)\n", control, frame);
+    }
+    const int t = frame - since;
+    const bool dialog = std::strcmp(control, "Dialog.fng") == 0;
+    gEventLeft = dialog && t % 120 >= 60 && t % 120 < 66;
+    gEventPress = t >= 60 && t % 120 >= 90 && t % 120 < 96;
+}
+
+void CareerSaveUpdate() {
+    static long boot_stamp = -1;
+    if (boot_stamp < 0) {
+        boot_stamp = ProfileStamp();
+    }
+    if (gLoadPhase) {
+        static int roaming_frame = -1;
+        const bool hud = std::strstr(ControlPackageName(), "HUD") != nullptr || *ControlPackageName() == '\0';
+        if (roaming_frame < 0 && hud && GRaceStatus::Exists() && GRaceStatus::Get().GetPlayMode() == GRaceStatus::kPlayMode_Roaming) {
+            roaming_frame = gBenchFrame;
+        }
+        if (roaming_frame >= 0 && gBenchFrame - roaming_frame == 300) {
+            CheckCareerState("in free roam");
+            CheckSaveRoundTrip();
+            std::fprintf(stderr, "[benchmark] career-save load: %d checks, %d mismatches: %s\n", gStateChecks, gStateMismatches,
+                         gStateMismatches == 0 ? "PASS" : "FAIL");
+            Finish();
+        }
+        return;
+    }
+    // Save phase: the career event runs (CareerEventUpdate); back in free
+    // roam, the autosave.
+    static long race_stamp = -1;
+    if (gEventPhase == kEvent_Racing && race_stamp < 0) {
+        race_stamp = ProfileStamp();
+        std::fprintf(stderr, "[benchmark] profile %s before the race\n", race_stamp != boot_stamp ? "autosaved" : "not saved");
+    }
+    if (race_stamp < 0) {
+        return;
+    }
+    // The state as the save has it: taken the frame the file is written
+    // (the save is synchronous in the benchmark).
+    static int saved_frame = -1;
+    if (saved_frame < 0 && ProfileStamp() != race_stamp) {
+        saved_frame = gBenchFrame;
+        std::fprintf(stderr, "[benchmark] autosaved after the race (frame %d, control %s)\n", gBenchFrame, ControlPackageName());
+        WriteCareerState();
+    }
+    if (gEventPhase != kEvent_BackRoaming) {
+        return;
+    }
+    const int since = gBenchFrame - gEventPhaseFrame;
+    if (saved_frame >= 0 && since == 300) {
+        CheckSaveRoundTrip();
+        Finish();
+    }
+    if (saved_frame < 0 && since == 1800) {
+        std::fprintf(stderr, "[benchmark] no autosave 30 s into free roam\n");
+        Finish();
+    }
+}
+
 bool MainMenuUp() {
     return TheGameFlowManager.IsInFrontend() && cFEng::Get() != nullptr && cFEng::Get()->IsPackageInControl("MainMenu.fng");
 }
@@ -657,6 +953,25 @@ void PortBenchmarkConfigure(int argc, char **argv) {
         gOutDir = getcwd(cwd, sizeof(cwd)) ? cwd : ".";
     }
     std::fprintf(stderr, "[benchmark] scenario %s: %d frames, out %s\n", gScenario->name, gFrames, gOutDir.c_str());
+    if (gScenario->career_save) {
+        // Never the player's own profiles: a scratch folder, and the save
+        // phase starts from one without the benchmark's profile.
+        const char *dir = std::getenv("NFSMW_SAVE_DIR");
+        const char *phase = std::getenv("NFSMW_BENCHMARK_PHASE");
+        const bool load = phase != nullptr && std::strcmp(phase, "load") == 0;
+        if (dir == nullptr || *dir == '\0') {
+            std::fprintf(stderr, "[benchmark] career-save needs NFSMW_SAVE_DIR=<scratch folder>\n");
+            std::exit(2);
+        }
+        if (!load && ProfileStamp() != 0) {
+            std::fprintf(stderr, "[benchmark] career-save: %s exists; the save phase starts without it (delete it)\n", ProfilePath().c_str());
+            std::exit(2);
+        }
+        if (load && ProfileStamp() == 0) {
+            std::fprintf(stderr, "[benchmark] career-save load: no %s (run the save phase first)\n", ProfilePath().c_str());
+            std::exit(2);
+        }
+    }
 }
 
 bool PortBenchmarkActive() {
@@ -668,7 +983,9 @@ void PortBenchmarkInit() {
         return;
     }
     IsSoundEnabled = 0; // audio runs on real time
-    IsMemcardEnabled = 0;
+    if (!gScenario->career_save) {
+        IsMemcardEnabled = 0;
+    }
     if (gScenario->frontend) {
         return;
     }
@@ -679,7 +996,8 @@ void PortBenchmarkInit() {
         // a minute in, first (GRaceStatus::SkipToEndOfRaceInPlace, through
         // GManager::Update's NFSMW_DEBUG_SKIP_RACE), unless told otherwise
         // (NFSMW_DEBUG_SKIP_RACE=0 races it out).
-        if (gScenario->career_event) {
+        gLoadPhase = gScenario->career_save && std::getenv("NFSMW_BENCHMARK_PHASE") && std::strcmp(std::getenv("NFSMW_BENCHMARK_PHASE"), "load") == 0;
+        if (gScenario->career_event || (gScenario->career_save && !gLoadPhase)) {
             setenv("NFSMW_DEBUG_SKIP_RACE", "1:60", 0);
             if (std::strcmp(std::getenv("NFSMW_DEBUG_SKIP_RACE"), "0") == 0) {
                 unsetenv("NFSMW_DEBUG_SKIP_RACE");
@@ -767,6 +1085,15 @@ bool PortBenchmarkInput(PortInputState *state) {
     return true;
 }
 
+int PortBenchmarkTakeChars(int *out, int max) {
+    int n = std::min(max, static_cast<int>(gTypeQueue.size()));
+    for (int i = 0; i < n; i++) {
+        out[i] = static_cast<unsigned char>(gTypeQueue[i]);
+    }
+    gTypeQueue.erase(0, n);
+    return n;
+}
+
 void PortBenchmarkEndFrame(uint64_t render_start_ns) {
     if (gScenario == nullptr) {
         return;
@@ -787,14 +1114,36 @@ void PortBenchmarkEndFrame(uint64_t render_start_ns) {
         gStartTime = Now();
         std::fprintf(stderr, "[benchmark] start at frame %d, %.1f s after launch\n", frame, (gStartTime - gLaunch) / 1e9);
     }
+    if (!gStarted && gScenario->career_save) {
+        const char *control = ControlPackageName();
+        if (gLastControlPackage != control) {
+            gLastControlPackage = control;
+            std::fprintf(stderr, "[benchmark] boot control: %s (frame %d)\n", control, frame);
+        }
+    }
     if (!gStarted) {
         // Frontend: hold enter for 6 frames of every 60 until the main menu
         // is up (the splash screen waits for a press).
         static bool career_started = false;
         const bool to_menu = gScenario->frontend || (gScenario->free_roam && !career_started);
         gEnterPresses = to_menu && TheGameFlowManager.IsInFrontend() && !MainMenuUp() && frame % 60 < 6 ? 1 : 0;
+        if (gScenario->career_save) {
+            if (std::strstr(ControlPackageName(), "MC_") != nullptr) {
+                gEnterPresses = 0;
+            }
+            CareerSaveBoot(frame, gLoadPhase && career_started);
+        }
         // Free roam: a new career from the main menu (uiCareerCrib's "yes"
         // with the D-Day flow complete).
+        if (gScenario->free_roam && !career_started && MainMenuUp() && gLoadPhase) {
+            // The profile the boot loaded: the career menu's "Resume Career"
+            // (CResumeCareer::React) into the safehouse.
+            career_started = true;
+            std::fprintf(stderr, "[benchmark] main menu, profile %s loaded %d (frame %d)\n", FEDatabase->GetUserProfile(0)->GetProfileName(),
+                         FEDatabase->bProfileLoaded ? 1 : 0, frame);
+            CheckProfileResave();
+            CheckCareerState("after the load");
+        }
         if (gScenario->free_roam && !career_started && MainMenuUp()) {
             career_started = true;
             // The career menu's press would give player 1 the pad it came from.
@@ -820,8 +1169,11 @@ void PortBenchmarkEndFrame(uint64_t render_start_ns) {
         if (gScenario->free_roam) {
             FreeRoamScreens();
         }
-        if (gScenario->career_event) {
+        if (gScenario->career_event || (gScenario->career_save && !gLoadPhase)) {
             CareerEventUpdate();
+        }
+        if (gScenario->career_save) {
+            CareerSaveUpdate();
         }
         if (gScenario->milestone) {
             MilestoneUpdate();
@@ -833,7 +1185,26 @@ void PortBenchmarkEndFrame(uint64_t render_start_ns) {
 
     std::string png;
     bool shot = gStarted && std::find(gShots.begin(), gShots.end(), gBenchFrame) != gShots.end();
-    if (shot) {
+
+    // NFSMW_BENCHMARK_SCREENS=1: a screenshot of every screen that takes
+    // control, 90 frames in (<frame>_<package>.png, from the launch).
+    static const bool screens = EnvInt("NFSMW_BENCHMARK_SCREENS", 0) != 0;
+    static std::string screen_pkg;
+    static int screen_frame = 0;
+    if (screens) {
+        const char *control = ControlPackageName();
+        if (screen_pkg != control) {
+            screen_pkg = control;
+            screen_frame = frame;
+        }
+        if (frame - screen_frame == 90) {
+            char name[96];
+            std::snprintf(name, sizeof(name), "screen_%05d_%s.png", frame, *control ? control : "game");
+            png = gOutDir + "/" + name;
+            shot = true;
+        }
+    }
+    if (shot && png.empty()) {
         char name[64];
         std::snprintf(name, sizeof(name), "%s_%05d.png", gScenario->name, gBenchFrame);
         png = gOutDir + "/" + name;

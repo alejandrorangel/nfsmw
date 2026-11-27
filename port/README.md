@@ -114,7 +114,8 @@ Debug switches:
   `src/Audio/SndNative.cpp`; music/streams and in-game audio aren't ported).
   `NFSMW_AUDIO_LOG=1` logs Csis/AEMS/voice activity, `NFSMW_AUDIO_DUMP=<wav>`
   records the mixer output
-- `NFSMW_MEMCARD=1`: turn on the unported save path
+- `NFSMW_MEMCARD=0`: no profiles (saves); `NFSMW_SAVE_DIR=<dir>`: the profile
+  folder (default `~/Library/Application Support/NFSMW/Saves`)
 - `NFSMW_UNLOCK_ALL=1`: the game's `UnlockAllThings` switch (all cars, parts,
   vinyls unlocked) for testing customization without a career save
 - `NFSMW_FENG_POOL=1`: frontend allocations in the FEng pool (debugging)
@@ -154,6 +155,7 @@ game time, from the moment the race is on) it writes `<scenario>.csv`
 | `freeroam` | a new career's free roam from the main menu with the game's skip-D-Day switches (bin 15, the AI driving): traffic, patrolling cops and pursuits, the world's events |
 | `career-event` | the same free roam; at frame 120 the player is put in the trigger of the bin's first unlocked, unfinished event (`NFSMW_BENCHMARK_RACE` picks one), enter engages it (the HUD prompt, the engage dialog), the AI races it, `NFSMW_DEBUG_SKIP_RACE` (default `1:60`, `0` races it out) finishes it first a minute in, enter gets through the post race screens back to free roam; logs the phases, the cash before/after and the completed flag, checks a gameplay data round trip (save, load, save: identical) and ends 600 frames into free roam |
 | `career-milestone` | the same free roam; a heat 2 pursuit from frame 120 with the bin's milestones logged every 10 s (type, state, goal, value); at `NFSMW_BENCHMARK_EVADE` (frame 3600) the pursuit ends as driving into the safehouse while cooling down ends it (milestone rewards and pursuit screens), then the player is put in the safehouse gate and enter takes it into the safehouse (the career menu); "Resume Free Roam" goes back (the bin's script resumes from its saved vars), opens and closes the world map and the rap sheet, checks a gameplay data round trip and ends |
+| `career-save` | profiles on (needs `NFSMW_SAVE_DIR`, a scratch folder): the boot's "Create a new alias?" (yes, the name typed: `BENCH`), a new career, the `career-event` race, the game's autosave after it (the career's state at that moment to `career-save.state`); then `NFSMW_BENCHMARK_PHASE=load`: the boot loads the profile, the profile saved again in memory must match the file byte for byte and the career's state the saved one, "Career", "Resume Career", "Resume Free Roam" and the state checked again in free roam (`PASS`/`FAIL`). `python3 port/tools/career_save_test.py` runs both phases in a temporary folder |
 
 The free roam scenarios start the career as one that played D-Day would be
 (bin 16, then `EEnterBin(15)`: the bin's milestones and speed traps), give
@@ -163,6 +165,7 @@ player 1 pad 0 and close SMS screens with escape.
 Overrides: `NFSMW_BENCHMARK_FRAMES`, `NFSMW_BENCHMARK_SHOTS=<f>,<f>`,
 `NFSMW_BENCHMARK_RACE=<event id>`, `NFSMW_BENCHMARK_CAR=<vehicle>`,
 `NFSMW_BENCHMARK_OPPONENTS`, `NFSMW_BENCHMARK_TRAFFIC=<0..100>`,
+`NFSMW_BENCHMARK_SCREENS=1` (a screenshot of every screen that takes control),
 `NFSMW_BENCHMARK_PRESENT=<n>` (copy every n'th frame to the window; 1 with
 `NFSMW_BENCHMARK_VSYNC=1` is display-bound like play), `NFSMW_BENCHMARK_TIMEOUT`.
 Screen effects on cue: `NFSMW_BENCHMARK_NOS=<from>-<to>` holds the player's
