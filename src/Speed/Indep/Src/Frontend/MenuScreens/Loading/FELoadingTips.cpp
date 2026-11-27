@@ -19,6 +19,43 @@ bool LoadingTips::mDoneShowingLoadingTips = true; // initialised .data in speed.
 bool LoadingTips::mDoneShowingLoadingTips;
 #endif
 
+#if defined(EA_PORT_NATIVE)
+// speed.exe 1.3 0x8F3D78: name, bins, category, flags for each eGameTips.
+#define GAME_TIP(name, bins, category, flags)                                                                                                   \
+    { const_cast<char *>(name), static_cast<eGameTipBins>(bins), static_cast<eGameTipType>(category), static_cast<eGameTipFlags>(flags) }
+GameTipInfo GameTipInfoTable[NUM_GAME_TIPS - 1] = {
+    GAME_TIP("TIP_STRIKEOUT", 0x0, 0x0, 0x400),
+    GAME_TIP("TIP_ENGAGE_MECHANIC", 0x0, 0x0, 0x400),
+    GAME_TIP("TIP_WORLDMAP", 0x0, 0x0, 0x400),
+    GAME_TIP("TIP_CUSTOMIZATION_SHOPS", 0xD800, 0x10, 0x200),
+    GAME_TIP("TIP_CARLOTS", 0x2400, 0x10, 0x200),
+    GAME_TIP("TIP_ENGAGE_MECHANIC", 0xE000, 0x10, 0x200),
+    GAME_TIP("TIP_SMS", 0xE200, 0x10, 0x200),
+    GAME_TIP("TIP_UNLOCKS", 0x4800, 0x10, 0x200),
+    GAME_TIP("TIP_SPEEDBREAKER", 0x1440, 0x10, 0x200),
+    GAME_TIP("TIP_ROADBLOCKS", 0x5540, 0x10, 0x200),
+    GAME_TIP("TIP_SUVRAM", 0xA80, 0x10, 0x200),
+    GAME_TIP("TIP_CROSS", 0x2A, 0x10, 0x200),
+    GAME_TIP("TIP_HELICOPTER", 0x150, 0x10, 0x200),
+    GAME_TIP("TIP_ROLLING_ROADBLOCK", 0xA800, 0x10, 0x200),
+    GAME_TIP("TIP_BOX_FORMATION", 0x5400, 0x10, 0x200),
+    GAME_TIP("TIP_PURSUIT_BREAKERS", 0xE490, 0x10, 0x200),
+    GAME_TIP("TIP_HIDING_SPOTS", 0xE924, 0x10, 0x200),
+    GAME_TIP("TIP_BUSTED", 0x1210, 0x10, 0x200),
+    GAME_TIP("TIP_WORLDMAP", 0x5400, 0x10, 0x200),
+    GAME_TIP("TIP_RIVAL_CHALLENGES", 0xC000, 0x10, 0x200),
+    GAME_TIP("TIP_MARKER_REWARDS", 0x2A00, 0x10, 0x200),
+    GAME_TIP("TIP_BLACKLIST", 0x108A, 0x10, 0x200),
+    GAME_TIP("TIP_BOUNTY", 0x4A0, 0x10, 0x200),
+    GAME_TIP("TIP_CHALLENGE_SERIES", 0x96, 0x10, 0x200),
+    GAME_TIP("TIP_RAP_SHEET", 0x328, 0x10, 0x200),
+    GAME_TIP("TIP_SAFEHOUSE", 0xE000, 0x10, 0x200),
+    GAME_TIP("TIP_STRIKEOUT", 0x1F80, 0x10, 0x200),
+    GAME_TIP("GAME_TIP_USE_CONTROLLER_CONFIG", 0xFFFFFFFF, 0xFFFF, 0x200),
+};
+#undef GAME_TIP
+#endif
+
 static void LoadingTips_FinishLoadingTexBridge(uint32 p) {
     LoadingTips *ls = static_cast<LoadingTips *>(FEngFindScreen("Loading_Tips.fng"));
     if (ls != nullptr) {
