@@ -913,6 +913,10 @@ bool RenderFrontEndScene() {
     // the garage car draws through RenderFrontEndCars), so the shadowed
     // techniques read lit: only their level matters here.
     gShadowLevelClip = view_proj;
+    // eDisplayFrame 0x6DEF0F: the cars mirrored under the floor first (view
+    // 1, reflection 1; none in the car lot), then the garage, whose
+    // translucent floor shows them through, then the cars.
+    RenderFrontEndCars(view, 1);
     garage->HandleRender(1);
     int backdrop = gSceneDraws;
     RenderFrontEndCars(view, 0);
