@@ -141,6 +141,44 @@ FEClipInfo *cFEngRender::MakeRenderMatrix(FEObjData *pData, bMatrix4 *trans, FEC
 }
 
 void cFEngRender::RenderMovie(FEMovie *movie, FERenderObject *cached, FEPackageRenderInfo *pkg_render_info) {
+#if defined(EA_PORT_NATIVE)
+    // PC (speed.exe 1.3 @ 0x599DB0): the movie texture on the object's quad.
+    // VP6 movies (Settings::type 0) are stored bottom-up, so t runs from the
+    // bottom of the picture to its top.
+    if (gMoviePlayer == nullptr || gMoviePlayer->GetStatus() != 5) {
+        return;
+    }
+    TextureInfo *texture_info = gMoviePlayer->GetTexture();
+    bMatrix4 screen;
+    bIdentity(&screen);
+    screen.v3.x = SCREEN_WIDTH / 2;
+    screen.v3.y = SCREEN_HEIGHT / 2;
+    screen.v3.z = 0.0f;
+    bMatrix4 trans;
+    FEColor fe_color;
+    FEClipInfo *clip_info = MakeRenderMatrix(reinterpret_cast<FEObjData *>(movie->pData), &trans, fe_color, movie->RenderContext, 1.0f);
+    bMulMatrix(&trans, &screen, &trans);
+    if (cached == nullptr) {
+        cached = CreateCachedRender(movie, texture_info);
+    } else {
+        cached->Clear(pkg_render_info);
+    }
+    uint32 color = FEngColorToEpolyColor(fe_color);
+    uint32 Colours[4] = {color, color, color, color};
+    float s1 = static_cast<float>(texture_info->Width) / static_cast<float>(next_power_of_2(texture_info->Width));
+    float t = static_cast<float>(texture_info->Height) / static_cast<float>(next_power_of_2(texture_info->Height));
+    float t0 = 0.0f;
+    float t1 = t;
+    if (gMoviePlayer->GetSettings().type == 0) {
+        t0 = t;
+        t1 = 0.0f;
+    }
+    cached->SetTransform(&trans);
+    cached->AddPoly(-0.5f, -0.5f, 0.5f, 0.5f, 1.0f, 0.0f, t0, s1, t1, Colours, clip_info, pkg_render_info);
+    cached->SetTexture(texture_info);
+    cached->Render();
+    return;
+#endif
     if (gMoviePlayer != nullptr) {
         if (gMoviePlayer->GetStatus() == 5) {
             GCDrawMovie();

@@ -176,7 +176,14 @@ class AV_PLAYER {
 
     void *operator new[](size_t size, const char *msg, int alignment, int headersize, int type) {}
 
+#if defined(EA_PORT_NATIVE)
+    // PC MoviePlayer::Update (0x542C50) frees the player through rcmp_sys.
+    void operator delete(void *ptr) {
+        RCMP::rcmp_sys.FreeMem(ptr);
+    }
+#else
     void operator delete(void *ptr) {}
+#endif
 
     void operator delete[](void *ptr) {}
 
@@ -277,6 +284,9 @@ class AV_PLAYER {
     FRAME *m_CurRCMPFrame;                      // offset 0x74, size 0x4
     CHUNK m_ChunkPool[2];                       // offset 0x78, size 0x18
     int m_CurChunk;                             // offset 0x90, size 0x4
+#if defined(EA_PORT_NATIVE)
+    struct PortMovie *m_Port; // the native player (port/src/Movie/MovieNative.cpp)
+#endif
 };
 
 }; // namespace RCMP

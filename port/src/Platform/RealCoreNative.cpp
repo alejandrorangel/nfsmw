@@ -214,6 +214,11 @@ static std::string ResolvePath(const char *name) {
     return resolved;
 }
 
+// For platform code that reads game files itself (the movie player).
+std::string PortResolveDataPath(const char *name) {
+    return ResolvePath(name);
+}
+
 static int OpenFlagsFor(unsigned int modeflags) {
     // RealFile mode flags as used by bFile (bFile.hpp): 0x1 read, 0x2 write,
     // 0x4 truncate. BOPEN_FLAG_WRITE is 0x6, BOPEN_FLAG_APPEND is 0x2. bFile

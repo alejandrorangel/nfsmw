@@ -58,6 +58,10 @@ bool FEngMovieStarter::Callback(FEObject *obj) {
         }
 
         const char *movie_name = reinterpret_cast<const char *>(obj->Handle);
+#if defined(EA_PORT_NATIVE)
+        const char *PortDebugMovieName(const char *movie_name); // NFSMW_DEBUG_MOVIE
+        movie_name = PortDebugMovieName(movie_name);
+#endif
         char buffer[64];
         int movieID = GetMovieNameEnum(movie_name);
         CalculateMovieFilename(buffer, 0x40, movie_name, GetCurrentLanguage());
@@ -65,6 +69,15 @@ bool FEngMovieStarter::Callback(FEObject *obj) {
         if (GetCurrentLanguage() != 0 && !bFileExists(buffer)) {
             CalculateMovieFilename(buffer, 0x40, movie_name, eLANGUAGE_ENGLISH);
         }
+#if defined(EA_PORT_NATIVE)
+        // PC took the language and the PAL/NTSC region from the installer's
+        // Language setting, so the names always matched the installed movies.
+        // The port's language comes from the OS: use the installed version.
+        if (!bFileExists(buffer)) {
+            bool PortFindInstalledMovie(const char *basename, char *buffer, int bufsize);
+            PortFindInstalledMovie(movie_name, buffer, 0x40);
+        }
+#endif
 
         if (bFileExists(buffer)) {
             MoviePlayer_StartUp();

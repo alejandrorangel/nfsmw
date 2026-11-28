@@ -18,6 +18,11 @@ NFSMW_DATA=~/Games/NFSMW port/tools/crashtrace.sh   # stubs hit + backtrace unde
 python3 port/tools/port_report.py          # categorised native compile errors
 ```
 
+FMV movies need FFmpeg's libavcodec/libavutil (`brew install ffmpeg`;
+found with pkg-config). FFmpeg is LGPL and is linked dynamically (only
+its VP6 decoder is used); the port doesn't bundle it. Without it, or with
+`-DNFSMW_PORT_FFMPEG=OFF`, the movies are skipped.
+
 Debug builds the decompiled game code, the platform layer and the renderer at
 -O2; `-DNFSMW_PORT_OPTIMIZE_GAME=OFF` (the game code and the platform layer)
 and `-DNFSMW_PORT_OPTIMIZE_RENDERER=OFF` (the renderer, the frame build,
@@ -104,9 +109,23 @@ In place:
   letterbox (the ICE keys' letterbox height is stored and never read).
   `NFSMW_TRACE_NIS=1` logs them, `NFSMW_TRACE_EAGL4=1` the loaded objects;
   `NFSMW_NO_NIS=1` turns them off (PC's switch at 0x91E140).
+- Movies (FMV, `MOVIES/*.vp6`): `src/Movie/MovieNative.cpp` is the PC's
+  `RCMP::AV_PLAYER` for the game's own `MoviePlayer`: EA's MV container
+  (MV0K/MV0F VP6 pictures, SCHl/SCDl EA-XA audio), VP6 decoded by FFmpeg,
+  the audio on the mixer and the picture timed by it (PC's goal frame,
+  `IsTimeForDecode`), frames into a 32-bit "MovieTexture" that
+  `cFEngRender::RenderMovie` draws flipped as on PC. The EA logo, PSA and
+  attract movie play at boot, and the blacklist bios, story, tutorial and
+  race movies through their screens; Enter skips the skippable ones. The
+  install's movies are named for the language it was installed with (PC
+  took language and PAL/NTSC from the installer), so when the OS
+  language's are missing the installed ones play. `NFSMW_NO_MOVIES=1`
+  skips them (the benchmark always does), `NFSMW_DEBUG_MOVIE=<name>`
+  (e.g. `blacklist_01`) plays that movie in place of the EA logo,
+  `NFSMW_TRACE_MOVIES=1` logs them with their A/V timing.
 
 Not yet: reflections/env maps, sound output (the Csis/snd9 layers),
-saves, movies (VP6), world animations (toll booth arms and the like) and
+saves, world animations (toll booth arms and the like) and
 world moments (cinematic moment NIS), the in-game simulation.
 
 Aspect ratio (`NFSMW_ASPECT`): `fill` (default) scales the 640x480
