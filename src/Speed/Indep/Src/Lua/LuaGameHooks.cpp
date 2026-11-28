@@ -218,11 +218,30 @@ void Camera_SetGenericCamera(const char *name, const char *sub) {
     LUA_HOOK_TODO("Camera.SetGenericCamera");
 }
 
+#if defined(EA_PORT_NATIVE)
+// PC's NIS switch (byte 0x91E140, off in speed.exe 1.3): no NISes. Natively
+// NFSMW_NO_NIS=1, and the Quick Race benchmarks (their frames stay the race's).
+bool gPortNoNIS = false;
+#endif
+
 // PC: 0x604B80. Plays an NIS through EPlayRaceNIS (the scene starts as soon
 // as it's loaded; the NIS posts MNISComplete when it's done). With nothing to
 // play the script is told it's done straight away. The int is the camera
 // track; the last two are the movies played before and after the scene.
 void NIS_Play(GRuntimeInstance *location, const char *nisName, const char *type, int cameraTrack, const char *preMovie, const char *postMovie) {
+#if defined(EA_PORT_NATIVE)
+    static const bool no_nis_env = std::getenv("NFSMW_NO_NIS") != nullptr && std::getenv("NFSMW_NO_NIS")[0] == '1';
+    if ((gPortNoNIS || no_nis_env) && nisName != nullptr && *nisName != '\0') {
+        // Without the race's intro NIS, which ends with the player's car at
+        // the start marker (the opponents are already on the grid,
+        // Game_InitRacers), the car is put there.
+        if (type != nullptr && bStrICmp(type, "Intro") == 0 && location != nullptr) {
+            Game_WarpPlayerToTrigger(location);
+        }
+        MNISComplete(nisName).Post(UCrc32(UCRC32_Gameplay));
+        return;
+    }
+#endif
     if (nisName != nullptr && *nisName != '\0') {
 #if defined(EA_PORT_NATIVE)
         // PC hands the instance over as a GMarker (its position and direction

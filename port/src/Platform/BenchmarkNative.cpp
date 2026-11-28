@@ -1325,6 +1325,10 @@ void PortBenchmarkInit() {
     if (gScenario->frontend) {
         return;
     }
+    // The Quick Race scenarios measure the race: no intro NIS before it
+    // (NFSMW_BENCHMARK_NIS=1 plays it). The free roam ones play theirs.
+    extern bool gPortNoNIS;
+    gPortNoNIS = !gScenario->free_roam && EnvInt("NFSMW_BENCHMARK_NIS", 0) == 0;
     if (gScenario->free_roam) {
         SkipDDayRaces = 1;
         SkipCareerIntro = 1;
