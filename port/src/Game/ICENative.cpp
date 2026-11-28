@@ -49,6 +49,7 @@
 #include "Speed/Indep/Src/Misc/GameFlow.hpp"
 #include "Speed/Indep/Src/Misc/Point.hpp"
 #include "Speed/Indep/Src/Misc/Timer.hpp"
+#include "Speed/Indep/Src/World/WCollisionMgr.h"
 #include "Speed/Indep/Src/World/WorldConn.h"
 #include "Speed/Indep/bWare/Inc/bChunk.hpp"
 #include "Speed/Indep/bWare/Inc/bPrintf.hpp"
@@ -297,9 +298,43 @@ const float *KeyPoint(const ICEData *key, int offset, int i) {
     return reinterpret_cast<const float *>(reinterpret_cast<const char *>(key) + offset) + i * 3;
 }
 
+// 0x46E150: the ground height under a render-space point (the world's
+// height 4 above it), in game only; the point's own height when there's no
+// ground.
+float GroundElevation(const bVector3 &v) {
+    float height = 0.0f;
+    if (TheGameFlowManager.GetState() == GAMEFLOW_STATE_RACING) {
+        UMath::Vector3 point;
+        point.x = -v.y;
+        point.y = v.z + 4.0f;
+        point.z = v.x;
+        if (!WCollisionMgr(0, 3).GetWorldHeightAtPointRigorous(point, height, nullptr)) {
+            return v.z;
+        }
+    }
+    return height;
+}
+
+float sAnimElevation; // ICEManager::fAnimElevation (+0x50)
+
+// 0x47B300: a scene-space point of an NIS that fixes its camera's elevation
+// (CAnimScene) is raised by the ground under it (in the world) above the
+// ground under the scene's origin (0x46E1D0: none where there's no ground).
 void ScenePoint(bVector3 *p) {
-    // TODO(port): 0x47B300 raises scene-space points by the animation's
-    // elevation fix-up (0x46E150 / 0x46E1D0) when the NIS scene asks for it.
+    INIS *nis = INIS::Get();
+    ICEScene *scene = nis != nullptr ? nis->GetScene() : nullptr;
+    if (scene == nullptr || !scene->IsCameraFixingElevation()) {
+        return;
+    }
+    const bMatrix4 &transform = scene->GetSceneTransformMatrix();
+    bVector4 world(p->x, p->y, p->z, 1.0f);
+    eMulVector(&world, &transform, &world);
+    if (!TheICEManager.IsEditorOn()) {
+        bVector3 origin(transform.v3.x, transform.v3.y, transform.v3.z);
+        sAnimElevation = GroundElevation(origin);
+    }
+    float ground = GroundElevation(bVector3(world.x, world.y, world.z));
+    p->z += ground > 0.0f ? ground - sAnimElevation : 0.0f;
 }
 
 // ICEData::GetEye (0x47EDB0) / GetLook (0x47EE00).
