@@ -2192,7 +2192,9 @@ typedef void (^PassEncoder)(id<MTLCommandBuffer>);
             MeshConstants c = {};
             bool first = true;
             for (const Draw3D &d : draws) {
-                if ((d.flags & (PORT_3D_ADDITIVE | PORT_3D_ALPHA_BLEND | PORT_3D_ALPHA_TEST)) || d.effect == 19) {
+                // Not the sky (it only tests), and not WORLDBONE: its pose
+                // comes from the BlendMatrices the colour pass binds.
+                if ((d.flags & (PORT_3D_ADDITIVE | PORT_3D_ALPHA_BLEND | PORT_3D_ALPHA_TEST)) || d.effect == 19 || d.effect == 2) {
                     continue;
                 }
                 if (first) {
