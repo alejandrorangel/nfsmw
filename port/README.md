@@ -18,10 +18,18 @@ NFSMW_DATA=~/Games/NFSMW port/tools/crashtrace.sh   # stubs hit + backtrace unde
 python3 port/tools/port_report.py          # categorised native compile errors
 ```
 
-Debug builds the game code at -O0 (it hangs at -O2: undefined behaviour in
-decompiled code) but the drawing-only port sources (the renderer, the frame
-build, culling) at -O2; `-DNFSMW_PORT_OPTIMIZE_RENDERER=OFF` builds them at
--O0 too, for debugging. Neither changes a frame.
+Debug builds the decompiled game code and the drawing-only port sources (the
+renderer, the frame build, culling) at -O2; `-DNFSMW_PORT_OPTIMIZE_GAME=OFF`
+and `-DNFSMW_PORT_OPTIMIZE_RENDERER=OFF` build them at -O0, for debugging.
+Neither changes a frame: the game code's float math is built so that it gives
+the same bits at any level (clang's default `-ffp-contract=on`, which fuses
+`a*b+c` at -O0 too; no libm rewrites of sin/cos/pow/...:
+`NFSMW_PORT_EXACT_FP_FLAGS`), and the undefined behaviour that -O2 exposed in
+the decompiled code is fixed (an attrib hash shift by the full width, float
+to unsigned char/short conversions: `PORT_FTOU`, uninitialised reads). When
+optimized code gives a different frame than -O0, look for more of that: the
+benchmark's screenshots of the two builds (`--bin`, `--compare`), bisected by
+unit, then by file with `#pragma clang optimize off`.
 
 The app owns `main()` and runs the game's (renamed) `NFSMW_GameMain` on a
 64 MB-stack thread, with `NFSMW_DATA` as the working directory.

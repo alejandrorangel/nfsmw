@@ -81,6 +81,29 @@ option(NFSMW_PORT_CHECK_MISSING_RETURN "Report decomp functions that fall off th
 if(NFSMW_PORT_CHECK_MISSING_RETURN)
     target_compile_options(nfsmw_game PRIVATE $<$<CONFIG:Debug>:-fsanitize=return>)
 endif()
+# Float math that gives the same bits at every optimization level (the
+# simulation must not move by an ulp; the benchmark's screenshots are
+# identical at -O0 and -O2):
+# - FP contraction stays clang's default (-ffp-contract=on): a*b+c within one
+#   expression is an fmadd at -O0 too, so -ffp-contract=off would change the
+#   results. Never -ffast-math.
+# - No libm rewrites of the inexact functions (sin+cos -> __sincosf_stret,
+#   sin((double)f) -> sinf, pow(x, 0.5) -> sqrt, ...): they move results by an
+#   ulp. The exact ones (sqrt, fabs, floor, memcpy...) stay builtins.
+set(NFSMW_PORT_EXACT_FP_FLAGS -fno-fast-math)
+foreach(fn sin cos tan asin acos atan atan2 sinh cosh tanh exp exp2 expm1 log log2 log10 log1p pow cbrt hypot)
+    list(APPEND NFSMW_PORT_EXACT_FP_FLAGS -fno-builtin-${fn} -fno-builtin-${fn}f)
+endforeach()
+target_compile_options(nfsmw_game PRIVATE ${NFSMW_PORT_EXACT_FP_FLAGS})
+# The game code is optimized even in Debug: at -O0 the game loop and the
+# frame build took about twice as long. It needs the flags above, and the UB
+# fixes that -O2 exposed in decompiled code (Attrib::RotateNTo32's shift
+# width, PORT_FTOU, CompressVector's uninitialised vector).
+# -DNFSMW_PORT_OPTIMIZE_GAME=OFF builds it at -O0, for debugging.
+option(NFSMW_PORT_OPTIMIZE_GAME "Build the decompiled game code at -O2 in Debug too" ON)
+if(NFSMW_PORT_OPTIMIZE_GAME)
+    target_compile_options(nfsmw_game PRIVATE $<$<CONFIG:Debug>:-O2>)
+endif()
 
 # ---------------------------------------------------------------------------
 # Native platform layer: replaces EA SDK / Win32 pieces the game links against.
@@ -163,10 +186,10 @@ endif()
 # is optimized even in Debug: at -O0 it took about half of a race frame.
 # Only code that draws: it changes no game state, so the frames are the
 # same at either level (the benchmark's screenshots are identical). The
-# decompiled game code and the platform code the simulation reads (math,
-# camera, game shims) stay at -O0: at -O2 the game hangs loading the attrib
-# vaults (undefined behaviour in decompiled code), and -O2's sin/cos ->
-# sincos and similar libm rewrites move the simulation by an ulp.
+# platform code the simulation reads (math, camera, game shims) stays at -O0:
+# without NFSMW_PORT_EXACT_FP_FLAGS -O2's sin/cos -> sincos and similar libm
+# rewrites move the simulation by an ulp. (The game code: see
+# NFSMW_PORT_OPTIMIZE_GAME.)
 option(NFSMW_PORT_OPTIMIZE_RENDERER "Build the renderer at -O2 in Debug too" ON)
 if(NFSMW_PORT_OPTIMIZE_RENDERER)
     set_source_files_properties(
