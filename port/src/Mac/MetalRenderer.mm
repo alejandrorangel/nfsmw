@@ -1022,6 +1022,17 @@ float4 CarShade(MeshOut in, float4 t1, constant MeshConst &c, texturecube<float>
     return float4(r0 * shadow + env, t1.a * v0.w);               // mad r0.xyz, r0, r1.w, r1
 }
 
+// kMeshAlphaTest: the variant with the alpha test (shade bit 1), for the
+// draws that have it. The other draws' variant decides whether to discard
+// from a uniform alone (never, in fact), not from each pixel's shaded alpha:
+// measured cheaper on the GPU, and the same pixels. (No
+// discard at all would let hidden surface removal run, which is cheaper
+// still but resolves coplanar surfaces against the alpha-tested draws
+// differently: different pixels.) Undefined (a plain newFunctionWithName:)
+// means with.
+constant bool kMeshAlphaTestValue [[function_constant(0)]];
+constant bool kMeshAlphaTest = is_function_constant_defined(kMeshAlphaTestValue) ? kMeshAlphaTestValue : true;
+
 // shade: bit 0 texture-only debug view, bit 1 alpha test (punch-through
 // textures only; elsewhere alpha is a gloss/spec mask, or blends), bit 2
 // lit (model-space lights), bit 3 an environment cube is bound, bit 4 the
@@ -1119,8 +1130,11 @@ fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(
         float sh = WorldShadow(c, in.shadow_pos, shadow_map);
         out = float4(saturate(2.0 * t.rgb * (in.d0.rgb + in.d1.rgb * sh) + in.inscatter), t.a * in.d0.a);
     }
-    if ((c.shade & 2) && out.a < (95.0 / 255.0)) { // ALPHAREF 0x5F (sub_6C68B0)
+    if (kMeshAlphaTest && (c.shade & 2) && out.a < (95.0 / 255.0)) { // ALPHAREF 0x5F (sub_6C68B0)
         discard_fragment();
+    }
+    if (!kMeshAlphaTest && c.shade == 0xFFFFFFFFu) {
+        discard_fragment(); // never: keeps the discarding shader's depth handling (see kMeshAlphaTest)
     }
     if (c.shade & 256) {
         // NFSMW_SHADE=shadow: the shadow factor (red: level 1, green: 2).
@@ -1346,10 +1360,11 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     id<MTLCommandQueue> _queue;
     id<MTLRenderPipelineState> _debugPipeline;
     id<MTLRenderPipelineState> _fePipelines[3]; // indexed by PortBlendMode
-    id<MTLRenderPipelineState> _meshPipelines[3]; // opaque, alpha blend, additive (1 sample, all channels)
-    // The same for other sample counts / colour write masks, made on first
-    // use: [sample count 1, 2, 4, 8][mode][mask: all, rgb, alpha].
-    id<MTLRenderPipelineState> _meshPSO[4][3][3];
+    id<MTLRenderPipelineState> _meshPipelines[3]; // opaque, alpha blend, additive (1 sample, all channels, alpha test)
+    // All of them, made on first use but for the 1-sample, all-channel ones
+    // (made up front): [sample count 1, 2, 4, 8][mode][mask: all, rgb,
+    // alpha][alpha test: without, with] (see kMeshAlphaTest).
+    id<MTLRenderPipelineState> _meshPSO[4][3][3][2];
     id<MTLLibrary> _lib;
     MTLPixelFormat _colorFormat, _depthFormat;
     // The pass drawDraws is drawing: its sample count, colour write mask
@@ -1475,26 +1490,16 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         }
 
         if (lib) {
-            MTLRenderPipelineDescriptor *md = [MTLRenderPipelineDescriptor new];
-            md.vertexFunction = [lib newFunctionWithName:@"mesh_vs"];
-            md.fragmentFunction = [lib newFunctionWithName:@"mesh_fs"];
-            md.colorAttachments[0].pixelFormat = view.colorPixelFormat;
-            md.depthAttachmentPixelFormat = view.depthStencilPixelFormat;
-            md.stencilAttachmentPixelFormat = view.depthStencilPixelFormat;
             _lib = lib;
             _colorFormat = view.colorPixelFormat;
             _depthFormat = view.depthStencilPixelFormat;
             _passSamples = 1;
+            // The env-map faces' (a worker thread draws them): made now.
             for (int mode = 0; mode < 3; mode++) {
-                MTLRenderPipelineColorAttachmentDescriptor *c = md.colorAttachments[0];
-                c.blendingEnabled = mode != 0;
-                c.sourceRGBBlendFactor = c.sourceAlphaBlendFactor = MTLBlendFactorSourceAlpha;
-                c.destinationRGBBlendFactor = c.destinationAlphaBlendFactor =
-                    mode == 1 ? MTLBlendFactorOneMinusSourceAlpha : MTLBlendFactorOne;
-                _meshPipelines[mode] = [_device newRenderPipelineStateWithDescriptor:md error:&error];
-                if (!_meshPipelines[mode]) {
-                    NSLog(@"NFSMW: mesh pipeline %d failed: %@", mode, error);
+                for (int at = 0; at < 2; at++) {
+                    _meshPSO[0][mode][0][at] = [self newMeshPipeline:mode sampleIndex:0 mask:0 alphaTest:at != 0];
                 }
+                _meshPipelines[mode] = _meshPSO[0][mode][0][1];
             }
         }
         if (lib) {
@@ -1625,37 +1630,48 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
 - (void)mtkView:(MTKView *)view drawableSizeWillChange:(CGSize)size {
 }
 
-// The mesh pipeline for a blend mode in a pass of this sample count and
-// colour write mask. Made on first use (main thread); the 1-sample, all
-// channels ones (the env-map faces', from a worker thread) always exist.
-- (id<MTLRenderPipelineState>)meshPipeline:(int)mode samples:(int)samples mask:(int)mask {
-    int si = samples >= 8 ? 3 : samples >= 4 ? 2 : samples >= 2 ? 1 : 0;
-    if (si == 0 && mask == 0) {
-        return _meshPipelines[mode];
+// A mesh pipeline: blend mode, sample count 1 << si, colour write mask (0
+// all, 1 rgb, 2 alpha), with or without the alpha test (kMeshAlphaTest).
+- (id<MTLRenderPipelineState>)newMeshPipeline:(int)mode sampleIndex:(int)si mask:(int)mask alphaTest:(bool)alpha_test {
+    MTLFunctionConstantValues *fc = [MTLFunctionConstantValues new];
+    bool at = alpha_test;
+    [fc setConstantValue:&at type:MTLDataTypeBool atIndex:0];
+    NSError *error = nil;
+    MTLRenderPipelineDescriptor *md = [MTLRenderPipelineDescriptor new];
+    md.vertexFunction = [_lib newFunctionWithName:@"mesh_vs"];
+    md.fragmentFunction = [_lib newFunctionWithName:@"mesh_fs" constantValues:fc error:&error];
+    md.colorAttachments[0].pixelFormat = _colorFormat;
+    md.depthAttachmentPixelFormat = _depthFormat;
+    md.stencilAttachmentPixelFormat = _depthFormat;
+    md.rasterSampleCount = (NSUInteger)(1 << si);
+    MTLRenderPipelineColorAttachmentDescriptor *c = md.colorAttachments[0];
+    c.blendingEnabled = mode != 0;
+    c.sourceRGBBlendFactor = c.sourceAlphaBlendFactor = MTLBlendFactorSourceAlpha;
+    c.destinationRGBBlendFactor = c.destinationAlphaBlendFactor = mode == 1 ? MTLBlendFactorOneMinusSourceAlpha : MTLBlendFactorOne;
+    c.writeMask = mask == 1 ? (MTLColorWriteMaskRed | MTLColorWriteMaskGreen | MTLColorWriteMaskBlue)
+                : mask == 2 ? MTLColorWriteMaskAlpha
+                            : MTLColorWriteMaskAll;
+    id<MTLRenderPipelineState> p = md.fragmentFunction ? [_device newRenderPipelineStateWithDescriptor:md error:&error] : nil;
+    if (p == nil) {
+        NSLog(@"NFSMW: mesh pipeline %d/%d/%d/%d failed: %@", si, mode, mask, (int)at, error);
     }
-    if (_meshPSO[si][mode][mask] == nil && _lib) {
-        MTLRenderPipelineDescriptor *md = [MTLRenderPipelineDescriptor new];
-        md.vertexFunction = [_lib newFunctionWithName:@"mesh_vs"];
-        md.fragmentFunction = [_lib newFunctionWithName:@"mesh_fs"];
-        md.colorAttachments[0].pixelFormat = _colorFormat;
-        md.depthAttachmentPixelFormat = _depthFormat;
-        md.stencilAttachmentPixelFormat = _depthFormat;
-        md.rasterSampleCount = (NSUInteger)(1 << si);
-        MTLRenderPipelineColorAttachmentDescriptor *c = md.colorAttachments[0];
-        c.blendingEnabled = mode != 0;
-        c.sourceRGBBlendFactor = c.sourceAlphaBlendFactor = MTLBlendFactorSourceAlpha;
-        c.destinationRGBBlendFactor = c.destinationAlphaBlendFactor = mode == 1 ? MTLBlendFactorOneMinusSourceAlpha : MTLBlendFactorOne;
-        c.writeMask = mask == 1 ? (MTLColorWriteMaskRed | MTLColorWriteMaskGreen | MTLColorWriteMaskBlue)
-                    : mask == 2 ? MTLColorWriteMaskAlpha
-                                : MTLColorWriteMaskAll;
-        NSError *error = nil;
-        _meshPSO[si][mode][mask] = [_device newRenderPipelineStateWithDescriptor:md error:&error];
-        if (_meshPSO[si][mode][mask] == nil) {
-            NSLog(@"NFSMW: mesh pipeline %d/%d/%d failed: %@", si, mode, mask, error);
+    return p;
+}
+
+// The mesh pipeline for a blend mode in a pass of this sample count and
+// colour write mask, with or without the alpha test. Made on first use (main
+// thread); the 1-sample, all channels ones (the env-map faces', from a
+// worker thread) always exist.
+- (id<MTLRenderPipelineState>)meshPipeline:(int)mode samples:(int)samples mask:(int)mask alphaTest:(bool)alpha_test {
+    int si = samples >= 8 ? 3 : samples >= 4 ? 2 : samples >= 2 ? 1 : 0;
+    id<MTLRenderPipelineState> __strong &p = _meshPSO[si][mode][mask][alpha_test ? 1 : 0];
+    if (p == nil && _lib) {
+        p = [self newMeshPipeline:mode sampleIndex:si mask:mask alphaTest:alpha_test];
+        if (p == nil) {
             return _meshPipelines[mode];
         }
     }
-    return _meshPSO[si][mode][mask];
+    return p;
 }
 
 // The IDI_PARTICLES_FX pipeline for a blend mode in the current pass.
@@ -2091,7 +2107,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 bound.textures[index] = t;
             }
         };
-        id<MTLRenderPipelineState> pipelines[3] = {};
+        id<MTLRenderPipelineState> pipelines[3][2] = {}; // [mode][alpha test]
         // Pass 2 (the player view's frame only): ___eDisplayFrame 0x6DF3C3
         // draws the sky again with ColorWriteMode 8 (alpha only) and ZFUNC
         // LESSEQUAL after the world, so the frame's alpha (cleared to 0, the
@@ -2103,7 +2119,9 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 mask = 2;
             }
             for (int m = 0; m < 3; m++) {
-                pipelines[m] = [self meshPipeline:m samples:st.samples mask:mask];
+                for (int at = 0; at < 2; at++) {
+                    pipelines[m][at] = [self meshPipeline:m samples:st.samples mask:mask alphaTest:at != 0];
+                }
             }
             for (const Draw3D &d : draws) {
                 int mode = (d.flags & PORT_3D_ADDITIVE) ? 2 : (d.flags & PORT_3D_ALPHA_BLEND) ? 1 : 0;
@@ -2212,7 +2230,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                     }
                 }
                 memcpy(c.world, d.world, sizeof(c.world));
-                bindPipeline(pipelines[mode]);
+                bindPipeline(pipelines[mode][(c.shade & 2) ? 1 : 0]);
                 // D3D default ZWRITEENABLE stays on: no PC effect technique
                 // turns it off, so alpha-blended car glass writes depth too
                 // (otherwise the sky's alpha pass shows through the windows
@@ -2257,7 +2275,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 if (c.effect == 19 && !(c.shade & 1)) {
                     // IDI_SKYBOX_FX passes p1 and p2: SRCALPHA / INVSRCALPHA,
                     // ZFUNC EQUAL, no depth writes.
-                    bindPipeline(pipelines[1]);
+                    bindPipeline(pipelines[1][(c.shade & 2) ? 1 : 0]);
                     bindDepth(_depthEqual);
                     for (uint32_t pass = 1; pass <= 2; pass++) {
                         c.pad = pass;
