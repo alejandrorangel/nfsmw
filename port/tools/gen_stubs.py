@@ -59,8 +59,14 @@ def nm_symbols(game_objs, all_objs):
 
     undefined, _ = scan(game_objs)
     _, defined = scan(all_objs)
+    # Keep the stubs already generated that are still defined nowhere: an
+    # optimized build (NFSMW_PORT_OPTIMIZE_GAME) drops dead references that
+    # an -O0 build of the same code still needs at link time.
+    previous = set()
+    if os.path.exists(OUT):
+        previous = set(re.findall(r'^    \.globl "([^"]+)"$', open(OUT).read(), re.M))
     # ___dso_handle is provided by the linker itself.
-    return undefined - defined - {"___dso_handle"}
+    return (undefined | previous) - defined - {"___dso_handle"}
 
 
 SDK_LIBS = [
@@ -121,6 +127,10 @@ def main():
     stubs = [s for s in sorted(candidates) if s not in system]
 
     branches = branch_targets(objs)
+    # Stubs kept from the previous file keep their kind (an optimized build
+    # may no longer branch to a function it still declares).
+    if os.path.exists(OUT):
+        branches |= set(re.findall(r'^"([^"]+)":\n    adrp x16', open(OUT).read(), re.M))
     sizes = gc_sizes()
 
     funcs, datas, vtables = [], [], []
