@@ -27,6 +27,17 @@ void PrepareToAddStrings(unsigned int numstrings);
 
 // Rotates (v) by (amount) bits
 // TODO probably not in this namespace
+#if defined(EA_PORT_NATIVE)
+// A shift by the full width (amount 0, which every caller passes) is
+// undefined: optimized builds fold the key hash to garbage. Mask it.
+inline unsigned int RotateNTo32(unsigned int v, unsigned int amount) {
+    return (v << (amount & 31)) | (v >> ((32 - amount) & 31));
+}
+
+inline unsigned int RotateNTo32(unsigned long long v, unsigned int amount) {
+    return (v << (amount & 63)) | (v >> ((64 - amount) & 63));
+}
+#else
 inline unsigned int RotateNTo32(unsigned int v, unsigned int amount) {
     return (v << amount) | (v >> (32 - amount));
 }
@@ -34,6 +45,7 @@ inline unsigned int RotateNTo32(unsigned int v, unsigned int amount) {
 inline unsigned int RotateNTo32(unsigned long long v, unsigned int amount) {
     return (v << amount) | (v >> (64 - amount));
 }
+#endif
 
 #if defined(EA_PORT_NATIVE)
 // size_t is 64-bit natively (and a distinct type from both overloads above).
