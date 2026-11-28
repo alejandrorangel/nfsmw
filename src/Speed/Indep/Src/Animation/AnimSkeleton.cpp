@@ -131,12 +131,6 @@ CAnimSkeleton *GetSkeletonFromList(uint32 namehash) {
 
 int LoaderEAGLSkeletons(bChunk *chunk) {
     if (chunk->GetID() == BCHUNK_EAGL_SKELETONS) {
-#if defined(EA_PORT_NATIVE)
-        // TODO(port): EAGL4 data is 32-bit ELF objects relocated in place by
-        // EAGL4::DynamicLoader; not supported natively yet, so the chunk is
-        // accepted and left unloaded (no skeletons/animations in game).
-        return 1;
-#endif
         int size = chunk->GetAlignedSize(0x10); // unused
         CAnimSkeleton *anim_skel = new ("NFS CAnimSkeleton") CAnimSkeleton();
 

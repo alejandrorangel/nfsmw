@@ -715,6 +715,85 @@ ICEData *ICEManager::GetCameraData(uint32 scene_hash, int camTrack) {
     return track->GetKey(k);
 }
 
+namespace ICE {
+// ICE::HideOverlay (0x46EAE0), for the NIS's release.
+void HideOverlay() {
+    ::HideOverlay();
+}
+} // namespace ICE
+
+// ICEGetPlayerCarTransform (0x47EED0): the first player's car matrix in
+// render space (identity without one).
+static void ICEGetPlayerCarTransform(bMatrix4 *out) {
+    bIdentity(out);
+    IPlayer *player = IPlayer::First(PLAYER_ALL);
+    ISimable *simable = player != nullptr ? player->GetSimable() : nullptr;
+    IRigidBody *body = simable != nullptr ? simable->GetRigidBody() : nullptr;
+    if (body == nullptr) {
+        return;
+    }
+    UMath::Matrix4 m;
+    body->GetMatrix4(m);
+    bConvertFromBond(*out, *reinterpret_cast<bMatrix4 *>(&m));
+    const UMath::Vector3 &p = body->GetPosition();
+    out->v3.x = p.z;
+    out->v3.y = -p.x;
+    out->v3.z = p.y;
+}
+
+// 0x47EF70: of the scene's camera tracks, the one whose first key looks most
+// along the player's car (the eye-to-look direction on the ground plane
+// against the car's forward axis). Tracks are taken in chunk order; with
+// fewer than two the first.
+int ICEManager::ChooseGoodSceneCameraTrackIndex(uint32 scene_hash, bMatrix4 *scene_origin) {
+    bMatrix4 car;
+    ICEGetPlayerCarTransform(&car);
+    ICENativeGroup *group = GetGroup(eDCE_NIS, scene_hash);
+    if (group == nullptr || group->Tracks.size() < 2) {
+        return 0;
+    }
+    int best = 0;
+    float bestDot = -1.0f;
+    for (int i = 0; i < static_cast<int>(group->Tracks.size()); i++) {
+        ICETrackImage *track = group->Tracks[i];
+        if (track->NumKeys <= 0) {
+            continue;
+        }
+        const ICEData *first = track->GetKey(0);
+        int k = first->bSmooth != 0 ? 1 : 0;
+        const ICEData *key = first + k;
+        bVector4 points[2];
+        for (int j = 0; j < 2; j++) {
+            const float *v = KeyPoint(key, j == 0 ? 0x1C : 0x34, k);
+            bVector4 &p = points[j];
+            p = bVector4(v[0], sMirror ? -v[1] : v[1], v[2], 0.0f);
+            int space = j == 0 ? key->nSpaceEye : key->nSpaceLook;
+            if (space == eDCE_SCENE_SPACE) {
+                bVector3 sp(p.x, p.y, p.z);
+                ScenePoint(&sp);
+                p = bVector4(sp.x, sp.y, sp.z, 0.0f);
+            }
+            if (space == eDCE_CAR_SPACE) {
+                eMulVector(&p, &car, &p);
+            } else if (space == eDCE_HYBRID_SPACE) {
+                p.x += car.v3.x;
+                p.y += car.v3.y;
+                p.z += car.v3.z;
+            } else if (space == eDCE_SCENE_SPACE) {
+                eMulVector(&p, scene_origin, &p);
+            }
+        }
+        bVector3 dir(points[0].x - points[1].x, points[0].y - points[1].y, 0.0f);
+        bNormalize(&dir, &dir);
+        float dot = car.v0.z * dir.z + dir.x * car.v0.x + dir.y * car.v0.y;
+        if (bestDot < dot) {
+            best = i;
+            bestDot = dot;
+        }
+    }
+    return best;
+}
+
 int ICEManager::GetNumSceneCameraTrack(uint32 scene_hash) {
     ICENativeGroup *group = GetGroup(eDCE_NIS, scene_hash);
     return group != nullptr ? static_cast<int>(group->Tracks.size()) : 0;

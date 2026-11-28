@@ -59,8 +59,8 @@ class DeltaChan : public AnimMemoryMap {
     }
 
   private:
-    DeltaCompressedData *mData; // offset 0x4, size 0x4
-    unsigned short mNumFrames;  // offset 0x8, size 0x2
+    PORT_PTR32(DeltaCompressedData) mData; // offset 0x4, size 0x4
+    unsigned short mNumFrames;             // offset 0x8, size 0x2
 };
 
 // total size: 0x24
@@ -249,8 +249,8 @@ class KeyDeltaChan : public AnimMemoryMap {
     }
 
   private:
-    DeltaCompressedData *mData; // offset 0x4, size 0x4
-    unsigned short *mKeyTimes;  // offset 0x8, size 0x4
+    PORT_PTR32(DeltaCompressedData) mData; // offset 0x4, size 0x4
+    PORT_PTR32(unsigned short) mKeyTimes;  // offset 0x8, size 0x4
     unsigned short mNumKeys;    // offset 0xC, size 0x2
 };
 

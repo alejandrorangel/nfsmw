@@ -79,11 +79,12 @@ class AnimBank {
   private:
     int mSize;                                 // offset 0x0, size 0x4
     int mNumAnims;                             // offset 0x4, size 0x4
-    AttributeDictionary *mAttributeDictionary; // offset 0x8, size 0x4
-    CsisDictionary *mCsisDictionary;           // offset 0xC, size 0x4
-    AnimMemoryMap **mAnims;                    // offset 0x10, size 0x4
-    const char **mNames;                       // offset 0x14, size 0x4
-    BankStat *mStat;                           // offset 0x18, size 0x4
+    // Loaded in place (32-bit pointer slots; PORT_PTR32 natively).
+    PORT_PTR32(AttributeDictionary) mAttributeDictionary;    // offset 0x8, size 0x4
+    PORT_PTR32(CsisDictionary) mCsisDictionary;              // offset 0xC, size 0x4
+    PORT_PTR32(PORT_PTR32(AnimMemoryMap)) mAnims;            // offset 0x10, size 0x4
+    PORT_PTR32(PORT_PTR32(const char)) mNames;               // offset 0x14, size 0x4
+    PORT_PTR32(BankStat) mStat;                              // offset 0x18, size 0x4
 };
 
 // total size: 0x18

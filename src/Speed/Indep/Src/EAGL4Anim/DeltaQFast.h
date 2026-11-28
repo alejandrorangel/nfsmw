@@ -125,8 +125,8 @@ struct DeltaQFast : public AnimMemoryMap {
     unsigned short mNumKeys;       // offset 0x4, size 0x2
     unsigned char mNumBones;       // offset 0x6, size 0x1
     unsigned char mNumConstBones;  // offset 0x7, size 0x1
-    unsigned short *mTimes;        // offset 0x8, size 0x4
-    unsigned char *mBoneIdxs;      // offset 0xC, size 0x4
+    PORT_PTR32(unsigned short) mTimes; // offset 0x8, size 0x4
+    PORT_PTR32(unsigned char) mBoneIdxs; // offset 0xC, size 0x4
     unsigned char mBinLengthPower; // offset 0x10, size 0x1
     unsigned char mPadding[1];     // offset 0x11, size 0x1
 };

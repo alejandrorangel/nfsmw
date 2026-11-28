@@ -14,7 +14,7 @@ namespace EAGL4Anim {
 struct Attribute {
     AttributeId mId;          // offset 0x0, size 0x2
     short unsigned int mSize; // offset 0x2, size 0x2
-    void *mData;              // offset 0x4, size 0x4
+    PORT_PTR32(void) mData;   // offset 0x4, size 0x4 (an inline value when it fits)
 };
 
 // total size: 0xC
@@ -79,7 +79,7 @@ class AttributeMetaData {
     ~AttributeMetaData() {}
 
   private:
-    const char *mName;        // offset 0x0, size 0x4
+    PORT_PTR32(const char) mName; // offset 0x0, size 0x4
     short unsigned int mPad;  // offset 0x4, size 0x2
     short unsigned int mType; // offset 0x6, size 0x2
     short unsigned int mSize; // offset 0x8, size 0x2

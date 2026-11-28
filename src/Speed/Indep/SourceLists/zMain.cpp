@@ -87,6 +87,12 @@
 #include "Speed/Indep/Src/Generated/Events/EWorldMapOff.cpp"
 
 #include "Speed/Indep/Src/Generated/Events/EEnableAIPhysics.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EPlayRaceNIS.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EPlayEndNIS.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/EPlayRaceMovie.cpp"
 #endif
 
 #include "Speed/Indep/Src/Input/Common/action.cpp"

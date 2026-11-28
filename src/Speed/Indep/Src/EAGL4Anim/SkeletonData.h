@@ -90,7 +90,7 @@ class SkeletonData : public AnimationTarget {
     unsigned short mCoreSkelCheckSum; // offset 0x4, size 0x2
     unsigned short mFlags;            // offset 0x6, size 0x2
     int mNumBones;                    // offset 0x8, size 0x4
-    float *mInvBoneScales;            // offset 0xC, size 0x4
+    PORT_PTR32(float) mInvBoneScales; // offset 0xC, size 0x4
 };
 
 }; // namespace EAGL4Anim

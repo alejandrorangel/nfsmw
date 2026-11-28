@@ -34,11 +34,11 @@ struct CompoundChannel : public AnimMemoryMap {
         return mNumChannels;
     }
 
-    AnimMemoryMap **GetChannels() {
+    PORT_PTR32(AnimMemoryMap) *GetChannels() {
         return mChannels;
     }
 
-    const AnimMemoryMap *const *GetChannels() const {
+    const PORT_PTR32(AnimMemoryMap) *GetChannels() const {
         return mChannels;
     }
 
@@ -52,10 +52,10 @@ struct CompoundChannel : public AnimMemoryMap {
 
     static void InitAnimMemoryMap(AnimMemoryMap *anim);
 
-    AttributeBlock *mAttributeBlock; // offset 0x4, size 0x4
-    unsigned short mNumChannels;     // offset 0x8, size 0x2
-    unsigned short mNumFrames;       // offset 0xA, size 0x2
-    AnimMemoryMap *mChannels[1];     // offset 0xC, size 0x4
+    PORT_PTR32(AttributeBlock) mAttributeBlock; // offset 0x4, size 0x4
+    unsigned short mNumChannels;                // offset 0x8, size 0x2
+    unsigned short mNumFrames;                  // offset 0xA, size 0x2
+    PORT_PTR32(AnimMemoryMap) mChannels[1];     // offset 0xC, size 0x4
 };
 
 // total size: 0x1C

@@ -24,6 +24,7 @@ const char DynamicLoader::SkeletonType[] = "Skeleton";
 // const char DynamicLoader::AnimIdType[];
 // const char DynamicLoader::PosePaletteBankType[];
 
+#if !defined(EA_PORT_NATIVE) // natively: port/src/Game/EAGL4Native.cpp (32-bit slots)
 static long unsigned int elfhash(const char *name) {
     long unsigned int h = 0; // r3
     long unsigned int g;     // r9
@@ -248,5 +249,7 @@ bool DynamicLoader::GetNextAddr(const char *type, int &iIndex, void *&addr) cons
         return false;
     }
 }
+
+#endif // !EA_PORT_NATIVE
 
 }; // namespace EAGL4

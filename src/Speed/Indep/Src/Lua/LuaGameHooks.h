@@ -22,7 +22,7 @@ int Bin_GetNumChallengesPassed(int bin);                        // Bin.GetNumCha
 int Bin_GetNumRacesWon(int bin);                                // Bin.GetNumRacesWon
 int Math_RandomInt(int range);                                  // Math.RandomInt
 void Camera_SetGenericCamera(const char *name, const char *sub); // Camera.SetGenericCamera
-void NIS_Play(GRuntimeInstance *location, const char *nisName, const char *type, int flags, const char *cameraTrack, const char *shell); // NIS.Play
+void NIS_Play(GRuntimeInstance *location, const char *nisName, const char *type, int cameraTrack, const char *preMovie, const char *postMovie); // NIS.Play
 void Movie_PlayHackE3FMV();                                     // Movie.PlayHackE3FMV
 void Debug_Print(const char *text);                             // Debug.Print
 void Debug_PrintInstance(GRuntimeInstance *instance);           // Debug.PrintInstance

@@ -150,8 +150,8 @@ struct DeltaF3 : public AnimMemoryMap {
         return reinterpret_cast<float *>(AlignSize4(reinterpret_cast<intptr_t>(&GetConstBoneIdx()[mNumConstBones])));
     }
 
-    unsigned short *mDofIdxs;      // offset 0x4, size 0x4
-    unsigned short *mTimes;        // offset 0x8, size 0x4
+    PORT_PTR32(unsigned short) mDofIdxs; // offset 0x4, size 0x4
+    PORT_PTR32(unsigned short) mTimes; // offset 0x8, size 0x4
     unsigned short mNumFrames;     // offset 0xC, size 0x2
     unsigned short mNumBones;      // offset 0xE, size 0x2
     unsigned char mBinLengthPower; // offset 0x10, size 0x1

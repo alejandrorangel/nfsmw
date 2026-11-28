@@ -137,6 +137,7 @@ add_library(nfsmw_platform OBJECT
     src/Game/CameraDriveNative.cpp
     src/Game/RainNative.cpp
     src/Game/ICENative.cpp
+    src/Game/EAGL4Native.cpp
     src/Game/USpline.cpp
     src/Game/StringToNumberNative.cpp
     src/Game/AttribDefaultsNative.cpp

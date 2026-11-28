@@ -40,6 +40,7 @@
 #include "Speed/Indep/Src/Speech/SoundAI.h"
 #include "Speed/Indep/Src/Generated/Events/EResetProps.hpp"
 #include "Speed/Indep/Src/Generated/Hash.hpp"
+#include "Speed/Indep/Src/Generated/Events/EPlayRaceNIS.hpp"
 #include "Speed/Indep/Src/Generated/Messages/MNISComplete.h"
 #include "Speed/Indep/Src/Generated/Messages/MNotifyKnockedOut.h"
 #include "Speed/Indep/Src/Generated/Messages/MNotifyMovieFinished.h"
@@ -217,19 +218,26 @@ void Camera_SetGenericCamera(const char *name, const char *sub) {
     LUA_HOOK_TODO("Camera.SetGenericCamera");
 }
 
-// PC: 0x604B80. With nothing to play (or NISes disabled) the script is told
-// it's done straight away.
-// TODO(port): playing an NIS (the EPlayRaceNIS-like event 0x640F00) isn't
-// ported, so every NIS completes immediately.
-void NIS_Play(GRuntimeInstance *location, const char *nisName, const char *type, int flags, const char *cameraTrack, const char *shell) {
+// PC: 0x604B80. Plays an NIS through EPlayRaceNIS (the scene starts as soon
+// as it's loaded; the NIS posts MNISComplete when it's done). With nothing to
+// play the script is told it's done straight away. The int is the camera
+// track; the last two are the movies played before and after the scene.
+void NIS_Play(GRuntimeInstance *location, const char *nisName, const char *type, int cameraTrack, const char *preMovie, const char *postMovie) {
+    if (nisName != nullptr && *nisName != '\0') {
 #if defined(EA_PORT_NATIVE)
-    // A race's intro NIS ends with the player's car at the start marker
-    // (the opponents are already on the grid, Game_InitRacers): without the
-    // NIS, put it there as the scripts do when a race has no intro NIS.
-    if (nisName != nullptr && *nisName != '\0' && type != nullptr && bStrICmp(type, "Intro") == 0 && location != nullptr) {
-        Game_WarpPlayerToTrigger(location);
-    }
+        // PC hands the instance over as a GMarker (its position and direction
+        // at 0x28/0x34); only markers have them natively.
+        GMarker *marker = location != nullptr && location->GetType() == kGameplayObjType_Marker ? static_cast<GMarker *>(location) : nullptr;
+        if (std::getenv("NFSMW_TRACE_NIS") != nullptr) {
+            std::fprintf(stderr, "[nis] NIS.Play %s (%s) track %d at %s\n", nisName, type != nullptr ? type : "", cameraTrack,
+                         location == nullptr ? "-" : (marker != nullptr ? "a marker" : "an instance"));
+        }
+#else
+        GMarker *marker = static_cast<GMarker *>(location);
 #endif
+        new EPlayRaceNIS(marker, nisName, type, 0, cameraTrack, preMovie, postMovie);
+        return;
+    }
     MNISComplete(nisName).Post(UCrc32(UCRC32_Gameplay));
 }
 

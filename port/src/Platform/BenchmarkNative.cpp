@@ -48,6 +48,7 @@
 #include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/career/uiCareerMain.hpp"
 #include "Speed/Indep/Src/Gameplay/GActivity.h"
 #include "Speed/Indep/Src/Generated/Events/EEnterBin.hpp"
+#include "Speed/Indep/Src/Interfaces/SimActivities/INIS.h"
 #include "Speed/Indep/Src/Gameplay/GManager.h"
 #include "Speed/Indep/Src/Gameplay/GMilestone.h"
 #include "Speed/Indep/Src/Generated/AttribSys/Classes/milestonetypes.h"
@@ -395,7 +396,8 @@ void CareerEventUpdate() {
                 gEventPress = in_dialog >= 90 && in_dialog < 96;
             } else {
                 dialog_frame = -1;
-                gEventPress = since >= 60 && since % 60 < 6;
+                // Not while the race's intro NIS runs: enter skips it.
+                gEventPress = since >= 60 && since % 60 < 6 && !INIS::Exists();
             }
             if (racing) {
                 SetEventPhase(kEvent_Racing);

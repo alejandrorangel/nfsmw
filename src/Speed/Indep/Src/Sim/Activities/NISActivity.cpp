@@ -850,3 +850,373 @@ bool NISActivity::SkipOverNIS() {
     }
     return false;
 }
+
+#if defined(EA_PORT_NATIVE)
+// The parts of NISActivity the decomp has no code for, from speed.exe 1.3:
+// Load 0x6F51F0, Play 0x6F5750, UpdateLoading 0x6F7230, UpdatePlaying
+// 0x6EA750, Release 0x6F7520 (INIS::Release 0x6FD270), ResetEvents 0x6F7440,
+// the factory (Construct 0x6FD620).
+
+#include "Speed/Indep/Src/EAXSound/SoundPause.h"
+#include "Speed/Indep/Src/FEng/FEngine.h"
+#include "Speed/Indep/Src/Frontend/MenuScreens/InGame/FeFadeScreen.hpp"
+#include "Speed/Indep/Src/Generated/Events/EFadeScreenOff.hpp"
+#include "Speed/Indep/Src/Generated/Events/ELoadingScreenOff.hpp"
+#include "Speed/Indep/Src/Generated/Events/EPause.hpp"
+#include "Speed/Indep/Src/Generated/Events/EPlayRaceMovie.hpp"
+#include "Speed/Indep/Src/Generated/Events/EQuitToFE.hpp"
+#include "Speed/Indep/Src/Gameplay/GRaceStatus.h"
+#include "Speed/Indep/Src/Interfaces/Simables/INISCarControl.h"
+#include "Speed/Indep/Src/Interfaces/Simables/ISimable.h"
+#include "Speed/Indep/Src/Misc/Timer.hpp"
+#include "Speed/Indep/Src/World/FacePixelate.hpp"
+#include "Speed/Indep/Src/World/TrackStreamer.hpp"
+#include "Speed/Indep/Src/World/VisualTreatment.h"
+#include "Speed/Indep/Src/World/WCollisionMgr.h"
+
+#include <cstdio>
+#include <cstdlib>
+
+BIND_ACTIVITY_FACTORY(NISActivity);
+
+int NISActivity::mElapsedmsAudioTime = 0;
+
+extern float MaxTicksPerTimestep;
+extern int bStreamingPositionFromICE;
+extern bool gTWEAKER_NISLightEnabled;
+extern int Tweak_DisableRoadNoise;
+int AnimCfg_DisableAnimations = 0; // 0x9260C0 (.bss)
+void EmitterSystem_OnStartNIS();
+void EmitterSystem_OnEndNis();
+void CloseTopologyAndSceneryGroups();
+void InitTopologyAndSceneryGroups();
+void DisableSceneryGroup(unsigned int group_name_hash);
+void SetNISRaceDriverVisible(int visible);
+void SetOverRideRainIntensity(float rov);
+void SetSoundControlState(bool bON, eSNDCTLSTATE esndstate, const char *Reason);
+namespace ICE {
+void HideOverlay();
+}
+
+// Tweak_EnableNISMoments (0x901B28): on.
+static bool Tweak_EnableNISMoments = true;
+
+static bool TraceNIS() {
+    static int sTrace = -1;
+    if (sTrace < 0) {
+        const char *env = std::getenv("NFSMW_TRACE_NIS");
+        sTrace = env != nullptr && env[0] != '\0' && env[0] != '0';
+    }
+    return sTrace != 0;
+}
+
+// PC 0x6F51F0.
+void NISActivity::Load(CAnimChooser::eType nisType, const char *scene, int cameratrack, bool PlayAsSoonAsLoaded) {
+    loadStartTime = RealTimer.GetSeconds();
+    mNISType = nisType;
+    mSceneHash = bStringHash(scene);
+    if (bStrNICmp(scene, "IntroNisBL", 10) == 0 || bStrNICmp(scene, "IntroNisDD", 10) == 0 || bStrNICmp(scene, "IntroNis10", 10) == 0 ||
+        bStrNICmp(scene, "EndingNIS", 9) == 0) {
+        mNonSkipableNIS = true;
+    }
+    if (bStrNICmp(scene, "IntroNisDD", 10) == 0) {
+        mDDayNIS = true;
+    }
+    if (bStrNICmp(scene, "IntroNisBL", 10) == 0) {
+        mBlackListNIS = true;
+    }
+    if (bStrNICmp(scene, "IntroNisBL", 10) == 0 || bStrNICmp(scene, "IntroNis10", 10) == 0 || bStrNICmp(scene, "EndingNIS", 9) == 0) {
+        mCareerNIS = true;
+    }
+    if (TraceNIS()) {
+        std::fprintf(stderr, "[nis] load %s type %d track %d\n", scene, nisType, cameratrack);
+    }
+    bool disabled = AnimCfg_DisableAnimations != 0 || Sim::GetUserMode() == Sim::USER_SPLIT_SCREEN;
+    bool editor = TheICEManager.IsEditorOn();
+    if ((Sim::GetUserMode() != Sim::USER_SINGLE && nisType == CAnimChooser::Arrest) || disabled ||
+        (!Tweak_EnableNISMoments && nisType == CAnimChooser::Moment && !editor)) {
+        mState = NISACTIVITY_COMPLETE;
+        return;
+    }
+    int markerID = -1;
+    float markerDist = 75.0f;
+    bAngle angle = static_cast<bAngle>(static_cast<int>(mNISDirection * 23592960.0f) / 360);
+    TrackPositionMarker *marker = TheAnimCandidateData->GetClosestMarker(mSceneHash, mNISPosition, &markerID, &markerDist, angle);
+    if (marker != nullptr) {
+        StartLocationInRenderCoords(marker->Position, marker->Angle);
+        if (!editor) {
+            if (nisType == CAnimChooser::Arrest) {
+                UMath::Vector3 point;
+                point.x = -marker->Position.y;
+                point.y = marker->Position.z;
+                point.z = marker->Position.x;
+                float height = 0.0f;
+                if (WCollisionMgr(0, 3).GetWorldHeightAtPointRigorous(point, height, nullptr)) {
+                    marker->Position.z = height;
+                    StartLocationInRenderCoords(marker->Position, marker->Angle);
+                    NIS_NukeSmackablesWithinRange(mStartLocation, 10.0f);
+                }
+            }
+            bMatrix4 rotation;
+            bMatrix4 translation;
+            bMatrix4 transform;
+            CAnimLocator::GetInitialAnimMatricies(&rotation, &translation, true);
+            bMulMatrix(&transform, &translation, &rotation);
+            cameratrack = TheICEManager.ChooseGoodSceneCameraTrackIndex(bStringHash(scene), &transform);
+            if (nisType == CAnimChooser::Moment) {
+                // TODO(port): world moments (EBecomeAICar, CAnimMomentScene);
+                // EPlayRaceNIS doesn't start them natively.
+                mState = NISACTIVITY_COMPLETE;
+                return;
+            }
+        }
+    }
+    mStartPlayingNow = PlayAsSoonAsLoaded;
+    if (editor) {
+        mRunningThroughICE = true;
+    }
+    bStreamingPositionFromICE = 1;
+    int preMovieLen = bStrLen(mPreMovie);
+    if (scene != nullptr) {
+        PrepareVehicles(TheAnimCandidateData->GetSpecialCarList(mSceneHash));
+        if ((mNISType == CAnimChooser::Arrest || mNISType == CAnimChooser::Ending) && preMovieLen < 1) {
+            mUsingFEngOverlay = true;
+            new ESndGameState(11, true);
+        }
+        new EFadeScreenOn(false);
+        mSequencerID = UCrc32(stringhash32(scene));
+        mCameraTrackNumber = cameratrack;
+    }
+    if (preMovieLen < 1) {
+        mState = NISACTIVITY_CREATING;
+        UpdatePreloading();
+    } else {
+        mUsingFEngOverlay = true;
+        new EPlayRaceMovie(mPreMovie);
+        mState = NISACTIVITY_PRE_MOVIE;
+    }
+    if (FindSceneryGroup(bStringHash("SCENERY_GROUP_DOOR")) != nullptr) {
+        DisableSceneryGroup(bStringHash("SCENERY_GROUP_DOOR"));
+    }
+}
+
+// PC 0x6F7230.
+void NISActivity::UpdateLoading() {
+    GetStartCameraLocation();
+    mLoadAttemptCount++;
+    if (TheAnimPlayer.IsLoaded(mSceneHash) && !TheTrackStreamer.IsLoadingInProgress() && !mPause && mAnimScene == nullptr) {
+        mAnimHandle = TheAnimPlayer.CreateAndPlayAnim(mSceneHash, mCameraTrackNumber, mNISType, 0);
+        mAnimScene = TheAnimPlayer.FindAnimScene(mAnimHandle);
+        if (mAnimScene != nullptr) {
+            mAnimScene->Pause();
+        }
+        if (TraceNIS()) {
+            std::fprintf(stderr, "[nis] scene %08x created (handle %d)\n", mSceneHash, mAnimHandle);
+        }
+    }
+    bool streamQueued = g_pEAXSound->IsNISStreamQueued();
+    if (!TheAnimPlayer.IsLoaded(mSceneHash) || !IsCarListLoaded() || mAnimScene == nullptr || !streamQueued) {
+        return;
+    }
+    bool editor = TheICEManager.IsEditorOn();
+    if (!(mNISType == CAnimChooser::Arrest && !editor && RealTimer.GetSeconds() - 2.0f <= loadStartTime)) {
+        mState = NISACTIVITY_READY_TO_PLAY;
+        if (mNISType != CAnimChooser::Moment) {
+            eSNDCTLSTATE state = SNDSTATE_NIS_INTRO;
+            const char *reason = nullptr;
+            if (mDDayNIS) {
+                reason = "NIS Load DDay";
+            } else if (!mCareerNIS && mNISType != CAnimChooser::Intro) {
+                if (mNISType == CAnimChooser::Arrest) {
+                    reason = "NIS Play Arrest";
+                    state = SNDSTATE_NIS_ARREST;
+                }
+            } else if (mBlackListNIS) {
+                reason = "NIS Play BLK";
+                state = SNDSTATE_NIS_BLK;
+            } else if (mCareerNIS) {
+                reason = "NIS Play Story";
+                state = SNDSTATE_NIS_STORY;
+            } else {
+                reason = "NIS Play Intro";
+            }
+            if (reason != nullptr) {
+                SetSoundControlState(true, state, reason);
+            }
+        }
+    }
+    if (mNISType == CAnimChooser::Arrest) {
+        Speech::Manager::ClearPlayback();
+        // TODO(port): EAXDispatch::ArrestReply (SoundAI's dispatch, 0x717110).
+    }
+    if (mNISType == CAnimChooser::Intro) {
+        for (CarList::iterator i = mVehicleTable.begin(); i != mVehicleTable.end(); ++i) {
+            NISCar *car = i->second;
+            IDamageable *damage;
+            if (car != nullptr && car->mIVehiclePtr != nullptr && car->mIVehiclePtr->QueryInterface(&damage)) {
+                damage->ResetDamage();
+            }
+        }
+    }
+}
+
+// PC 0x6F5750.
+void NISActivity::Play() {
+    EmitterSystem_OnStartNIS();
+    if (mSceneHash == bStringHash("IntroNisBL09")) {
+        DisablePreculler();
+    }
+    mDefault_MaxTicksPerTimestep = MaxTicksPerTimestep;
+    MaxTicksPerTimestep = 7.0f;
+    bStreamingPositionFromICE = 0;
+    mNISElapsedTime = 0.0f;
+    if (mSequencer != nullptr) {
+        mSequencer->Release();
+    }
+    CloseTopologyAndSceneryGroups();
+    mSequencer = EventSequencer::Create(this, this, mSequencerID, Sim::GetTime(), 1.0f);
+    mState = NISACTIVITY_PLAYING;
+    StartEvents();
+    g_pEAXSound->PlayNIS();
+    if (g_pNISRevMgr != nullptr) {
+        g_pNISRevMgr->StartNISReving();
+    }
+    if (mAnimScene != nullptr) {
+        mAnimScene->Play();
+        if (mAnimScene->GetSceneType() == CAnimChooser::Ending) {
+            SetNISRaceDriverVisible(0);
+            if (IVisualTreatment *treatment = IVisualTreatment::Get()) {
+                treatment->SetState(IVisualTreatment::COPCAM_LOOK);
+            }
+            new ESndGameState(4, true);
+        }
+    }
+    if (IPlayer *player = IPlayer::First(PLAYER_LOCAL)) {
+        if (IFeedback *ffb = player->GetFFB()) {
+            ffb->PauseEffects();
+        }
+    }
+    if (TraceNIS()) {
+        std::fprintf(stderr, "[nis] play %08x (%.2f..%.2f s)\n", mSceneHash, mAnimScene != nullptr ? mAnimScene->GetTimeStart() : 0.0f,
+                     mAnimScene != nullptr ? mAnimScene->GetTimeTotalLength() : 0.0f);
+    }
+}
+
+// PC 0x6EA750.
+void NISActivity::UpdatePlaying(float dT) {
+    if (mPause) {
+        dT = 0.0f;
+    }
+    mNISElapsedTime += dT;
+    if (FadeScreen::IsFadeScreenOn()) {
+        new EFadeScreenOff(0x161A918);
+        new ESndGameState(11, false);
+    }
+    if (mUsingFEngOverlay) {
+        mUsingFEngOverlay = false;
+        new ELoadingScreenOff();
+    }
+    if (mMomentScene == nullptr) {
+        if (mAnimScene != nullptr && (mAnimScene->GetTimeElapsed() <= mAnimScene->GetTimeTotalLength() || TheICEManager.IsEditorOn())) {
+            if (mAnimScene->IsPaused()) {
+                mAnimScene->AnimatedCars_Update(0.0f);
+            } else {
+                mAnimScene->UpdateTime(dT);
+                mAnimScene->AnimatedCars_Update(dT);
+            }
+        } else if (bStrLen(mPostMovie) < 1) {
+            mState = NISACTIVITY_COMPLETE;
+            static_cast<Sim::IActivity *>(this)->Release();
+        } else {
+            new EPlayRaceMovie(mPostMovie);
+            mState = NISACTIVITY_POST_MOVIE;
+        }
+    } else if (mMomentScene->GetTimeElapsed() < mMomentScene->GetTimeTotalLength()) {
+        mMomentScene->SetTime(mMomentScene->GetTimeElapsed() + dT);
+    } else {
+        mState = NISACTIVITY_COMPLETE;
+        static_cast<Sim::IActivity *>(this)->Release();
+    }
+    if (!TheICEManager.IsEditorOn() && SkipNISs != 0) {
+        SkipOverNIS();
+    }
+}
+
+// PC 0x6F7440. The time argument isn't used.
+void NISActivity::ResetEvents(float SetTime) {
+    if (mSequencer != nullptr) {
+        mSequencer->SetVerbose(false);
+        mSequencer->Reset(Sim::GetTime());
+    }
+    for (CarList::iterator i = mVehicleTable.begin(); i != mVehicleTable.end(); ++i) {
+        NISCar *car = i->second;
+        if (car == nullptr || car->mIVehiclePtr == nullptr) {
+            continue;
+        }
+        car->mIVehiclePtr->SetAnimating(true);
+        INISCarControl *control;
+        if (car->mIVehiclePtr->QueryInterface(&control)) {
+            control->RestoreState();
+        }
+        IDamageable *damage;
+        if (car->mIVehiclePtr->QueryInterface(&damage)) {
+            damage->ResetDamage();
+        }
+    }
+}
+
+// PC 0x6F7520 (INIS::Release / Sim::IActivity::Release). An arrest that
+// wasn't started from the ICE editor goes on to the rap sheet (free roam) or
+// the pause menu (a race) once it's done.
+void NISActivity::Release() {
+    if (TraceNIS()) {
+        std::fprintf(stderr, "[nis] release %08x (state %d)\n", mSceneHash, mState);
+    }
+    if (IVisualTreatment *treatment = IVisualTreatment::Get()) {
+        treatment->SetState(IVisualTreatment::HEAT_LOOK);
+    }
+    gTWEAKER_NISLightEnabled = false;
+    ICE::HideOverlay();
+    bool arrested = false;
+    if (mNISType == CAnimChooser::Arrest && !mRunningThroughICE) {
+        arrested = true;
+    } else if (mNISType == CAnimChooser::Moment) {
+        // TODO(port): EBecomePlayerCar (world moments aren't started natively).
+    } else if (mNISType == CAnimChooser::Ending && !mRunningThroughICE) {
+        new EFadeScreenOn(false);
+    }
+    FacePixelation::Disable();
+    SetNISRaceDriverVisible(1);
+    Tweak_DisableRoadNoise = 0;
+    PrecipitationEnable = mIsPrecipitationEnable;
+    SetOverRideRainIntensity(0.0f);
+    if (mUsingFEngOverlay) {
+        mUsingFEngOverlay = false;
+        cFEng::Get()->QueuePackagePop(1);
+    }
+    MaxTicksPerTimestep = mDefault_MaxTicksPerTimestep;
+    InitTopologyAndSceneryGroups();
+    uint32 sceneHash = mSceneHash;
+    CAnimChooser::eType type = mNISType;
+    // PC deletes the activity straight away when it runs in the ICE editor
+    // (never natively); otherwise the garbage collector does.
+    Sim::Activity::Release();
+    if (sceneHash == bStringHash("IntroNisBL09")) {
+        EnablePreculler();
+    }
+    EmitterSystem_OnEndNis();
+    if (g_pNISRevMgr != nullptr) {
+        g_pNISRevMgr->Start321Reving();
+    }
+    if (type != CAnimChooser::Moment) {
+        SoundPause(false, eSNDPAUSE_NISON);
+    }
+    if (arrested) {
+        if (GRaceStatus::Get().GetRaceParameters() == nullptr) {
+            new EQuitToFE(GARAGETYPE_CAREER_SAFEHOUSE, "Infractions.fng");
+        } else {
+            new EPause(0, 1, 0);
+        }
+    }
+}
+#endif

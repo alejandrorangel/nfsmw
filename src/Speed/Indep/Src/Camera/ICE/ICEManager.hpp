@@ -94,7 +94,11 @@ class ICEManager {
     void SetSmoothExit(bool smooth) {} // Decl: 53
     bool IsSmoothExit() {}             // Decl: 54
 #endif
+#if defined(EA_PORT_NATIVE)
+    int ChooseGoodSceneCameraTrackIndex(uint32 scene_hash, bMatrix4 *scene_origin);
+#else
     // int ChooseGoodSceneCameraTrackIndex(uint32 scene_hash, Matrix4 *scene_origin);
+#endif
     void SetUseRealTime(bool val) { // Decl: 55
         bUseRealTime = val;
     }

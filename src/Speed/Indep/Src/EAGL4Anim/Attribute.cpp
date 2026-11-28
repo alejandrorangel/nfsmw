@@ -29,7 +29,12 @@ const Attribute *AttributeBlock::FindAttribute(AttributeId aid) const {
 bool AttributeBlock::GetAttribute(AttributeId aid, void *&result) const {
     const Attribute *attrib = FindAttribute(aid);
     if (attrib) {
+#if defined(EA_PORT_NATIVE)
+        // The slot holds the value itself (attributes that fit in 32 bits).
+        result = reinterpret_cast<void *>(static_cast<uintptr_t>(attrib->mData.Raw()));
+#else
         result = attrib->mData;
+#endif
         return true;
     } else {
         return false;

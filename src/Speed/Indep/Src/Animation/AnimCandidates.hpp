@@ -264,7 +264,19 @@ class CAnimCandidateData {
         }
     }
 
+#if defined(EA_PORT_NATIVE)
+    // PC: 0x6EA1C0.
+    int GetSpecialCarList(uint32 sceneHash) {
+        for (int i = 0; i < static_cast<int>(mSpecialCarListCount); i++) {
+            if (sceneHash == mSpecialCarListAnim[i].mSceneHash) {
+                return mSpecialCarListAnim[i].mSpecialCarList;
+            }
+        }
+        return -1;
+    }
+#else
     int GetSpecialCarList(uint32 sceneHash) {}
+#endif
 
     int GetSceneMomentMarkerType(uint32 sceneHash);
 

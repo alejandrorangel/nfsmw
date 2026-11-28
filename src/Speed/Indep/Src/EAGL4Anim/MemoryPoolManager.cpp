@@ -34,10 +34,28 @@ namespace EAGL4Anim {
 
 MemoryPoolManager *MemoryPoolManager::gDefaultMemoryManager = nullptr;
 MemoryPoolManager *MemoryPoolManager::gMemoryManager = nullptr;
+#if defined(EA_PORT_NATIVE)
+// The block sizes are the Fn classes' 32-bit sizes; natively they're the
+// native ones (8-byte vtable and pointers), kept 16-byte aligned.
+#define EAGL4_NATIVE_BLOCK(T) static_cast<unsigned short>((sizeof(T) + 15) & ~15)
+unsigned short MemoryPoolManager::gFreeListSize[] = {
+    EAGL4_NATIVE_BLOCK(FnRawPoseChannel),  EAGL4_NATIVE_BLOCK(FnRawEventChannel),  EAGL4_NATIVE_BLOCK(FnRawLinearChannel),
+    EAGL4_NATIVE_BLOCK(FnCycle),           EAGL4_NATIVE_BLOCK(FnEventBlender),     EAGL4_NATIVE_BLOCK(FnGraft),
+    EAGL4_NATIVE_BLOCK(FnPoseBlender),     EAGL4_NATIVE_BLOCK(FnPoseMirror),       EAGL4_NATIVE_BLOCK(FnRunBlender),
+    EAGL4_NATIVE_BLOCK(FnTurnBlender),     EAGL4_NATIVE_BLOCK(FnDeltaLerpChan),    EAGL4_NATIVE_BLOCK(FnDeltaQuatChan),
+    EAGL4_NATIVE_BLOCK(FnKeyLerpChan),     EAGL4_NATIVE_BLOCK(FnKeyQuatChan),      EAGL4_NATIVE_BLOCK(FnPhaseChan),
+    EAGL4_NATIVE_BLOCK(FnCompoundChannel), EAGL4_NATIVE_BLOCK(FnRawStateChan),     EAGL4_NATIVE_BLOCK(FnDeltaQ),
+    EAGL4_NATIVE_BLOCK(FnDeltaQFast),      EAGL4_NATIVE_BLOCK(FnDeltaSingleQ),     EAGL4_NATIVE_BLOCK(FnDeltaF3),
+    EAGL4_NATIVE_BLOCK(FnDeltaF1),         EAGL4_NATIVE_BLOCK(FnStatelessQ),       EAGL4_NATIVE_BLOCK(FnStatelessF3),
+    EAGL4_NATIVE_BLOCK(FnCsisEventChannel),
+};
+#undef EAGL4_NATIVE_BLOCK
+#else
 unsigned short MemoryPoolManager::gFreeListSize[] = {
     0x14, 0x18, 0x14, 0x1C, 0x2C, 0x14, 0xA0, 0x20, 0x80, 0x5C, 0x24, 0x24, 0x24,
     0x24, 0x1C, 0x1C, 0x14, 0x30, 0x40, 0x30, 0x30, 0x30, 0x18, 0x18, 0x18,
 };
+#endif
 
 // TODO why is there MatrixMultiply here?
 
@@ -74,13 +92,24 @@ void *MemoryPoolManager::NewBlockByIdxAux(unsigned short idx) {
     return r;
 }
 
+#if defined(EA_PORT_NATIVE)
+// The size class sits in a 16-byte header (4 bytes on PC), so blocks stay
+// aligned for the native pointers stored in them.
+const int kNativeBlockHeader = 16;
+#endif
+
 void *MemoryPoolManager::NewBlockAux(size_t size) {
     unsigned char idx = static_cast<unsigned char>(size / 16);
     char *r = gSizeFreeList[idx];
     if (!r) {
         *reinterpret_cast<unsigned int *>(gMemoryPoolFree) = idx;
+#if defined(EA_PORT_NATIVE)
+        r = gMemoryPoolFree + kNativeBlockHeader;
+        gMemoryPoolFree += (idx + 1) * 0x10 + kNativeBlockHeader;
+#else
         r = gMemoryPoolFree + 4;
         gMemoryPoolFree += (idx + 1) * 0x10 + 4;
+#endif
         return r;
     } else {
         gSizeFreeList[idx] = *reinterpret_cast<char **>(r);
@@ -100,6 +129,9 @@ void MemoryPoolManager::ResetPoolAux() {
 }
 
 void MemoryPoolManager::InitAux(unsigned int poolSize) {
+#if defined(EA_PORT_NATIVE)
+    poolSize *= 2; // native Fn objects are about twice their 32-bit size
+#endif
     gMemoryPoolSize = poolSize;
     gMemoryPool = (char *)EAGL4Internal::EAGL4Malloc(poolSize, "EAGL4Anim Memory Pool");
     gMaxIdx = 0;
@@ -290,7 +322,11 @@ void MemoryPoolManager::DeleteBlockByIdxAux(unsigned short idx, void *ptr) {
 }
 
 void MemoryPoolManager::DeleteBlockAux(void *ptr) {
+#if defined(EA_PORT_NATIVE)
+    unsigned int idx = *reinterpret_cast<unsigned int *>(reinterpret_cast<char *>(ptr) - kNativeBlockHeader);
+#else
     unsigned int idx = reinterpret_cast<int *>(ptr)[-1];
+#endif
 
     *reinterpret_cast<char **>(ptr) = gSizeFreeList[idx];
     gSizeFreeList[idx] = reinterpret_cast<char *>(ptr);

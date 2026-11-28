@@ -28,7 +28,7 @@ class NisScene {
 
     uint32 mSceneNameHash;         // offset 0x0, size 0x4
     char mSceneName[16];           // offset 0x4, size 0x10
-    char *Description;             // offset 0x14, size 0x4
+    PORT_PTR32(char) Description;  // offset 0x14, size 0x4 (loaded in place)
     int32 SceneType;               // offset 0x18, size 0x4
     int32 HaveLayout;              // offset 0x1C, size 0x4
     int32 HaveCarAnimation;        // offset 0x20, size 0x4
