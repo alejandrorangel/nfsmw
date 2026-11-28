@@ -405,7 +405,7 @@ void Emitter::GetInitialParticleColorAndSize(const bMatrix4 *xtra_basis, const b
     outParticle->mSize = extra_params.x;
 
     bAngle pangle = outParticle->mAngle;
-    bAngle adelta = static_cast<bAngle>(extra_params.y);
+    bAngle adelta = PORT_FTOU(bAngle, extra_params.y);
     if (pangle % 2 == 0) {
         pangle += adelta;
     } else {
@@ -1067,8 +1067,8 @@ void EmitterSystem::UpdateParticles(float dt) {
                         t.x = t.z * t.y;
                         RotateTranslate(t, *reinterpret_cast<const UMath::Matrix4 *>(ExtraBasis), extra_params);
                         particle->mSize = extra_params.x;
-                        bAngle pangle = static_cast<uint32>(particle->mInitialAngle) * 257.0f;
-                        bAngle adelta = extra_params.y + static_cast<float>(particle->mRotOffset) / 255.0f * extra_params.y;
+                        bAngle pangle = PORT_FTOU(bAngle, static_cast<uint32>(particle->mInitialAngle) * 257.0f);
+                        bAngle adelta = PORT_FTOU(bAngle, extra_params.y + static_cast<float>(particle->mRotOffset) / 255.0f * extra_params.y);
                         if (pangle % 2 == 0) {
                             pangle += adelta;
                         } else {

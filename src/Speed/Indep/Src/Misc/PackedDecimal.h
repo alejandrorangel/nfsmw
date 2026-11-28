@@ -81,7 +81,7 @@ template <typename N, int a, int b> class FixedPoint {
   public:
     FixedPoint<N, a, b>() {}
     FixedPoint<N, a, b>(float val) {
-        mWord = val * GetScale();
+        mWord = PORT_FTOU(N, val * GetScale());
     }
 
     operator float() const {

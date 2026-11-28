@@ -128,7 +128,7 @@ void Camera::SetCameraMatrix(const bMatrix4 &m, float fTime) {
         VelocityKey.SimTimeMultiplier = (CurrentKey.SimTimeMultiplier - PreviousKey.SimTimeMultiplier) * fTimeRecip;
 
         VelocityKey.FieldOfView = CurrentKey.FieldOfView - PreviousKey.FieldOfView;
-        VelocityKey.FieldOfView = fTimeRecip * static_cast<float>(VelocityKey.FieldOfView);
+        VelocityKey.FieldOfView = PORT_FTOU(unsigned short, fTimeRecip * static_cast<float>(VelocityKey.FieldOfView));
 
         VelocityKey.NoiseFrequency1 =
             static_cast<const CameraParams &>(CurrentKey).NoiseFrequency1 - static_cast<const CameraParams &>(PreviousKey).NoiseFrequency1;

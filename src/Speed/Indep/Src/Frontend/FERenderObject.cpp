@@ -245,10 +245,10 @@ void FERenderObject::AddPoly(float x0, float y0, float x1, float y1, float z, fl
     pcColors = reinterpret_cast<u8 *>(new_colors);
 
     for (i = 0; i < num_verts; i++) {
-        pcColors[i * 4 + 0] = static_cast<unsigned char>(ncolors[i].x * 255.0f);
-        pcColors[i * 4 + 1] = static_cast<unsigned char>(ncolors[i].y * 255.0f);
-        pcColors[i * 4 + 2] = static_cast<unsigned char>(ncolors[i].z * 255.0f);
-        pcColors[i * 4 + 3] = static_cast<unsigned char>(ncolors[i].w * 255.0f);
+        pcColors[i * 4 + 0] = PORT_FTOU(unsigned char, ncolors[i].x * 255.0f);
+        pcColors[i * 4 + 1] = PORT_FTOU(unsigned char, ncolors[i].y * 255.0f);
+        pcColors[i * 4 + 2] = PORT_FTOU(unsigned char, ncolors[i].z * 255.0f);
+        pcColors[i * 4 + 3] = PORT_FTOU(unsigned char, ncolors[i].w * 255.0f);
     }
 
     for (i = 0; i < num_verts - 2; i++) {

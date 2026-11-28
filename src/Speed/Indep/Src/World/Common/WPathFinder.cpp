@@ -31,8 +31,8 @@ class AStarNode : public bTNode<AStarNode> {
         : nParentSlot((parent != nullptr) ? AStarNodeSlotPool->GetSlotNumber(parent) : -1), //
           nSegmentIndex(static_cast<short>(segment)),                                       //
           nRoadNode(road_node->fIndex),                                                     //
-          fActualCost(static_cast<unsigned short>(actual_cost / ASTAR_METRIC_SCALE + 0.5f)),
-          fEstimatedCost(static_cast<unsigned short>(estimated_cost / ASTAR_METRIC_SCALE + 0.5f)) {}
+          fActualCost(PORT_FTOU(unsigned short, actual_cost / ASTAR_METRIC_SCALE + 0.5f)),
+          fEstimatedCost(PORT_FTOU(unsigned short, estimated_cost / ASTAR_METRIC_SCALE + 0.5f)) {}
 
     AStarNode *GetParent() {
         return this->nParentSlot >= 0 ? static_cast<AStarNode *>(AStarNodeSlotPool->GetSlot(this->nParentSlot)) : nullptr;

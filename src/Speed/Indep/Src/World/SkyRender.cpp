@@ -283,7 +283,7 @@ void StuffSkyLayer(eView *view, SKY_LAYER layer) {
                 bMatrix4 LocalRot;
 
                 if (MoveClouds) {
-                    matAng += static_cast<unsigned short>(time * MoveCloudsStep);
+                    matAng += PORT_FTOU(unsigned short, time * MoveCloudsStep);
                 } else {
                     matAng = CloudOffest;
                 }

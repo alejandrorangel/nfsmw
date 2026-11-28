@@ -122,13 +122,13 @@ uint32 ScaleColours(uint32 a, uint32 b) {
     CompColour *col_b = reinterpret_cast<CompColour *>(&b);
     CompColour result;
 
-    result.r = static_cast<unsigned char>(static_cast<float>(static_cast<int>(col_a->r)) * (static_cast<float>(static_cast<int>(col_b->r)) / 255.0f));
+    result.r = PORT_FTOU(unsigned char, static_cast<float>(static_cast<int>(col_a->r)) * (static_cast<float>(static_cast<int>(col_b->r)) / 255.0f));
 
-    result.g = static_cast<unsigned char>(static_cast<float>(static_cast<int>(col_a->g)) * (static_cast<float>(static_cast<int>(col_b->g)) / 255.0f));
+    result.g = PORT_FTOU(unsigned char, static_cast<float>(static_cast<int>(col_a->g)) * (static_cast<float>(static_cast<int>(col_b->g)) / 255.0f));
 
-    result.b = static_cast<unsigned char>(static_cast<float>(static_cast<int>(col_a->b)) * (static_cast<float>(static_cast<int>(col_b->b)) / 255.0f));
+    result.b = PORT_FTOU(unsigned char, static_cast<float>(static_cast<int>(col_a->b)) * (static_cast<float>(static_cast<int>(col_b->b)) / 255.0f));
 
-    result.a = static_cast<unsigned char>(static_cast<float>(static_cast<int>(col_a->a)) * (static_cast<float>(static_cast<int>(col_b->a)) / 255.0f));
+    result.a = PORT_FTOU(unsigned char, static_cast<float>(static_cast<int>(col_a->a)) * (static_cast<float>(static_cast<int>(col_b->a)) / 255.0f));
 
     return *reinterpret_cast<uint32 *>(&result);
 }

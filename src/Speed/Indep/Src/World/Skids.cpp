@@ -175,7 +175,7 @@ int SkidSet::AddSegment(bVector3 *position, bVector3 *delta_position, bool skid_
     }
 
     skid_segment->SetPoints(position, delta_position);
-    skid_segment->SetIntensity(static_cast<unsigned char>(intensity * 255.0f));
+    skid_segment->SetIntensity(PORT_FTOU(unsigned char, intensity * 255.0f));
 
     bExpandBoundingBox(&this->BBoxMin, &this->BBoxMax, position, length);
     this->pClan->ExpandBoundingBox(&this->BBoxMin, &this->BBoxMax);

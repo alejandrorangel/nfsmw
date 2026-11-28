@@ -335,9 +335,9 @@ void ApplyCameraShake(int nViewID, bMatrix4 *pMatrix) {
     bIdentity(&m);
     eMulVector(&m.v3, pMatrix, &vShake);
     m.v3.w = 1.0f;
-    eRotateX(&m, &m, static_cast<bAngle>(vShakeRotation.x * (m.v3.z + m.v3.y)));
-    eRotateY(&m, &m, static_cast<bAngle>(vShakeRotation.y * m.v3.x));
-    eRotateZ(&m, &m, static_cast<bAngle>(vShakeRotation.z * (m.v3.x + m.v3.y)));
+    eRotateX(&m, &m, PORT_FTOU(bAngle, vShakeRotation.x * (m.v3.z + m.v3.y)));
+    eRotateY(&m, &m, PORT_FTOU(bAngle, vShakeRotation.y * m.v3.x));
+    eRotateZ(&m, &m, PORT_FTOU(bAngle, vShakeRotation.z * (m.v3.x + m.v3.y)));
     eMulMatrix(pMatrix, pMatrix, &m);
 }
 

@@ -51,6 +51,10 @@
 #define PORT_PTR32(T) PortPtr32<T>
 #endif
 
+// Float -> unsigned char/short as speed.exe does it: through a 32-bit int,
+// so negative values wrap (see src/types.h).
+#define PORT_FTOU(T, x) static_cast<T>(static_cast<int>(x))
+
 static inline int isnanf(float f) {
     return __builtin_isnan(f);
 }

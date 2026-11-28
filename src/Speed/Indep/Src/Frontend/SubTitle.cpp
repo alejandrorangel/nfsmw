@@ -125,7 +125,7 @@ void SubTitler::Update(uint32 msg) {
                     char timer_str[100];
                     timer.PrintToString(timer_str, 0);
                 }
-                uint16 delta = static_cast<uint16>(timenow * 10.0f);
+                uint16 delta = PORT_FTOU(uint16, timenow * 10.0f);
                 if (data_[next_].startTime <= delta) {
                     RefreshText();
                     next_++;

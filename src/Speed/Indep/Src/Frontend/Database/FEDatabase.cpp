@@ -1490,13 +1490,13 @@ GameCompletionStats cFrontendDatabase::GetGameCompletionStats() {
         }
     }
 
-    stats.m_nRapSheetRankings = static_cast<unsigned char>(nRapSheetRankings / nTotalRapSheetRankings * 100.0f);
-    stats.m_nCareer = static_cast<unsigned char>((nCompletedCareerRaces + nMilestonesAwarded) / (nTotalCareerRaces + nTotalMilestones) * 100.0f);
+    stats.m_nRapSheetRankings = PORT_FTOU(unsigned char, nRapSheetRankings / nTotalRapSheetRankings * 100.0f);
+    stats.m_nCareer = PORT_FTOU(unsigned char, (nCompletedCareerRaces + nMilestonesAwarded) / (nTotalCareerRaces + nTotalMilestones) * 100.0f);
     stats.m_nChallenge =
-        static_cast<unsigned char>(static_cast<float>(stats.m_nCompletedChallengeRaces) / static_cast<float>(stats.m_nTotalChallengeRaces) * 100.0f);
-    stats.m_nOverall = static_cast<unsigned char>(static_cast<float>(static_cast<int>(stats.m_nCareer)) * 0.7f +
-                                                  static_cast<float>(static_cast<int>(stats.m_nChallenge)) * 0.2f +
-                                                  static_cast<float>(static_cast<int>(stats.m_nRapSheetRankings)) * 0.1f);
+        PORT_FTOU(unsigned char, static_cast<float>(stats.m_nCompletedChallengeRaces) / static_cast<float>(stats.m_nTotalChallengeRaces) * 100.0f);
+    stats.m_nOverall = PORT_FTOU(unsigned char, static_cast<float>(static_cast<int>(stats.m_nCareer)) * 0.7f +
+                                                    static_cast<float>(static_cast<int>(stats.m_nChallenge)) * 0.2f +
+                                                    static_cast<float>(static_cast<int>(stats.m_nRapSheetRankings)) * 0.1f);
 
     return stats;
 }

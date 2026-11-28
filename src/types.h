@@ -301,6 +301,14 @@ typedef volatile int32 vs32;
 #define PORT_WEAK
 #endif
 
+// Float -> unsigned char/short. The original compilers convert through a
+// 32-bit int (negatives wrap); in C++ an out-of-range value is undefined, and
+// clang converts with fcvtzu at -O0 (negatives become 0) but fcvtzs at -O2.
+// The native port spells out the original's conversion.
+#ifndef PORT_FTOU
+#define PORT_FTOU(T, x) static_cast<T>(x)
+#endif
+
 // Pointer field inside data that's loaded in place (fixed up at load time).
 // A 4-byte compressed pointer in the native port, a plain pointer otherwise.
 #ifndef PORT_PTR32
