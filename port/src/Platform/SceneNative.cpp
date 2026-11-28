@@ -224,7 +224,8 @@ void SetSceneCamera(Camera *camera) {
 
 // render_flags: eViewPlatInterface::Render flags (bit 0: CarRender's
 // disable_env_flag, no environment map).
-void DrawSolid(eSolid *solid, const M44 world, const eDynamicLightContext *lights = nullptr, unsigned int render_flags = 0) {
+void DrawSolid(eSolid *solid, const M44 world, const eDynamicLightContext *lights = nullptr, unsigned int render_flags = 0,
+               const bMatrix4 *blending_matrices = nullptr) {
     eSolidPlatInfo *info = solid->GetPlatInfo();
     if (info == nullptr) {
         return;
@@ -285,7 +286,17 @@ void DrawSolid(eSolid *solid, const M44 world, const eDynamicLightContext *light
                 d.flags |= PORT_3D_ENVMAP;
             }
         }
-        if (group.Effect == PORT_EFFECT_CAR) {
+        // IDI_WORLDBONE_FX BlendMatrices (sub_6C7F50): the group's 16 palette
+        // bones of the model's blending matrices (skinning matrices: the
+        // skeleton's global pose times each bone's inverse base matrix).
+        float bones[256];
+        if (group.Effect == PORT_EFFECT_WORLDBONE && blending_matrices != nullptr) {
+            for (int i = 0; i < 16; i++) {
+                std::memcpy(&bones[i * 16], &blending_matrices[group.BonePalette[i]], sizeof(float) * 16);
+            }
+            d.bones = bones;
+        }
+        if (group.Effect == PORT_EFFECT_CAR || d.bones != nullptr) {
             // sub_6C8000 (speed.exe 1.3), not the light context: LocalEyePos =
             // the view's camera position x inverse(local_world)
             // (eInvertTransformationMatrix 0x6BDE60, D3DXVec4Transform), and
@@ -1082,7 +1093,7 @@ void eViewPlatInterface::Render(eModel *model, bMatrix4 *local_to_world, eLightC
     if (light_context && light_context->Type == 0) {
         dynamic_lights = static_cast<const eDynamicLightContext *>(light_context);
     }
-    DrawSolid(model->GetSolid(), world, dynamic_lights, flags);
+    DrawSolid(model->GetSolid(), world, dynamic_lights, flags, blending_matricies);
     if (replaced) {
         model->RestoreReplacementTextureTable(replaced);
     }

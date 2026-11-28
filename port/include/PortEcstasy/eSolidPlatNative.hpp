@@ -6,6 +6,8 @@
 //   0x134B02  groups, 0x68 bytes each (data 16-byte aligned):
 //               +0x00 AABB min, +0x0C AABB max
 //               +0x18 texture slots (u8 each; slot 0 = diffuse)
+//               +0x1E WORLDBONE: the 16 skeleton bones its vertices' blend
+//                     indices pick (sub_6C7F50)
 //               +0x30 effect index into the PC effect table (speed.exe 1.3
 //                     0x8F9BE8, 0x90 per entry): 0 WORLD, 1 WORLDREFLECT,
 //                     2 WORLDBONE, 3 WORLDNORMALMAP, 4 CAR, 5 GLOSSYWINDOW,
@@ -33,6 +35,7 @@ struct eSolidPlatGroup {
     float AABBMin[3];
     float AABBMax[3];
     uint8 TextureSlots[6];
+    uint8 BonePalette[16]; // WORLDBONE: blend index -> skeleton bone
     uint16 VertexBuffer; // index into eSolidPlatInfo::VertexBuffers
     uint16 Effect;       // PORT_EFFECT_* (PC effect table index)
     uint32 Flags;

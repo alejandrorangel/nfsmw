@@ -49,6 +49,8 @@
 #include "Speed/Indep/Src/Gameplay/GActivity.h"
 #include "Speed/Indep/Src/Generated/Events/EEnterBin.hpp"
 #include "Speed/Indep/Src/Interfaces/SimActivities/INIS.h"
+#include "Speed/Indep/Src/Animation/AnimDirectory.hpp"
+#include "Speed/Indep/Src/Animation/AnimScene.hpp"
 #include "Speed/Indep/Src/Gameplay/GManager.h"
 #include "Speed/Indep/Src/Gameplay/GMilestone.h"
 #include "Speed/Indep/Src/Generated/AttribSys/Classes/milestonetypes.h"
@@ -103,6 +105,7 @@ struct Scenario {
     bool milestone;     // free roam: a pursuit for the bin's milestones, escaped to the safehouse
     bool career_save;   // profiles on: a career saved to disk, then loaded back (NFSMW_BENCHMARK_PHASE)
     bool rival;         // free roam: the bin's requirements met, the rival challenged and beaten, the next bin
+    bool busted;        // free roam: a pursuit, the car stopped until the cops bust it: the arrest NIS
 };
 
 // Race IDs are the race database's event IDs (NFSMW_BENCHMARK=list-races
@@ -126,6 +129,8 @@ const Scenario kScenarios[] = {
      false, true, nullptr, nullptr, 0, 0, 0, true, 0.0f, 60000, {0}, false, false, true},
     {"career-rival", "a new career's free roam with the bin's requirements met (debug): the rival challenge, the boss race, the rival flow, the next bin",
      false, true, nullptr, nullptr, 0, 0, 0, true, 0.0f, 60000, {0}, false, false, false, true},
+    {"career-busted", "a new career's free roam, a heat 2 pursuit, the car stopped until the cops bust it: the arrest NIS, the rap sheet",
+     false, true, nullptr, nullptr, 0, 0, 0, true, 0.0f, 30000, {0}, false, false, false, false, true},
     {"frontend", "the main menu over the garage car: car shading and the frontend", true, false, nullptr, nullptr, 0, 0, 0, false, 0.0f, 3600,
      {120, 1800, 3600}},
     {"list-races", "prints the race database's events and exits", true, false, nullptr, nullptr, 0, 0, 0, false, 0.0f, 1, {0}},
@@ -434,6 +439,67 @@ void CareerEventUpdate() {
                 Finish();
             }
             break;
+    }
+}
+
+// The busted scenario: a heat 2 pursuit from frame 120 (as the milestone
+// scenario), at NFSMW_BENCHMARK_BUST (frame 600) the AI lets go and the car
+// stops; the cops bust it (MPerpBusted): the arrest NIS (NISListenerActivity,
+// a random ArrestM/F scene at an arrest marker near the car), then, in free
+// roam, the rap sheet in the safehouse. Logs the NIS's scene and frames, and
+// ends 300 frames into the frontend.
+void BustedUpdate() {
+    static const int bust = EnvInt("NFSMW_BENCHMARK_BUST", 600);
+    static int nis_frame = -1;
+    static int fe_frame = -1;
+    gEventPress = false;
+    gEventLeft = false;
+    if (gBenchFrame == 120 && ICopMgr::Exists()) {
+        ICopMgr::Get()->LockoutCops(false);
+        ICopMgr::Get()->PursueAtHeatLevel(2);
+        std::fprintf(stderr, "[benchmark] pursuit at heat 2 (frame %d)\n", gBenchFrame);
+    }
+    if (gBenchFrame == bust) {
+        SetHumanAI(false);
+        gEventHoldCar = true;
+        std::fprintf(stderr, "[benchmark] the car stops (frame %d)\n", gBenchFrame);
+    }
+    if (gBenchFrame >= bust && nis_frame < 0) {
+        IPlayer *player = FirstPlayer();
+        IVehicle *ivehicle;
+        if (player && player->GetSimable() && player->GetSimable()->QueryInterface(&ivehicle)) {
+            ivehicle->SetSpeed(0.0f);
+        }
+    }
+    INIS *nis = INIS::Get();
+    if (nis != nullptr && nis_frame < 0) {
+        nis_frame = gBenchFrame;
+        std::fprintf(stderr, "[benchmark] busted: arrest NIS (frame %d)\n", gBenchFrame);
+    }
+    static bool playing = false;
+    if (nis != nullptr && nis->IsPlaying() && !playing) {
+        playing = true;
+        char name[32] = "";
+        if (TheAnimDirectory != nullptr && nis->GetAnimScene() != nullptr) {
+            TheAnimDirectory->GetNameOfSceneHash(nis->GetAnimScene()->GetSceneHash(), name);
+        }
+        std::fprintf(stderr, "[benchmark] arrest NIS %s playing (frame %d)\n", name, gBenchFrame);
+    }
+    if (nis == nullptr && playing) {
+        playing = false;
+        std::fprintf(stderr, "[benchmark] arrest NIS done (frame %d)\n", gBenchFrame);
+    }
+    if (fe_frame < 0 && TheGameFlowManager.IsInFrontend()) {
+        fe_frame = gBenchFrame;
+        std::fprintf(stderr, "[benchmark] in the frontend (frame %d)\n", gBenchFrame);
+    }
+    if (fe_frame >= 0 && gBenchFrame - fe_frame == 300) {
+        std::fprintf(stderr, "[benchmark] frontend screen: %s\n", ControlPackageName());
+        Finish();
+    }
+    if (gBenchFrame == bust + 60 * 60 && nis_frame < 0) {
+        std::fprintf(stderr, "[benchmark] not busted a minute after stopping\n");
+        Finish();
     }
 }
 
@@ -1445,6 +1511,9 @@ void PortBenchmarkEndFrame(uint64_t render_start_ns) {
         }
         if (gScenario->milestone) {
             MilestoneUpdate();
+        }
+        if (gScenario->busted) {
+            BustedUpdate();
         }
         if (!gScenario->frontend && !gEventHoldCar) {
             DriveWithAI();

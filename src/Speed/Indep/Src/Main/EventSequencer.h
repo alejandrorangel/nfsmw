@@ -96,6 +96,9 @@ class System {
     System(Engine *engine, const CARP::EventSeqSystem *system, float externalTime, float rate);
 
     friend void Update(float externalTime);
+#if defined(EA_PORT_NATIVE)
+    friend class Engine;
+#endif
 
     unsigned int ID() const;
 
@@ -192,6 +195,33 @@ public:
         }
     }
 
+#if defined(EA_PORT_NATIVE)
+    // speed.exe 1.3, Engine's IEngine vtable 0x8A7EC8.
+    ~Engine() override;
+    void Release() override;
+    const char *Name() const override;
+    void Relocate(unsigned int deltaAddress) override;
+    void Unload() override;
+    IContext *GetContext() const override;
+    void SetContext(IContext *context) override;
+    unsigned int NumSystems() const override;
+    unsigned int GetSystemID(unsigned int index) const override;
+    System *GetSystemByIndex(unsigned int index) const override;
+    System *FindSystem(unsigned int systemID) const override;
+    bool AnySystemInAction() const override;
+    void SetAllSystemsState(float externalTime, unsigned int state) override;
+    bool ProcessStimulus(unsigned int systemID, unsigned int stimulus, float externalTime, IContext *ifiringcontext, QueueMode mode) override;
+    bool ProcessStimulus(unsigned int stimulus, float externalTime, IContext *ifiringcontext, QueueMode mode) override;
+    bool Trigger(float externalTime, IContext *ifiringcontext, QueueMode mode) override;
+    bool FireEventTag(unsigned int tag, IContext *ifiringcontext) override;
+    void Flush() override;
+    void Stop(float externalTime, bool flush, IContext *ifiringcontext) override;
+    void Complete(float externalTime, bool flush, IContext *ifiringcontext) override;
+    void Pause(float externalTime, IContext *ifiringcontext) override;
+    void Resume(float externalTime, IContext *ifiringcontext) override;
+    void Reset(float externalTime) override;
+    void SetVerbose(bool verbose) override;
+#else
     // ~Engine() override {}
 
     // void Release() override {}
@@ -207,6 +237,7 @@ public:
     // void SetContext(IContext *context) override {}
 
     // unsigned int NumSystems() const override {}
+#endif
 
     IContext *Context() const {
         return this->mContext;

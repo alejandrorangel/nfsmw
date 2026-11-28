@@ -202,7 +202,11 @@ bool CAnimPlayer::Load(uint32 anim_id, int camera_track_number, bool DisableZone
 
         if (scene_found) {
             int size_needed = AnimLoader_SizeNeeded();
+#if defined(EA_PORT_NATIVE)
+            if (size_needed > 3000000) { // speed.exe 1.3 (0x44CC90); the arrest scenes need over 1 MB
+#else
             if (size_needed >= 0xDBBA1) {
+#endif
                 gAnimLoader_MemPointer = nullptr;
             } else if (size_needed > gAnimCfg_Small_NIS_Size) {
                 TheTrackStreamer.BlockUntilLoadingComplete();

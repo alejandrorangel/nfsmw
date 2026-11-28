@@ -79,6 +79,9 @@ struct Port3DDraw {
     // hardware-compare tap, 2 four taps (PCF). Only effects WORLD,
     // WORLDREFLECT, WORLDNORMALMAP, CAR and GLOSSYWINDOW use it.
     uint32_t shadow_level;
+    // IDI_WORLDBONE_FX BlendMatrices: 16 skinning matrices (row vectors, 16
+    // floats each) picked by the group's bone palette, or null. Copied.
+    const float *bones;
 };
 enum { PORT_3D_ALPHA_BLEND = 1, PORT_3D_ADDITIVE = 2, PORT_3D_ALPHA_TEST = 4, PORT_3D_LIT = 8, PORT_3D_ENVMAP = 16 };
 

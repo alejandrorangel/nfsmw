@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "Speed/Indep/Src/Main/EventSequencer.h"
 #include "Speed/Indep/Libs/Support/Miscellaneous/CARP.h"
 #include "Speed/Indep/Libs/Support/Miscellaneous/PackedBinaryTree.h"
@@ -57,6 +58,20 @@ namespace EventSequencer {
 
 typedef std::map<UCrc32, const UData *> NameHashToDataMap;
 
+#if defined(EA_PORT_NATIVE)
+// speed.exe 1.3's static initialisers (0x886990..0x886AD0): stringhash32 of
+// the names.
+static unsigned int gCreateStimulus = stringhash32("create");
+static unsigned int gTriggerStimulus = stringhash32("trigger");
+static unsigned int gStartAction = stringhash32("start");
+static unsigned int gEndAction = stringhash32("end");
+static unsigned int gStopAction = stringhash32("stop");
+static unsigned int gPauseAction = stringhash32("pause");
+static unsigned int gResumeAction = stringhash32("resume");
+static unsigned int gUnloadAction = stringhash32("unload");
+static unsigned int gStimulusParameter = stringhash32("stimulus");
+static unsigned int gStimulusResult = stringhash32("result");
+#else
 static unsigned int gCreateStimulus;
 static unsigned int gTriggerStimulus;
 static unsigned int gStartAction;
@@ -67,6 +82,7 @@ static unsigned int gResumeAction;
 static unsigned int gUnloadAction;
 static unsigned int gStimulusParameter;
 static unsigned int gStimulusResult;
+#endif
 
 static NameHashToDataMap gEngineData;
 static unsigned int gNumActiveSystems = 0;
@@ -152,6 +168,196 @@ IEngine *Create(UTL::COM::Object *baseObject, IContext *context, UCrc32 name, fl
 
     return Create(baseObject, context, data, externalTime, rate);
 }
+
+#if defined(EA_PORT_NATIVE)
+// Engine's IEngine methods (speed.exe 1.3, vtable 0x8A7EC8): each runs over
+// the engine's systems.
+
+Engine::~Engine() { // 0x645540
+    for (unsigned int i = 0; i < mNumSystems; i++) {
+        mSystems[i].~System();
+    }
+    gFastMem.Free(mSystems, mNumSystems * sizeof(System), "EventSequencerSystems");
+    mSystems = NULL;
+}
+
+void Engine::Release() { // 0x6452C0
+    delete this;
+}
+
+const char *Engine::Name() const { // 0x6452D0
+    return mEngine != NULL ? static_cast<const char *>(mEngine->mName) : NULL;
+}
+
+void Engine::Relocate(unsigned int deltaAddress) {
+    // PC 0x645360 moves the data pointers after a defragmentation; native
+    // data stays put.
+}
+
+void Engine::Unload() { // 0x646730
+    if (mEngine == NULL) {
+        return;
+    }
+    mEngine = NULL;
+    for (unsigned int i = 0; i < mNumSystems; i++) {
+        System &s = mSystems[i];
+        if (s.mEngine != NULL) {
+            s.TerminateAction(gUnloadAction, s.GetActiveIndex(), s.mActionLast, true, NULL);
+            s.mEngine = NULL;
+        }
+    }
+}
+
+IContext *Engine::GetContext() const { // 0x6452E0
+    return mContext;
+}
+
+void Engine::SetContext(IContext *context) { // 0x6452F0
+    mContext = context;
+}
+
+unsigned int Engine::NumSystems() const { // 0x645300
+    return mNumSystems;
+}
+
+unsigned int Engine::GetSystemID(unsigned int index) const { // 0x645310
+    if (mEngine != NULL && index < mNumSystems) {
+        return mEngine->GetSystemIDs()[index];
+    }
+    return 0;
+}
+
+System *Engine::GetSystemByIndex(unsigned int index) const { // 0x645330
+    return index < mNumSystems ? &mSystems[index] : NULL;
+}
+
+System *Engine::FindSystem(unsigned int systemID) const { // 0x6454A0 (with 0x6454D0)
+    if (mEngine == NULL) {
+        return NULL;
+    }
+    const unsigned int *ids = mEngine->GetSystemIDs();
+    const unsigned int *end = ids + mEngine->mNumSystems;
+    const unsigned int *it = std::lower_bound(ids, end, systemID);
+    if (it < end && *it == systemID) {
+        return GetSystemByIndex(static_cast<unsigned int>(it - ids));
+    }
+    return GetSystemByIndex(static_cast<unsigned int>(-1));
+}
+
+bool Engine::AnySystemInAction() const { // 0x6453C0
+    for (unsigned int i = 0; i < mNumSystems; i++) {
+        if (mSystems[i].IsInAction()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void Engine::SetAllSystemsState(float externalTime, unsigned int state) { // 0x6455E0
+    for (unsigned int i = 0; i < mNumSystems; i++) {
+        System &s = mSystems[i];
+        if (s.mSystem == NULL) {
+            continue;
+        }
+        if (s.IsInAction()) {
+            s.TerminateAction(gStopAction, s.GetActiveIndex(), externalTime, true, NULL);
+        }
+        s.mState = const_cast<CARP::EventSeqState *>(s.mSystem->FindState(state));
+        if (s.mState == NULL) {
+            s.mState = const_cast<CARP::EventSeqState *>(s.mSystem->FindState(s.mSystem->mDefaultState));
+            s.mCurrentState = s.mSystem->mDefaultState;
+        } else {
+            s.mCurrentState = state;
+        }
+    }
+}
+
+bool Engine::ProcessStimulus(unsigned int systemID, unsigned int stimulus, float externalTime, IContext *ifiringcontext,
+                             QueueMode mode) { // 0x6467B0
+    System *s = FindSystem(systemID);
+    return s != NULL && s->ProcessStimulus(stimulus, externalTime, ifiringcontext, mode);
+}
+
+bool Engine::ProcessStimulus(unsigned int stimulus, float externalTime, IContext *ifiringcontext, QueueMode mode) { // 0x6467F0
+    bool result = false;
+    for (unsigned int i = 0; i < mNumSystems; i++) {
+        if (mSystems[i].ProcessStimulus(stimulus, externalTime, ifiringcontext, mode)) {
+            result = true;
+        }
+    }
+    return result;
+}
+
+bool Engine::Trigger(float externalTime, IContext *ifiringcontext, QueueMode mode) { // 0x646850
+    return ProcessStimulus(gTriggerStimulus, externalTime, ifiringcontext, mode);
+}
+
+bool Engine::FireEventTag(unsigned int tag, IContext *ifiringcontext) { // 0x645730
+    bool fired = false;
+    for (unsigned int i = 0; i < mNumSystems; i++) {
+        if (mSystems[i].FireEventTag(tag, ifiringcontext)) {
+            fired = true;
+        }
+    }
+    return fired;
+}
+
+void Engine::Flush() { // 0x6453F0
+    for (unsigned int i = 0; i < mNumSystems; i++) {
+        mSystems[i].Flush();
+    }
+}
+
+void Engine::Stop(float externalTime, bool flush, IContext *ifiringcontext) { // 0x645440
+    for (unsigned int i = 0; i < mNumSystems; i++) {
+        System &s = mSystems[i];
+        s.TerminateAction(gStopAction, s.GetActiveIndex(), externalTime, flush, ifiringcontext);
+    }
+}
+
+void Engine::Complete(float externalTime, bool flush, IContext *ifiringcontext) { // 0x6471B0
+    for (unsigned int i = 0; i < mNumSystems; i++) {
+        System &s = mSystems[i];
+        if (s.IsInAction()) {
+            s.FireTimedEvents(s.mActionLast, s.mAction->mDuration);
+        }
+        s.TerminateAction(gEndAction, s.GetActiveIndex(), externalTime, flush, ifiringcontext);
+    }
+}
+
+void Engine::Pause(float externalTime, IContext *ifiringcontext) { // 0x645800
+    for (unsigned int i = 0; i < mNumSystems; i++) {
+        mSystems[i].Pause(externalTime, ifiringcontext);
+    }
+}
+
+void Engine::Resume(float externalTime, IContext *ifiringcontext) { // 0x645860
+    for (unsigned int i = 0; i < mNumSystems; i++) {
+        mSystems[i].Resume(externalTime, ifiringcontext);
+    }
+}
+
+// 0x647230: each system back to its initial state and given "create", then
+// "create" to all (queued behind the first). PC's queueing branch for a
+// system still in action can't be taken after the reset.
+void Engine::Reset(float externalTime) {
+    for (unsigned int i = 0; i < mNumSystems; i++) {
+        System &s = mSystems[i];
+        if (s.mSystem == NULL) {
+            continue;
+        }
+        s.InternalReset(externalTime, s.mActionRate);
+        if (!s.IsInAction()) {
+            s.InvokeStimulus(gCreateStimulus, externalTime, NULL);
+        }
+    }
+    ProcessStimulus(gCreateStimulus, externalTime, NULL, QUEUE_ALLOW);
+}
+
+void Engine::SetVerbose(bool verbose) { // 0x645350
+    mVerbose = verbose;
+}
+#endif
 
 const UGroup *PrepareBinary(const void *binData) {
     const UGroup *g = UGroup::Deserialize(binData, true, 0);
@@ -273,6 +479,55 @@ void System::Reset(float externalTime, float rate, IContext *ifiringcontext) {
     this->ProcessStimulus(gCreateStimulus, externalTime, ifiringcontext, QUEUE_ALLOW);
 }
 
+#if defined(EA_PORT_NATIVE)
+// speed.exe 1.3 (0x645A40): an idle system takes the stimulus now; one in
+// action queues it (by the mode) as the response of the state its queue ends
+// in.
+bool System::ProcessStimulus(unsigned int stimulus, float externalTime, IContext *ifiringcontext, EventSequencer::QueueMode mode) {
+    if (this->mSystem == NULL) {
+        return false;
+    }
+    if (mode == QUEUE_ABORT) {
+        if (this->IsInAction()) {
+            this->Stop(externalTime, true, NULL);
+        }
+    } else if (mode == QUEUE_FLUSH && this->mQueuedStimuli[0] != 0) {
+        this->Flush();
+    }
+    if (!this->IsInAction()) {
+        return this->InvokeStimulus(stimulus, externalTime, ifiringcontext);
+    }
+    unsigned int blocking;
+    if (mode == QUEUE_SHALLOW) {
+        blocking = this->mQueuedStimuli[0];
+    } else if (mode == QUEUE_ALLOW) {
+        blocking = this->mQueuedStimuli[3];
+    } else {
+        return false;
+    }
+    if (blocking != 0) {
+        return false;
+    }
+    unsigned int entry = 0;
+    while (this->mQueuedStimuli[entry] != 0) {
+        entry++;
+    }
+    unsigned int currentEnd = this->mQueuedStimuli[0] != 0 ? this->mQueueEndState : this->mEndState;
+    const CARP::EventSeqState *endState = this->mSystem->FindState(currentEnd);
+    if (endState == NULL) {
+        endState = this->mSystem->FindState(this->mSystem->mDefaultState);
+    }
+    unsigned int filtered = this->ExecuteFilter(endState, stimulus, ifiringcontext);
+    const CARP::EventSeqResponse *response = endState->FindResponse(filtered);
+    if (response == NULL) {
+        return false;
+    }
+    this->mQueuedStimuli[entry] = filtered;
+    this->mQueueEndState = response->mEndState;
+    this->mQueueDuration = response->mActionSeq->mDuration < 0.0f ? UMath::Infinity : this->mQueueDuration + response->mActionSeq->mDuration;
+    return true;
+}
+#else
 // unfinished
 bool System::ProcessStimulus(unsigned int stimulus, float externalTime, IContext *ifiringcontext, EventSequencer::QueueMode mode) {
     bool result = false;
@@ -339,6 +594,8 @@ bool System::ProcessStimulus(unsigned int stimulus, float externalTime, IContext
 
     return result;
 }
+
+#endif
 
 bool System::FireEventTag(unsigned int tag, IContext *ifiringcontext) const {
     if (this->IsInAction()) {

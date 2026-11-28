@@ -147,6 +147,7 @@ eSolidPlatInfo *LoadMesh(bChunk *mesh, const char *solid_name) {
         bMemCpy(out.AABBMin, g + 0x00, 12);
         bMemCpy(out.AABBMax, g + 0x0C, 12);
         bMemCpy(out.TextureSlots, g + 0x18, 6);
+        bMemCpy(out.BonePalette, g + 0x1E, 16);
         out.Effect = static_cast<uint16>(Read<uint32>(g + 0x30));
         {
             static const bool trace = std::getenv("NFSMW_TRACE_SOLID_EFFECTS") != nullptr;

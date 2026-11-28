@@ -6,7 +6,9 @@
 #include "MetalPrelitBridge.h"
 #include "MetalUpload.h"
 
+#include <array>
 #include <atomic>
+#include <deque>
 #include <mutex>
 #include <vector>
 
@@ -182,6 +184,7 @@ struct Draw3D {
     float lights[28];
     float envmap[12];
     uint32_t shadow_level;
+    const float *bones = nullptr; // WORLDBONE BlendMatrices (Frame3D::bones)
 };
 
 // One face of the dynamic environment cube (PC env-map views).
@@ -238,6 +241,9 @@ struct Frame3D {
     // IDI_RAIN_DROP_FX drops (PortMetal3DSetRainDrops).
     std::vector<PortRainDrop> drops;
     id<MTLTexture> drop_displace;
+    // WORLDBONE skinning palettes this frame (Draw3D::bones points in here;
+    // a deque keeps them in place as it grows and across the frame swap).
+    std::deque<std::array<float, 256>> bones;
 };
 static Frame3D g3DBuilding;
 static Frame3D g3DPublished;
@@ -284,6 +290,7 @@ void PortMetal3DBeginFrame(const float view_proj[16]) {
     g3DBuilding.particles.clear();
     g3DBuilding.drops.clear();
     g3DBuilding.drop_displace = nil;
+    g3DBuilding.bones.clear();
 }
 
 void PortMetal3DAddParticles(void *texture, uint32_t flags, const float world[16], const PortParticleVertex *quads, int num_quads) {
@@ -528,6 +535,11 @@ void PortMetal3DAdd(const Port3DDraw *draw) {
         memcpy(d.lights, draw->lights, sizeof(d.lights));
         memcpy(d.envmap, draw->envmap, sizeof(d.envmap));
         d.shadow_level = draw->shadow_level;
+        if (draw->bones) {
+            g3DBuilding.bones.emplace_back();
+            memcpy(g3DBuilding.bones.back().data(), draw->bones, sizeof(float) * 256);
+            d.bones = g3DBuilding.bones.back().data();
+        }
         g3DTarget->push_back(std::move(d));
     }
 }
@@ -718,9 +730,45 @@ void CarVertex(thread MeshOut &o, float3 v0, float3 v1, float4 v2, constant Mesh
     }
 }
 
+// IDI_WORLDBONE_FX technique #0 'world' vs #1 (vs_1_1), instruction by
+// instruction: 60-byte vertices (position, normal, D3DCOLOR, uv, three blend
+// weights v4, three blend indices v5 as floats). The position is skinned by
+// the three BlendMatrices its indices pick; the lighting uses the unskinned
+// position and normal (LocalEyePos, two lights: LocalDirectionMatrix rows 0
+// and 1, LocalColourMatrix columns 0 and 1, +0.3 wrap).
+void BoneVertex(thread MeshOut &o, const device float *v, constant MeshConst &c, constant Material &m, constant Lights &l,
+                constant float4x4 *bones) {
+    float4 v0 = float4(v[0], v[1], v[2], 1);
+    float3 v1 = float3(v[3], v[4], v[5]);
+    uint argb = as_type<uint>(v[6]);
+    float red = float((argb >> 16) & 0xff) / 255.0;
+    float3 w = float3(v[9], v[10], v[11]);
+    int3 idx = int3(floor(float3(v[12], v[13], v[14])));
+    // Row-vector matrices loaded column-major: B * p computes p * B.
+    float4 skinned = (bones[idx.y] * v0) * w.y;                // dp4 x4 c[a0]; mul r1, r0, v4.y
+    skinned = (bones[idx.x] * v0) * w.x + skinned;             // mad r1, r0, v4.x, r1
+    skinned = (bones[idx.z] * v0) * w.z + skinned;             // mad r1, r0, v4.z, r1
+    o.pos = c.mvp * skinned;                                   // dp4 oPos, r1, WorldViewProj
+    o.world_pos = (c.world * skinned).xyz;
+    float3 e = l.eye.xyz - v0.xyz;                             // add r2.xyz, -v0, LocalEyePos
+    e = e * rsqrt(dot(e, e));                                  // dp3, rsq, mul
+    float ndv = max(clamp(dot(e, v1), 0.0, 1.0), 0.01);       // dp3; max 0; min 1; max 0.01
+    float spec = pow(ndv, clamp(m.specular_power, -128.0, 128.0));   // lit r0, r2.xxyy
+    float env = pow(ndv, clamp(m.envmap_power, -128.0, 128.0));      // lit r1, r2.xxzz
+    float4 diffuse = ndv * m.diffuse_range + m.diffuse_min;    // mad r0, r2.x, DiffuseRange, DiffuseMin
+    float l1 = clamp(dot(v1, l.dir[1].xyz) + 0.3, 0.0, 1.0);   // dp3 r1.x, v1, c72; add 0.3; max 0; min 1
+    float l0 = clamp(dot(v1, l.dir[0].xyz) + 0.3, 0.0, 1.0);   // dp3 r2.x, v1, c71; ...
+    float3 lights = l0 * l.colour[0].rgb + l1 * l.colour[1].rgb;
+    o.d0 = saturate(float4(diffuse.rgb * lights, diffuse.w));  // mul oD0.xyz; mov oD0.w
+    float envamt = (env * m.envmap_range + m.envmap_min) * red;
+    o.d1 = saturate(float4((spec * m.specular_range.rgb + m.specular_min.rgb) * red, envamt + envamt));
+    o.uv = float2(v[7], v[8]);                                 // mov oT0, v3
+}
+
 vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffer(0)]], constant MeshConst &c [[buffer(1)]],
                        constant WorldFog &fog [[buffer(2)]], constant SkyConst &sky [[buffer(3)]], constant Material &m [[buffer(4)]],
-                       constant Lights &l [[buffer(5)]], constant EnvMatrix &wv [[buffer(6)]]) {
+                       constant Lights &l [[buffer(5)]], constant EnvMatrix &wv [[buffer(6)]],
+                       constant float4x4 *bones [[buffer(7)]]) {
     const device float *v = verts + vid * (c.stride / 4);
     float4 p = float4(v[0], v[1], v[2], 1);
     MeshOut o;
@@ -752,6 +800,10 @@ vertex MeshOut mesh_vs(uint vid [[vertex_id]], const device float *verts [[buffe
     o.env = 0;
     if (c.effect == 4) {
         CarVertex(o, p.xyz, o.local_normal, o.color, c, m, l, wv);
+        return o;
+    }
+    if (c.effect == 2 && (c.shade & 1024) != 0) {
+        BoneVertex(o, v, c, m, l, bones);
         return o;
     }
     if (c.effect == 22) {
@@ -1015,6 +1067,10 @@ fragment float4 mesh_fs(MeshOut in [[stage_in]], texture2d<float> tex [[texture(
         out = saturate(t * saturate(in.d0) * float4(0.5, 0.5, 0.5, min(c.eye.w, 1.0)));
     } else if (c.effect == 4) {
         out = CarShade(in, t, c, env_map, CarShadow(c, in.shadow_pos, shadow_map, shadow_colour));
+    } else if (c.effect == 2 && (c.shade & 1024) != 0) {
+        // IDI_WORLDBONE_FX ps #0 (ps_1_1): t v0 c0, c0 = (1, 1, 1, 2)
+        // clamped to 1 as ps_1_x constants are.
+        out = saturate(t * in.d0);
     } else if (NormalMapped(c)) {
         // ps #12 of IDI_WORLDNORMALMAP_FX / IDI_WORLDREFLECT_FX: N from the
         // normal map, L = normalize(oT2), R = 2 (N.L) N - L, V = normalize(oT3);
@@ -2120,6 +2176,9 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 if (d.flags & PORT_3D_ENVMAP) {
                     c.shade |= 16;
                 }
+                if (d.effect == 2 && d.bones) {
+                    c.shade |= 1024; // WORLDBONE with its BlendMatrices
+                }
                 if ((c.effect == 1 || c.effect == 3) && d.texture2 && d.texture3 && d.vertex_stride >= 60) {
                     c.shade |= 128;
                 }
@@ -2186,6 +2245,9 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                     [enc setVertexBytes:d.lights length:sizeof(d.lights) atIndex:5];
                     [enc setVertexBytes:d.envmap length:sizeof(d.envmap) atIndex:6];
                     bound.car_consts = &d;
+                }
+                if (d.effect == 2 && d.bones) { // IDI_WORLDBONE_FX BlendMatrices
+                    [enc setVertexBytes:d.bones length:sizeof(float) * 256 atIndex:7];
                 }
                 [enc drawIndexedPrimitives:MTLPrimitiveTypeTriangle
                                 indexCount:d.num_indices

@@ -715,6 +715,23 @@ ICEData *ICEManager::GetCameraData(uint32 scene_hash, int camTrack) {
     return track->GetKey(k);
 }
 
+// ICEData::GetEye (0x47EDB0) / GetLook (0x47EE00), as KeyGetEye/KeyGetLook.
+void ICEData::GetEye(int i, ICE::Vector3 *p) {
+    bVector3 v;
+    KeyGetEye(this, i, &v);
+    p->x = v.x;
+    p->y = v.y;
+    p->z = v.z;
+}
+
+void ICEData::GetLook(int i, ICE::Vector3 *p) {
+    bVector3 v;
+    KeyGetLook(this, i, &v);
+    p->x = v.x;
+    p->y = v.y;
+    p->z = v.z;
+}
+
 namespace ICE {
 // ICE::HideOverlay (0x46EAE0), for the NIS's release.
 void HideOverlay() {
