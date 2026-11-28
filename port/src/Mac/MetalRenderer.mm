@@ -1958,10 +1958,14 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
 // for depths in 0.5..1). IDI_CAR_SHADOW_MAP_FX writes red; the world depth
 // only. Guess: alpha-blended world draws (no depth writes in the main pass)
 // and additive draws cast no shadow.
-- (void)drawShadowMap:(const Frame3D &)scene commandBuffer:(id<MTLCommandBuffer>)cmd {
+// Sets this frame's shadow map state (_shadowValid, the targets) and returns
+// the block that encodes the map's pass (nil if there is none), which only
+// reads what it captures: run on the pre-scene worker (drawInMTKView).
+typedef void (^PassEncoder)(id<MTLCommandBuffer>);
+- (PassEncoder)shadowMapEncoder:(const Frame3D &)scene {
     _shadowValid = false;
     if (!scene.shadow_active || !scene.shadow_transform_set || !_shadowPipelines[0] || !_shadowPipelines[1]) {
-        return;
+        return nil;
     }
     // PC: 1024 (sub_6C8770, sub_6C86B0). Natively about the render height
     // (Shadow Detail 1) or twice it (2), a power of two in 1024..4096.
@@ -2003,13 +2007,21 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     rp.depthAttachment.loadAction = MTLLoadActionClear;
     rp.depthAttachment.clearDepth = 1.0;
     rp.depthAttachment.storeAction = MTLStoreActionStore;
+    _shadowValid = true;
+    const Frame3D *frame = &scene; // _scene: not swapped until the worker is done
+    id<MTLRenderPipelineState> car_pipeline = _shadowPipelines[0], world_pipeline = _shadowPipelines[1];
+    id<MTLDepthStencilState> depth_write = _depthWrite;
+    id<MTLSamplerState> sampler = _meshSamplers[gTextureFiltering.load() % 3];
+    id<MTLTexture> white = _white;
+    return ^(id<MTLCommandBuffer> cmd) {
+    const Frame3D &scene = *frame;
     id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rp];
     enc.label = @"Shadow map";
     [enc setViewport:(MTLViewport){0, 0, (double)size, (double)size, 0, 1}];
     [enc setCullMode:MTLCullModeNone];
-    [enc setDepthStencilState:_depthWrite];
+    [enc setDepthStencilState:depth_write];
     [enc setDepthBias:4.0f slopeScale:4.0f clamp:0.0f];
-    [enc setFragmentSamplerState:_meshSamplers[gTextureFiltering.load() % 3] atIndex:0];
+    [enc setFragmentSamplerState:sampler atIndex:0];
     int bound = -1;
     id<MTLBuffer> bound_vertices = nil;
     id<MTLTexture> bound_texture = nil;
@@ -2037,7 +2049,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         c.alpha_test = (!car && (d.flags & PORT_3D_ALPHA_TEST)) ? 1 : 0;
         int pipeline = car ? 0 : 1;
         if (pipeline != bound) {
-            [enc setRenderPipelineState:_shadowPipelines[pipeline]];
+            [enc setRenderPipelineState:pipeline == 0 ? car_pipeline : world_pipeline];
             bound = pipeline;
         }
         if (d.vertex_buffer != bound_vertices) {
@@ -2046,7 +2058,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         }
         [enc setVertexBytes:&c length:sizeof(c) atIndex:1];
         [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
-        id<MTLTexture> texture = d.texture ? d.texture : _white;
+        id<MTLTexture> texture = d.texture ? d.texture : white;
         if (texture != bound_texture) {
             [enc setFragmentTexture:texture atIndex:0];
             bound_texture = texture;
@@ -2058,7 +2070,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                  indexBufferOffset:d.first_index * 2];
     }
     [enc endEncoding];
-    _shadowValid = true;
+    };
 }
 
 - (void)drawDraws:(const std::vector<Draw3D> &)draws viewProj:(const float *)view_proj eye:(const float *)eye fog:(const PortWorldFog &)fog
@@ -2617,11 +2629,12 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
 
 // PC ___eDisplayFrame 0x6DE3FA: the road reflection view (view 4) into its
 // 320x240 target before the player view, and sub_6D4960's blur. Binds this
-// frame's ReflectedTex (_reflBound).
-- (void)drawReflection:(const Frame3D &)scene commandBuffer:(id<MTLCommandBuffer>)cmd {
+// frame's ReflectedTex (_reflBound). As shadowMapEncoder: sets the state,
+// returns the block that encodes the passes (nil if none).
+- (PassEncoder)reflectionEncoder:(const Frame3D &)scene {
     _reflBound = _white; // sub_6BCDC0 at Road Reflection Detail 0: 1x1 0xFFFFFFFF
     if (scene.reflection_mode == 0 || !_meshPipelines[0]) {
-        return;
+        return nil;
     }
     const NSUInteger w = 320, h = 240; // sub_6BCDC0, sub_6BD0D0 render target 1
     if (_reflColor == nil) {
@@ -2644,55 +2657,68 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
         _reflDepth = [_device newTextureWithDescriptor:dd];
         _reflValid = false;
     }
-    if (scene.reflection_active) {
-        // sub_6BD3B0 for render target 1: clear target and z (black, 1).
-        MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
-        rp.colorAttachments[0].texture = _reflColor;
-        rp.colorAttachments[0].loadAction = MTLLoadActionClear;
-        rp.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
-        rp.colorAttachments[0].storeAction = MTLStoreActionStore;
-        rp.depthAttachment.texture = _reflDepth;
-        rp.depthAttachment.loadAction = MTLLoadActionClear;
-        rp.depthAttachment.clearDepth = 1.0;
-        rp.depthAttachment.storeAction = MTLStoreActionStore;
-        rp.stencilAttachment.texture = _reflDepth;
-        rp.stencilAttachment.loadAction = MTLLoadActionClear;
-        rp.stencilAttachment.storeAction = MTLStoreActionDontCare;
-        id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rp];
-        enc.label = @"Road reflection";
-        _drawingEnvFace = true; // a non-main render target: the NOFOG effects
-        [self drawDraws:scene.reflection_draws viewProj:scene.reflection_view_proj eye:scene.eye fog:scene.fog
-                 envMap:[self envMapFor:scene] width:w height:h encoder:enc state:[self passState]];
-        _drawingEnvFace = false;
-        [enc endEncoding];
+    // The pass sees the state as it is now (ReflectedTex the 1x1 white).
+    _drawingEnvFace = true; // a non-main render target: the NOFOG effects
+    const PassState st = [self passState];
+    _drawingEnvFace = false;
+    const bool active = scene.reflection_active;
+    if (active) {
         _reflValid = true;
     }
     if (!_reflValid) {
         _reflBound = _black;
-        return;
-    }
-    if (scene.reflection_blur && _filterPipeline) {
-        [self filter:_reflColor into:_reflBlur taps:kBlurH count:4 mode:0 commandBuffer:cmd];
-        [self filter:_reflBlur into:_reflColor taps:kBlurV count:4 mode:0 commandBuffer:cmd];
-    }
-    if (scene.reflection_active && PortMetalPrelitHasPart(PORT_PRELIT_PART_REFLECTION)) {
-        // ___eDisplayFrame 0x6DE57B: after the blur, under IDI_WORLDPRELIT_FX,
-        // the world (type 2), car and pool flares into the reflection.
-        MTLRenderPassDescriptor *fp = [MTLRenderPassDescriptor renderPassDescriptor];
-        fp.colorAttachments[0].texture = _reflColor;
-        fp.colorAttachments[0].loadAction = MTLLoadActionLoad;
-        fp.colorAttachments[0].storeAction = MTLStoreActionStore;
-        fp.depthAttachment.texture = fp.stencilAttachment.texture = _reflDepth;
-        fp.depthAttachment.loadAction = fp.stencilAttachment.loadAction = MTLLoadActionLoad;
-        fp.depthAttachment.storeAction = fp.stencilAttachment.storeAction = MTLStoreActionDontCare;
-        id<MTLRenderCommandEncoder> fe = [cmd renderCommandEncoderWithDescriptor:fp];
-        fe.label = @"Road reflection flares";
-        [fe setViewport:(MTLViewport){0, 0, (double)w, (double)h, 0, 1}];
-        PortMetalPrelitDraw((__bridge void *)fe, (__bridge void *)_device, scene.reflection_view_proj, 1, (int)_colorFormat, (int)_depthFormat,
-                            PORT_PRELIT_PART_REFLECTION);
-        [fe endEncoding];
+        return nil;
     }
     _reflBound = _reflColor;
+    const bool blur = scene.reflection_blur && _filterPipeline;
+    const bool flares = active && PortMetalPrelitHasPart(PORT_PRELIT_PART_REFLECTION);
+    const Frame3D *frame = &scene; // _scene: not swapped until the worker is done
+    id<MTLTexture> env_map = [self envMapFor:scene];
+    id<MTLTexture> colour = _reflColor, blurred = _reflBlur, depth = _reflDepth;
+    return ^(id<MTLCommandBuffer> cmd) {
+      const Frame3D &scene = *frame;
+      if (active) {
+          // sub_6BD3B0 for render target 1: clear target and z (black, 1).
+          MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+          rp.colorAttachments[0].texture = colour;
+          rp.colorAttachments[0].loadAction = MTLLoadActionClear;
+          rp.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
+          rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+          rp.depthAttachment.texture = depth;
+          rp.depthAttachment.loadAction = MTLLoadActionClear;
+          rp.depthAttachment.clearDepth = 1.0;
+          rp.depthAttachment.storeAction = MTLStoreActionStore;
+          rp.stencilAttachment.texture = depth;
+          rp.stencilAttachment.loadAction = MTLLoadActionClear;
+          rp.stencilAttachment.storeAction = MTLStoreActionDontCare;
+          id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rp];
+          enc.label = @"Road reflection";
+          [self drawDraws:scene.reflection_draws viewProj:scene.reflection_view_proj eye:scene.eye fog:scene.fog envMap:env_map width:w
+                   height:h encoder:enc state:st];
+          [enc endEncoding];
+      }
+      if (blur) {
+          [self filter:colour into:blurred taps:kBlurH count:4 mode:0 commandBuffer:cmd];
+          [self filter:blurred into:colour taps:kBlurV count:4 mode:0 commandBuffer:cmd];
+      }
+      if (flares) {
+          // ___eDisplayFrame 0x6DE57B: after the blur, under IDI_WORLDPRELIT_FX,
+          // the world (type 2), car and pool flares into the reflection.
+          MTLRenderPassDescriptor *fp = [MTLRenderPassDescriptor renderPassDescriptor];
+          fp.colorAttachments[0].texture = colour;
+          fp.colorAttachments[0].loadAction = MTLLoadActionLoad;
+          fp.colorAttachments[0].storeAction = MTLStoreActionStore;
+          fp.depthAttachment.texture = fp.stencilAttachment.texture = depth;
+          fp.depthAttachment.loadAction = fp.stencilAttachment.loadAction = MTLLoadActionLoad;
+          fp.depthAttachment.storeAction = fp.stencilAttachment.storeAction = MTLStoreActionDontCare;
+          id<MTLRenderCommandEncoder> fe = [cmd renderCommandEncoderWithDescriptor:fp];
+          fe.label = @"Road reflection flares";
+          [fe setViewport:(MTLViewport){0, 0, (double)w, (double)h, 0, 1}];
+          PortMetalPrelitDraw((__bridge void *)fe, (__bridge void *)_device, scene.reflection_view_proj, 1, (int)_colorFormat, (int)_depthFormat,
+                              PORT_PRELIT_PART_REFLECTION);
+          [fe endEncoding];
+      }
+    };
 }
 
 // The 3D scene into the offscreen frame (multisampled with FSAA, then
@@ -2952,12 +2978,32 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
         _skyMisc[i] = scene.sky_misc[i];
     }
     [self drawEnvFaces:scene view:view];
-    [self drawShadowMap:scene commandBuffer:cmd];
+    // The shadow map and the road reflection: their state is set here, their
+    // passes encoded on a worker into their own command buffer, enqueued
+    // now (so the GPU runs them after the env-map faces and before the
+    // scene, as before) while this thread encodes the scene.
+    PassEncoder shadow = [self shadowMapEncoder:scene];
     if (scene.shadow_transform_set) {
         memcpy(_shadowTransform, scene.shadow_transform, sizeof(_shadowTransform));
     }
     _invShadowStrength = scene.inv_shadow_strength;
-    [self drawReflection:scene commandBuffer:cmd];
+    PassEncoder reflection = [self reflectionEncoder:scene];
+    if (shadow || reflection) {
+        id<MTLCommandBuffer> pre = [_queue commandBuffer];
+        pre.label = @"Shadow map, road reflection";
+        [pre enqueue];
+        PortMacBenchmarkExtraCommandBuffer(pre, view);
+        dispatch_group_async(_envGroup, dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), ^{
+          if (shadow) {
+              shadow(pre);
+          }
+          if (reflection) {
+              reflection(pre);
+          }
+          [pre commit];
+        });
+    }
+    [cmd enqueue];
     // The 3D frame goes through the offscreen target (FSAA resolve, the
     // treatment's and over bright's sources) unless it's the debug overlay.
     bool offscreen = !scene.overlay && !scene.draws.empty() && _filterPipeline && _copyPipeline;
@@ -3042,8 +3088,8 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
         }];
     }
     [cmd commit];
-    // The faces' worker reads _scene and the prelit frame: done before the
-    // next frame is taken.
+    // The workers read _scene and the prelit frame: done before the next
+    // frame is taken.
     dispatch_group_wait(_envGroup, DISPATCH_TIME_FOREVER);
 }
 
