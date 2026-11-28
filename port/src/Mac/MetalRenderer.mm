@@ -561,6 +561,23 @@ int PortMetalFEEndFrame() {
 // shadow map and the reflection bound then. The env-map faces are encoded
 // on a worker thread with what these were when they started (the last
 // frame's shadow map and reflection, as on the main thread before).
+// mesh_vs / mesh_fs's MeshConst.
+struct MeshConstants {
+    float mvp[16];
+    float world[16];
+    uint32_t stride;
+    uint32_t shade;
+    uint32_t effect;
+    uint32_t pad;
+    float eye[4];
+    float view_x[4];
+    float shadow[16];
+    float inv_shadow;
+    uint32_t shadow_level;
+    uint32_t shadow_map;
+    float shadow_texel;
+};
+
 struct PassState {
     int samples, mask;
     bool main_scene, skip_sky_alpha, only_sky_alpha, env_face;
@@ -1365,6 +1382,9 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     // (made up front): [sample count 1, 2, 4, 8][mode][mask: all, rgb,
     // alpha][alpha test: without, with] (see kMeshAlphaTest).
     id<MTLRenderPipelineState> _meshPSO[4][3][3][2];
+    // The player view's depth prepass (drawDraws): mesh_vs alone, no colour
+    // writes, by sample count index.
+    id<MTLRenderPipelineState> _meshDepthPSO[4];
     id<MTLLibrary> _lib;
     MTLPixelFormat _colorFormat, _depthFormat;
     // The pass drawDraws is drawing: its sample count, colour write mask
@@ -1656,6 +1676,27 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         NSLog(@"NFSMW: mesh pipeline %d/%d/%d/%d failed: %@", si, mode, mask, (int)at, error);
     }
     return p;
+}
+
+// The depth prepass pipeline for a pass of this sample count (made on first
+// use; main thread).
+- (id<MTLRenderPipelineState>)meshDepthPipeline:(int)samples {
+    int si = samples >= 8 ? 3 : samples >= 4 ? 2 : samples >= 2 ? 1 : 0;
+    if (_meshDepthPSO[si] == nil && _lib) {
+        MTLRenderPipelineDescriptor *md = [MTLRenderPipelineDescriptor new];
+        md.vertexFunction = [_lib newFunctionWithName:@"mesh_vs"];
+        md.colorAttachments[0].pixelFormat = _colorFormat;
+        md.colorAttachments[0].writeMask = MTLColorWriteMaskNone;
+        md.depthAttachmentPixelFormat = _depthFormat;
+        md.stencilAttachmentPixelFormat = _depthFormat;
+        md.rasterSampleCount = (NSUInteger)(1 << si);
+        NSError *error = nil;
+        _meshDepthPSO[si] = [_device newRenderPipelineStateWithDescriptor:md error:&error];
+        if (_meshDepthPSO[si] == nil) {
+            NSLog(@"NFSMW: mesh depth pipeline %d failed: %@", si, error);
+        }
+    }
+    return _meshDepthPSO[si];
 }
 
 // The mesh pipeline for a blend mode in a pass of this sample count and
@@ -2113,6 +2154,58 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
         // LESSEQUAL after the world, so the frame's alpha (cleared to 0, the
         // world drawn with ColorWriteMode 7) holds the sky's: what over
         // bright's downsample (IDI_FILTER_FX p5) scales by.
+        // mvp = world * view_proj (row vectors).
+        auto worldViewProj = [&](const Draw3D &d, float *mvp) {
+            for (int i = 0; i < 4; i++) {
+                for (int j = 0; j < 4; j++) {
+                    float sum = 0;
+                    for (int k = 0; k < 4; k++) {
+                        sum += d.world[i * 4 + k] * view_proj[k * 4 + j];
+                    }
+                    mvp[i * 4 + j] = sum;
+                }
+            }
+        };
+        // The player view: a depth prepass of the draws whose depth is
+        // unconditional (opaque, depth-writing, no alpha test; not the sky,
+        // which only tests), with the same vertex function. Then each pixel
+        // sample's colour still comes from the last of the draws at the
+        // nearest depth (LESSEQUAL), as without it, but the GPU shades the
+        // hidden ones' pixels no more. The other passes have little
+        // overdraw: measured no faster.
+        id<MTLRenderPipelineState> depth_pipeline = st.main_scene && !st.only_sky_alpha ? [self meshDepthPipeline:st.samples] : nil;
+        if (depth_pipeline) {
+            [enc setRenderPipelineState:depth_pipeline];
+            bindDepth(_depthWrite);
+            MeshConstants c = {};
+            bool first = true;
+            for (const Draw3D &d : draws) {
+                if ((d.flags & (PORT_3D_ADDITIVE | PORT_3D_ALPHA_BLEND | PORT_3D_ALPHA_TEST)) || d.effect == 19) {
+                    continue;
+                }
+                if (first) {
+                    // Read by mesh_vs, not by the position: bound for the
+                    // pipeline's arguments, the draws' own bound later.
+                    [enc setVertexBytes:d.material length:sizeof(d.material) atIndex:4];
+                    [enc setVertexBytes:d.lights length:sizeof(d.lights) atIndex:5];
+                    [enc setVertexBytes:d.envmap length:sizeof(d.envmap) atIndex:6];
+                    first = false;
+                }
+                c.stride = d.vertex_stride;
+                c.effect = d.effect;
+                worldViewProj(d, c.mvp);
+                if (d.vertex_buffer != bound.vertices) {
+                    [enc setVertexBuffer:d.vertex_buffer offset:0 atIndex:0];
+                    bound.vertices = d.vertex_buffer;
+                }
+                [enc setVertexBytes:&c length:sizeof(c) atIndex:1];
+                [enc drawIndexedPrimitives:MTLPrimitiveTypeTriangle
+                                indexCount:d.num_indices
+                                 indexType:MTLIndexTypeUInt16
+                               indexBuffer:d.index_buffer
+                         indexBufferOffset:d.first_index * 2];
+            }
+        }
         int mask = st.mask;
         for (int blended = st.only_sky_alpha ? 2 : 0; blended < (st.main_scene && !st.skip_sky_alpha ? 3 : 2); blended++) {
             if (blended == 2) {
@@ -2135,21 +2228,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                 } else if ((mode != 0) != (blended != 0)) {
                     continue;
                 }
-                struct {
-                    float mvp[16];
-                    float world[16];
-                    uint32_t stride;
-                    uint32_t shade;
-                    uint32_t effect;
-                    uint32_t pad;
-                    float eye[4];
-                    float view_x[4];
-                    float shadow[16];
-                    float inv_shadow;
-                    uint32_t shadow_level;
-                    uint32_t shadow_map;
-                    float shadow_texel;
-                } c = {};
+                MeshConstants c = {};
                 c.stride = d.vertex_stride;
                 c.effect = d.effect;
                 if (st.env_face) {
@@ -2219,16 +2298,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
                         }
                     }
                 }
-                // mvp = world * view_proj (row vectors).
-                for (int i = 0; i < 4; i++) {
-                    for (int j = 0; j < 4; j++) {
-                        float sum = 0;
-                        for (int k = 0; k < 4; k++) {
-                            sum += d.world[i * 4 + k] * view_proj[k * 4 + j];
-                        }
-                        c.mvp[i * 4 + j] = sum;
-                    }
-                }
+                worldViewProj(d, c.mvp);
                 memcpy(c.world, d.world, sizeof(c.world));
                 bindPipeline(pipelines[mode][(c.shade & 2) ? 1 : 0]);
                 // D3D default ZWRITEENABLE stays on: no PC effect technique
@@ -2337,9 +2407,12 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     cd.height = h / 4 > 0 ? h / 4 : 1;
     for (int i = 0; i < 2; i++) {
         _bloom[i] = [_device newTextureWithDescriptor:cd];
+        _bloom[i].label = i == 0 ? @"Bloom 0x982964" : @"Bloom 0x982968";
         _ob[i] = [_device newTextureWithDescriptor:cd];
+        _ob[i].label = i == 0 ? @"Over bright 0x982964" : @"Over bright 0x982968";
     }
     _obSource = [_device newTextureWithDescriptor:cd];
+    _obSource.label = @"Over bright source 0x98296C";
     _mb[0] = _mb[1] = nil;
     _sceneColorMSKept = _sceneDepthKept = nil;
 }
@@ -2528,6 +2601,7 @@ fragment float4 debug_fs(VOut in [[stage_in]], texture2d<float> tex [[texture(0)
     c.taps = count;
     c.lum_alpha = mode;
     id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rp];
+    enc.label = dst.label;
     [enc setRenderPipelineState:_filterPipeline];
     [enc setFragmentTexture:src atIndex:0];
     [enc setFragmentBytes:&c length:sizeof(c) atIndex:0];
@@ -2560,6 +2634,7 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
         _reflColor = [_device newTextureWithDescriptor:cd];
         _reflColor.label = @"Road reflection";
         _reflBlur = [_device newTextureWithDescriptor:cd];
+        _reflBlur.label = @"Road reflection blur";
         MTLTextureDescriptor *dd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float_Stencil8
                                                                                       width:w
                                                                                      height:h
@@ -2752,6 +2827,7 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
         op.colorAttachments[0].loadAction = MTLLoadActionDontCare;
         op.colorAttachments[0].storeAction = MTLStoreActionStore;
         id<MTLRenderCommandEncoder> oe = [cmd renderCommandEncoderWithDescriptor:op];
+        oe.label = @"Over bright contrast";
         [oe setRenderPipelineState:_overbrightPipeline];
         [oe setFragmentTexture:_obSource atIndex:0];
         float offset = scene.ob.offset;
@@ -2890,6 +2966,7 @@ static const float kBlurV[4][3] = {{1 / 3.0f, 0, 1.5f}, {1 / 6.0f, 0, 3.0f}, {1 
         [self drawOffscreenScene:scene commandBuffer:cmd view:view];
     }
     id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:pass];
+    enc.label = @"Frame";
     if (offscreen) {
         if (treated) {
             [self applyTreatment:scene encoder:enc];
