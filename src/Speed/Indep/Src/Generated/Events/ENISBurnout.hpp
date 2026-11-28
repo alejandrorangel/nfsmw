@@ -17,7 +17,7 @@ class ENISBurnout : public Event {
 
     // enum { kEventID = 0 };
 
-    ENISBurnout(float pSpeed, unsigned int phSimable);
+    ENISBurnout(float pSpeed, uintptr_t phSimable);
 
     ~ENISBurnout() override;
 
@@ -26,7 +26,7 @@ class ENISBurnout : public Event {
   private:
     float fSpeed; // offset: 0x8, size 0x4
 
-    unsigned int fhSimable; // offset: 0x10, size 0x4
+    uintptr_t fhSimable; // offset: 0x10, size 0x4
 };
 
 void ENISBurnout_MakeEvent_Callback(const void *staticData);

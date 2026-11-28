@@ -18,7 +18,7 @@ class ENISSteering : public Event {
 
     // enum { kEventID = 0 };
 
-    ENISSteering(float pDegrees, float pBlendWeight, unsigned int phSimable);
+    ENISSteering(float pDegrees, float pBlendWeight, uintptr_t phSimable);
 
     ~ENISSteering() override;
 
@@ -28,7 +28,7 @@ class ENISSteering : public Event {
     float fDegrees;     // offset: 0x8, size 0x4
     float fBlendWeight; // offset: 0xc, size 0x4
 
-    unsigned int fhSimable; // offset: 0x14, size 0x4
+    uintptr_t fhSimable; // offset: 0x14, size 0x4
 };
 
 void ENISSteering_MakeEvent_Callback(const void *staticData);

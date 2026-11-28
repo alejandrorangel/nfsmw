@@ -18,7 +18,7 @@ class ENISBrakelock : public Event {
 
     // enum { kEventID = 0 };
 
-    ENISBrakelock(unsigned int pFront, unsigned int pRear, unsigned int phSimable);
+    ENISBrakelock(unsigned int pFront, unsigned int pRear, uintptr_t phSimable);
 
     ~ENISBrakelock() override;
 
@@ -28,7 +28,7 @@ class ENISBrakelock : public Event {
     unsigned int fFront; // offset: 0x8, size 0x4
     unsigned int fRear;  // offset: 0xc, size 0x4
 
-    unsigned int fhSimable; // offset: 0x14, size 0x4
+    uintptr_t fhSimable; // offset: 0x14, size 0x4
 };
 
 void ENISBrakelock_MakeEvent_Callback(const void *staticData);

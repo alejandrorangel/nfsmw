@@ -17,7 +17,7 @@ class ENISNitro : public Event {
 
     // enum { kEventID = 0 };
 
-    ENISNitro(unsigned int pOn, unsigned int phSimable);
+    ENISNitro(unsigned int pOn, uintptr_t phSimable);
 
     ~ENISNitro() override;
 
@@ -26,7 +26,7 @@ class ENISNitro : public Event {
   private:
     unsigned int fOn; // offset: 0x8, size 0x4
 
-    unsigned int fhSimable; // offset: 0x10, size 0x4
+    uintptr_t fhSimable; // offset: 0x10, size 0x4
 };
 
 void ENISNitro_MakeEvent_Callback(const void *staticData);

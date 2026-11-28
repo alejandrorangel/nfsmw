@@ -18,7 +18,7 @@ class ENISCarPitch : public Event {
 
     // enum { kEventID = 0 };
 
-    ENISCarPitch(float pPitch, float pTime, unsigned int phSimable);
+    ENISCarPitch(float pPitch, float pTime, uintptr_t phSimable);
 
     ~ENISCarPitch() override;
 
@@ -28,7 +28,7 @@ class ENISCarPitch : public Event {
     float fPitch; // offset: 0x8, size 0x4
     float fTime;  // offset: 0xc, size 0x4
 
-    unsigned int fhSimable; // offset: 0x14, size 0x4
+    uintptr_t fhSimable; // offset: 0x14, size 0x4
 };
 
 void ENISCarPitch_MakeEvent_Callback(const void *staticData);

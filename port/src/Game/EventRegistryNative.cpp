@@ -14,6 +14,14 @@
 #include "Speed/Indep/Src/Generated/Events/ESndGameState.hpp"
 #include "Speed/Indep/Src/Generated/Events/ESimulate.hpp"
 #include "Speed/Indep/Src/Generated/Events/ESpawnSmackable.hpp"
+#include "Speed/Indep/Src/Generated/Events/ENISBurnout.hpp"
+#include "Speed/Indep/Src/Generated/Events/ENISNitro.hpp"
+#include "Speed/Indep/Src/Generated/Events/ENISCarShake.hpp"
+#include "Speed/Indep/Src/Generated/Events/ENISCarPitch.hpp"
+#include "Speed/Indep/Src/Generated/Events/ENISCarRoll.hpp"
+#include "Speed/Indep/Src/Generated/Events/ENISBrakelock.hpp"
+#include "Speed/Indep/Src/Generated/Events/ENISSteering.hpp"
+#include "Speed/Indep/Src/Generated/Events/ENISNeutralRev.hpp"
 #include "Speed/Indep/Src/Main/Event.h"
 #include "Speed/Indep/Libs/Support/Miscellaneous/StringHash.h"
 
@@ -35,6 +43,15 @@ const EventEntry kEvents[] = {
     {0x2AF7332B, EEnterBin_MakeEvent_Callback},
     {0x2EC2700D, EAutoSave_MakeEvent_Callback},
     {ESpawnSmackable::kEventID, ESpawnSmackable_MakeEvent_Callback},
+    // NIS car events (the car from the event's dynamic data).
+    {0x6A5265B2, ENISBurnout_MakeEvent_Callback},
+    {0xEB348F62, ENISNitro_MakeEvent_Callback},
+    {0xFB3DAD79, ENISCarShake_MakeEvent_Callback},
+    {0xA18E1896, ENISCarPitch_MakeEvent_Callback},
+    {0x3081837D, ENISCarRoll_MakeEvent_Callback},
+    {0xA01A259B, ENISBrakelock_MakeEvent_Callback},
+    {0x7282975D, ENISSteering_MakeEvent_Callback},
+    {0x00EB198B, ENISNeutralRev_MakeEvent_Callback},
     // TODO(port): ECinematicMoment (0x7D2B68BD) needs its name pointers
     // resolved from the event data first.
 };

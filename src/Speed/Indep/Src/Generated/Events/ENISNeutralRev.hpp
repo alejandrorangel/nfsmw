@@ -19,7 +19,7 @@ class ENISNeutralRev : public Event {
 
     // enum { kEventID = 0 };
 
-    ENISNeutralRev(unsigned int pOn, float pThrottle, float pSpeed, unsigned int phSimable);
+    ENISNeutralRev(unsigned int pOn, float pThrottle, float pSpeed, uintptr_t phSimable);
 
     ~ENISNeutralRev() override;
 
@@ -30,7 +30,7 @@ class ENISNeutralRev : public Event {
     float fThrottle;  // offset: 0xc, size 0x4
     float fSpeed;     // offset: 0x10, size 0x4
 
-    unsigned int fhSimable; // offset: 0x18, size 0x4
+    uintptr_t fhSimable; // offset: 0x18, size 0x4
 };
 
 void ENISNeutralRev_MakeEvent_Callback(const void *staticData);

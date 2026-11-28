@@ -20,7 +20,7 @@ class ENISCarShake : public Event {
 
     // enum { kEventID = 0 };
 
-    ENISCarShake(float pShake, float pRate, float pRamp, float pTime, unsigned int phSimable);
+    ENISCarShake(float pShake, float pRate, float pRamp, float pTime, uintptr_t phSimable);
 
     ~ENISCarShake() override;
 
@@ -32,7 +32,7 @@ class ENISCarShake : public Event {
     float fRamp;  // offset: 0x10, size 0x4
     float fTime;  // offset: 0x14, size 0x4
 
-    unsigned int fhSimable; // offset: 0x1c, size 0x4
+    uintptr_t fhSimable; // offset: 0x1c, size 0x4
 };
 
 void ENISCarShake_MakeEvent_Callback(const void *staticData);

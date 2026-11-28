@@ -93,6 +93,22 @@
 #include "Speed/Indep/Src/Generated/Events/EPlayEndNIS.cpp"
 
 #include "Speed/Indep/Src/Generated/Events/EPlayRaceMovie.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/ENISBurnout.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/ENISNitro.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/ENISCarShake.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/ENISCarPitch.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/ENISCarRoll.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/ENISBrakelock.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/ENISSteering.cpp"
+
+#include "Speed/Indep/Src/Generated/Events/ENISNeutralRev.cpp"
 #endif
 
 #include "Speed/Indep/Src/Input/Common/action.cpp"

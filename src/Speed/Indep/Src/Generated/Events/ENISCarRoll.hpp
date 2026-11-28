@@ -18,7 +18,7 @@ class ENISCarRoll : public Event {
 
     // enum { kEventID = 0 };
 
-    ENISCarRoll(float pRoll, float pTime, unsigned int phSimable);
+    ENISCarRoll(float pRoll, float pTime, uintptr_t phSimable);
 
     ~ENISCarRoll() override;
 
@@ -28,7 +28,7 @@ class ENISCarRoll : public Event {
     float fRoll; // offset: 0x8, size 0x4
     float fTime; // offset: 0xc, size 0x4
 
-    unsigned int fhSimable; // offset: 0x14, size 0x4
+    uintptr_t fhSimable; // offset: 0x14, size 0x4
 };
 
 void ENISCarRoll_MakeEvent_Callback(const void *staticData);
