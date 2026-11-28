@@ -581,6 +581,10 @@ bool gLoadPhase = false;
 // (uiCareerCrib) the career is changed (cash) and saved by hand: the menu's
 // Save (CSave::React, MemcardEnter 0x2251) through the memory card screens.
 bool gMenuSavePhase = false;
+// Profiles on: career-save, or career-rival given NFSMW_SAVE_DIR (the rival
+// flow's autosave, MCE_RivalFlow, writes a new profile; the career-save load
+// phase checks it).
+bool gProfiles = false;
 int gMenuSaveStage = 0; // 0 to Save, 1 saving, 2 saved
 std::string gTypeQueue;
 const char kProfileName[] = "BENCH";
@@ -935,6 +939,26 @@ void CareerSaveUpdate() {
     }
 }
 
+// career-rival with profiles: the memory card screens (the rival flow's
+// autosave prompts) and, each time the profile file is written, the career's
+// state as that save has it (career-save's load phase checks the last one).
+void RivalProfileUpdate() {
+    MemcardScreens(gBenchFrame);
+    static long stamp = -1;
+    const long now = ProfileStamp();
+    if (stamp < 0) {
+        stamp = now;
+        return;
+    }
+    if (now != stamp) {
+        stamp = now;
+        std::fprintf(stderr, "[benchmark] profile written (frame %d, control %s, bin %u)\n", gBenchFrame, ControlPackageName(),
+                     FEDatabase->GetCareerSettings()->GetCurrentBin());
+        CheckProfileResave();
+        WriteCareerState();
+    }
+}
+
 // The rival scenario. At frame 60 the bin's requirements are met the way
 // playing would meet them (debug switches, each defaulting to the bin's
 // requirement): NFSMW_DEBUG_RACES_WON=<n> of its world races won,
@@ -1179,7 +1203,15 @@ void PortBenchmarkConfigure(int argc, char **argv) {
         gOutDir = getcwd(cwd, sizeof(cwd)) ? cwd : ".";
     }
     std::fprintf(stderr, "[benchmark] scenario %s: %d frames, out %s\n", gScenario->name, gFrames, gOutDir.c_str());
+    if (gScenario->rival && std::getenv("NFSMW_SAVE_DIR") && *std::getenv("NFSMW_SAVE_DIR")) {
+        gProfiles = true;
+        if (ProfileStamp() != 0) {
+            std::fprintf(stderr, "[benchmark] career-rival with profiles: %s exists; it starts without it (delete it)\n", ProfilePath().c_str());
+            std::exit(2);
+        }
+    }
     if (gScenario->career_save) {
+        gProfiles = true;
         // Never the player's own profiles: a scratch folder, and the save
         // phase starts from one without the benchmark's profile.
         const char *dir = std::getenv("NFSMW_SAVE_DIR");
@@ -1209,7 +1241,7 @@ void PortBenchmarkInit() {
         return;
     }
     IsSoundEnabled = 0; // audio runs on real time
-    if (!gScenario->career_save) {
+    if (!gProfiles) {
         IsMemcardEnabled = 0;
     }
     if (gScenario->frontend) {
@@ -1342,7 +1374,7 @@ void PortBenchmarkEndFrame(uint64_t render_start_ns) {
         gStartTime = Now();
         std::fprintf(stderr, "[benchmark] start at frame %d, %.1f s after launch\n", frame, (gStartTime - gLaunch) / 1e9);
     }
-    if (!gStarted && gScenario->career_save) {
+    if (!gStarted && gProfiles) {
         const char *control = ControlPackageName();
         if (gLastControlPackage != control) {
             gLastControlPackage = control;
@@ -1355,7 +1387,7 @@ void PortBenchmarkEndFrame(uint64_t render_start_ns) {
         static bool career_started = false;
         const bool to_menu = gScenario->frontend || (gScenario->free_roam && !career_started);
         gEnterPresses = to_menu && TheGameFlowManager.IsInFrontend() && !MainMenuUp() && frame % 60 < 6 ? 1 : 0;
-        if (gScenario->career_save) {
+        if (gProfiles) {
             if (std::strstr(ControlPackageName(), "MC_") != nullptr) {
                 gEnterPresses = 0;
             }
@@ -1405,6 +1437,9 @@ void PortBenchmarkEndFrame(uint64_t render_start_ns) {
         }
         if (gScenario->rival) {
             RivalUpdate();
+            if (gProfiles) {
+                RivalProfileUpdate();
+            }
         }
         if (gScenario->milestone) {
             MilestoneUpdate();
