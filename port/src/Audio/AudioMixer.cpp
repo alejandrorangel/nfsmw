@@ -73,6 +73,13 @@ struct Mixer::Impl {
     VoiceId next_id = 1;
     float master = 1.0f;
     WavDump dump;
+    struct Stream {
+        uint32_t id;
+        StreamFill fill;
+        void *user;
+    };
+    std::vector<Stream> streams;
+    uint32_t next_stream = 1;
 
     Voice *Find(VoiceId id) {
         for (Voice &v : voices) {
@@ -178,6 +185,19 @@ void Mixer::SetMasterVolume(float volume) {
     mImpl->master = volume;
 }
 
+uint32_t Mixer::AddStream(StreamFill fill, void *user) {
+    std::lock_guard<std::mutex> lock(mImpl->mutex);
+    uint32_t id = mImpl->next_stream++;
+    mImpl->streams.push_back({id, fill, user});
+    return id;
+}
+
+void Mixer::RemoveStream(uint32_t id) {
+    std::lock_guard<std::mutex> lock(mImpl->mutex);
+    auto &ss = mImpl->streams;
+    ss.erase(std::remove_if(ss.begin(), ss.end(), [id](const Impl::Stream &s) { return s.id == id; }), ss.end());
+}
+
 void Mixer::Mix(float *out, size_t frames) {
     std::fill(out, out + frames * 2, 0.0f);
     std::lock_guard<std::mutex> lock(mImpl->mutex);
@@ -220,6 +240,9 @@ void Mixer::Mix(float *out, size_t frames) {
     }
     auto &vs = mImpl->voices;
     vs.erase(std::remove_if(vs.begin(), vs.end(), [](const Voice &v) { return !v.sample; }), vs.end());
+    for (const Impl::Stream &stream : mImpl->streams) {
+        stream.fill(stream.user, out, frames, mOutputRate);
+    }
     if (mImpl->dump.file != nullptr) {
         mImpl->dump.Write(out, frames);
     }

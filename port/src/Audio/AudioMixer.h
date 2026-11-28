@@ -46,6 +46,14 @@ class Mixer {
     void SetPitch(VoiceId id, float pitch);
     void SetMasterVolume(float volume);
 
+    // Streamed sources (movie audio): fill() adds `frames` frames of
+    // interleaved stereo float at OutputRate() into out. It runs on the output
+    // thread, under the mixer's lock, after the voices are mixed; once
+    // RemoveStream returns it is never called again.
+    using StreamFill = void (*)(void *user, float *out, size_t frames, int output_rate);
+    uint32_t AddStream(StreamFill fill, void *user);
+    void RemoveStream(uint32_t id);
+
     // Called by the output thread: writes frames of interleaved stereo float.
     // NFSMW_AUDIO_DUMP=<file.wav> also records the mix (16-bit stereo).
     void Mix(float *out, size_t frames);
