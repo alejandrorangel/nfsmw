@@ -55,7 +55,15 @@ void CompressVector(const bVector3 *bv, smVector3 *sv) {
     bVector3 norm;
 
     float magn = bLength(bv);
+#ifdef EA_PORT_NATIVE
+    // Scaled the uninitialised norm (stack garbage, which changes with the
+    // optimization level). The inverse of ExpandVector: the unit direction
+    // in 1/127ths.
+    bNormalize(&norm, bv);
+    bScale(&norm, &norm, 127.0f);
+#else
     bScale(&norm, &norm, magn * 127.0f);
+#endif
 
     sv->x = static_cast<char>(norm.x);
     sv->y = static_cast<char>(norm.y);

@@ -294,7 +294,12 @@ template <typename T> class bTList : public bList {
             return *this;
         }
 
+#ifdef EA_PORT_NATIVE
+        // By value: the original returns a reference to the local tmp.
+        iterator operator--(int) {
+#else
         iterator &operator--(int) {
+#endif
             validate();
             iterator tmp;
             tmp._Ptr = _Ptr;
@@ -308,7 +313,12 @@ template <typename T> class bTList : public bList {
             return *this;
         }
 
+#ifdef EA_PORT_NATIVE
+        // By value: the original returns a reference to the local tmp.
+        iterator operator++(int) {
+#else
         iterator &operator++(int) {
+#endif
             validate();
             iterator tmp;
             tmp._Ptr = _Ptr;

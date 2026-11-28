@@ -396,7 +396,13 @@ void HudResourceManager::LoadedCustomHudTexturePackCallback() {
 }
 
 void HudResourceManager::LoadedCustomHudTexturesCallback() {
+#ifdef EA_PORT_NATIVE
+    // The original's sixth pass (object hash 0, no such object) reads past
+    // the 5 texture hashes: undefined, which optimized builds may exploit.
+    for (int mPhaseCust = 0; mPhaseCust < 5; mPhaseCust++) {
+#else
     for (int mPhaseCust = 0; mPhaseCust <= (uint32)5; mPhaseCust++) {
+#endif
         int fengObjHash = 0;
         CAR_SLOT_ID carSlotIdForColour = CARSLOTID_BASE;
         switch (mPhaseCust) {
