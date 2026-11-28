@@ -38,9 +38,15 @@ struct CompoundChannel : public AnimMemoryMap {
         return mChannels;
     }
 
+#if defined(EA_PORT_NATIVE)
     const PORT_PTR32(AnimMemoryMap) *GetChannels() const {
         return mChannels;
     }
+#else
+    const AnimMemoryMap *const *GetChannels() const {
+        return mChannels;
+    }
+#endif
 
     int GetSize() const {}
 

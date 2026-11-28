@@ -102,7 +102,8 @@ In place:
   (`EventSequencer::Engine`), though most `ENIS*` events aren't ported.
   `HUDACTION_SKIPNIS` (enter) skips a skippable one, as on PC. PC draws no
   letterbox (the ICE keys' letterbox height is stored and never read).
-  `NFSMW_TRACE_NIS=1` logs them, `NFSMW_TRACE_EAGL4=1` the loaded objects.
+  `NFSMW_TRACE_NIS=1` logs them, `NFSMW_TRACE_EAGL4=1` the loaded objects;
+  `NFSMW_NO_NIS=1` turns them off (PC's switch at 0x91E140).
 
 Not yet: reflections/env maps, sound output (the Csis/snd9 layers),
 saves, movies (VP6), world animations (toll booth arms and the like) and
@@ -191,7 +192,9 @@ player 1 pad 0 and close SMS screens with escape. They log each NIS as it
 plays (`career-event`: the race's intro, `IntroNis01`; `career-rival`: the
 rival's, `IntroNisBL15`, then the second boss race's; `career-busted`: the
 arrest) and, unless `NFSMW_BENCHMARK_SHOTS` is given, screenshot it 1, 3
-and 5 seconds in.
+and 5 seconds in. The Quick Race scenarios skip the race's intro NIS (the car
+is put on the grid as without one) so their frames stay the race's;
+`NFSMW_BENCHMARK_NIS=1` plays it.
 
 Overrides: `NFSMW_BENCHMARK_FRAMES`, `NFSMW_BENCHMARK_SHOTS=<f>,<f>`,
 `NFSMW_BENCHMARK_RACE=<event id>`, `NFSMW_BENCHMARK_CAR=<vehicle>`,
