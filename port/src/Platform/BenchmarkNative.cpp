@@ -44,6 +44,8 @@
 #include "Speed/Indep/Src/Frontend/MemoryCard/MemoryCard.hpp"
 #include "Speed/Indep/Src/Frontend/MenuScreens/Common/feKeyboardInput.hpp"
 #include "Speed/Indep/Src/Frontend/RaceStarter.hpp"
+#include "Speed/Indep/Src/Frontend/FEPackageManager.hpp"
+#include "Speed/Indep/Src/Frontend/MenuScreens/Safehouse/career/uiCareerMain.hpp"
 #include "Speed/Indep/Src/Gameplay/GActivity.h"
 #include "Speed/Indep/Src/Generated/Events/EEnterBin.hpp"
 #include "Speed/Indep/Src/Gameplay/GManager.h"
@@ -575,6 +577,11 @@ void MilestoneUpdate() {
 // career's state must match the saved one; "Resume Career" (the safehouse,
 // "Resume Free Roam") and the state checked again in free roam.
 bool gLoadPhase = false;
+// Phase "menu-save" (a load phase too): in the safehouse's career menu
+// (uiCareerCrib) the career is changed (cash) and saved by hand: the menu's
+// Save (CSave::React, MemcardEnter 0x2251) through the memory card screens.
+bool gMenuSavePhase = false;
+int gMenuSaveStage = 0; // 0 to Save, 1 saving, 2 saved
 std::string gTypeQueue;
 const char kProfileName[] = "BENCH";
 int gStateMismatches = 0;
@@ -782,8 +789,72 @@ void MemcardScreens(int frame) {
 // Load phase, from the main menu: enter on "Career", "Resume Career" (the
 // career menu, CResumeCareer::React) and "Resume Free Roam" (the safehouse),
 // each the focused first option; "Leave the safe house?": left (yes), enter.
+// The career menu's option list (IconScrollerMenu::Options is protected).
+struct CareerCribAccess : uiCareerCrib {
+    static IconOption *CurrentOption(uiCareerCrib *crib) {
+        return (crib->*(&CareerCribAccess::Options)).GetCurrentOption();
+    }
+};
+
+// Menu-save phase, in the career menu: the cash changed once, then right
+// until the focus is on Save, enter; once saved, left back to "Resume Free
+// Roam". Returns true while it drives the menu.
+// Once the profile file changes: the profile saved again in memory must
+// match it, and the career's state is written (the next load checks it).
+bool MenuSave(int frame, const char *control, int t) {
+    int &stage = gMenuSaveStage;
+    static long stamp = 0;
+    if (stage == 1 && ProfileStamp() != stamp) {
+        stage = 2;
+        std::fprintf(stderr, "[benchmark] menu save: profile written (frame %d, control %s)\n", frame, control);
+        CheckProfileResave();
+        WriteCareerState();
+    }
+    if (stage == 1) {
+        return true;
+    }
+    uiCareerCrib *crib = dynamic_cast<uiCareerCrib *>(FEngFindScreen(control));
+    if (crib == nullptr) {
+        return false;
+    }
+    gEventKey = -1;
+    if (stage == 2) {
+        // Saved: back left to "Resume Free Roam" (the first option); the
+        // load phase's presses take it from there.
+        if (dynamic_cast<CResumeFreeRoam *>(CareerCribAccess::CurrentOption(crib)) != nullptr) {
+            return false;
+        }
+        gEventKey = t % 30 < 3 ? PORT_KEY_LEFT : -1;
+        return true;
+    }
+    static bool changed = false;
+    if (!changed) {
+        changed = true;
+        FEDatabase->GetCareerSettings()->AwardCash(12345);
+        std::fprintf(stderr, "[benchmark] menu save: cash now %d (frame %d)\n", FEDatabase->GetCareerSettings()->GetCash(), frame);
+    }
+    if (t < 60) {
+        return true;
+    }
+    // Save is the last option: right until it has the focus.
+    if (dynamic_cast<CSave *>(CareerCribAccess::CurrentOption(crib)) == nullptr) {
+        gEventKey = t % 30 < 3 ? PORT_KEY_RIGHT : -1;
+        return true;
+    }
+    gEventPress = t % 60 >= 30 && t % 60 < 36;
+    if (gEventPress) {
+        stage = 1;
+        stamp = ProfileStamp();
+        std::fprintf(stderr, "[benchmark] menu save: Save pressed (frame %d)\n", frame);
+    }
+    return true;
+}
+
 void CareerSaveBoot(int frame, bool menus) {
     MemcardScreens(frame);
+    if (gMenuSavePhase && menus && std::strstr(ControlPackageName(), "MC_") != nullptr) {
+        MenuSave(frame, ControlPackageName(), 0);
+    }
     if (!menus || std::strstr(ControlPackageName(), "MC_") != nullptr || !TheGameFlowManager.IsInFrontend()) {
         return;
     }
@@ -796,6 +867,13 @@ void CareerSaveBoot(int frame, bool menus) {
         std::fprintf(stderr, "[benchmark] menu: %s (frame %d)\n", control, frame);
     }
     const int t = frame - since;
+    if (gMenuSavePhase) {
+        gEventLeft = false;
+        gEventPress = false;
+        if (MenuSave(frame, control, t)) {
+            return;
+        }
+    }
     const bool dialog = std::strcmp(control, "Dialog.fng") == 0;
     gEventLeft = dialog && t % 120 >= 60 && t % 120 < 66;
     gEventPress = t >= 60 && t % 120 >= 90 && t % 120 < 96;
@@ -815,6 +893,10 @@ void CareerSaveUpdate() {
         if (roaming_frame >= 0 && gBenchFrame - roaming_frame == 300) {
             CheckCareerState("in free roam");
             CheckSaveRoundTrip();
+            if (gMenuSavePhase && gMenuSaveStage != 2) {
+                std::fprintf(stderr, "[benchmark] menu save: the career menu's Save never wrote the profile\n");
+                gStateMismatches++;
+            }
             std::fprintf(stderr, "[benchmark] career-save load: %d checks, %d mismatches: %s\n", gStateChecks, gStateMismatches,
                          gStateMismatches == 0 ? "PASS" : "FAIL");
             Finish();
@@ -1102,7 +1184,7 @@ void PortBenchmarkConfigure(int argc, char **argv) {
         // phase starts from one without the benchmark's profile.
         const char *dir = std::getenv("NFSMW_SAVE_DIR");
         const char *phase = std::getenv("NFSMW_BENCHMARK_PHASE");
-        const bool load = phase != nullptr && std::strcmp(phase, "load") == 0;
+        const bool load = phase != nullptr && (std::strcmp(phase, "load") == 0 || std::strcmp(phase, "menu-save") == 0);
         if (dir == nullptr || *dir == '\0') {
             std::fprintf(stderr, "[benchmark] career-save needs NFSMW_SAVE_DIR=<scratch folder>\n");
             std::exit(2);
@@ -1140,7 +1222,9 @@ void PortBenchmarkInit() {
         // a minute in, first (GRaceStatus::SkipToEndOfRaceInPlace, through
         // GManager::Update's NFSMW_DEBUG_SKIP_RACE), unless told otherwise
         // (NFSMW_DEBUG_SKIP_RACE=0 races it out).
-        gLoadPhase = gScenario->career_save && std::getenv("NFSMW_BENCHMARK_PHASE") && std::strcmp(std::getenv("NFSMW_BENCHMARK_PHASE"), "load") == 0;
+        const char *phase = std::getenv("NFSMW_BENCHMARK_PHASE");
+        gMenuSavePhase = gScenario->career_save && phase && std::strcmp(phase, "menu-save") == 0;
+        gLoadPhase = gScenario->career_save && phase && (std::strcmp(phase, "load") == 0 || gMenuSavePhase);
         if (gScenario->career_event || gScenario->rival || (gScenario->career_save && !gLoadPhase)) {
             setenv("NFSMW_DEBUG_SKIP_RACE", "1:60", 0);
             if (std::strcmp(std::getenv("NFSMW_DEBUG_SKIP_RACE"), "0") == 0) {

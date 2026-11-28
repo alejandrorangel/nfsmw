@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Career save to disk and back: the career-save benchmark scenario's two phases.
+"""Career save to disk and back: the career-save benchmark scenario's phases.
 
     python3 port/tools/career_save_test.py [--keep DIR] [--screens]
 
@@ -7,7 +7,10 @@ Phase "save" boots with an empty scratch profile folder (NFSMW_SAVE_DIR),
 creates a profile, starts a career, wins an event and lets the game autosave,
 writing the career's state; phase "load" boots again, loads the profile and
 checks it (saved again byte for byte, the career's state after the load and in
-free roam). Never touches the player's own profiles.
+free roam); phase "menu-save" loads it, changes the career (cash) in the
+safehouse's career menu and saves it with the menu's Save (the memory card
+screens), and a last "load" checks what that save wrote. Never touches the
+player's own profiles.
 """
 import argparse
 import os
@@ -19,7 +22,7 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def run_phase(binary, data, work, phase, screens, timeout):
+def run_phase(binary, data, work, phase, screens, timeout, label):
     env = dict(os.environ)
     for key in list(env):
         if key.startswith('NFSMW_BENCHMARK') or key.startswith('NFSMW_TRACE') or key.startswith('NFSMW_AUTO'):
@@ -34,7 +37,7 @@ def run_phase(binary, data, work, phase, screens, timeout):
     })
     if screens:
         env['NFSMW_BENCHMARK_SCREENS'] = '1'
-    log_path = os.path.join(work, phase + '.log')
+    log_path = os.path.join(work, label + '.log')
     with open(log_path, 'w') as log:
         try:
             code = subprocess.run([binary], env=env, stdout=log, stderr=subprocess.STDOUT, timeout=timeout).returncode
@@ -59,8 +62,8 @@ def main():
     os.makedirs(os.path.join(work, 'out'))
     os.makedirs(os.path.join(work, 'saves'))
     ok = True
-    for phase in ('save', 'load'):
-        code, lines = run_phase(binary, args.data, work, phase, args.screens, args.timeout)
+    for i, phase in enumerate(('save', 'load', 'menu-save', 'load')):
+        code, lines = run_phase(binary, args.data, work, phase, args.screens, args.timeout, '%d-%s' % (i + 1, phase))
         print('%s: exit %s' % (phase, code))
         for l in lines:
             if not l.startswith('[benchmark]   car ') and not l.startswith('[benchmark]   race '):
@@ -68,8 +71,9 @@ def main():
         if code != 0:
             ok = False
             break
-    if ok:
-        ok = any('PASS' in l for l in lines)
+        if phase != 'save' and not any('PASS' in l for l in lines):
+            ok = False
+            break
     print('career save: %s (%s)' % ('PASS' if ok else 'FAIL', work))
     if not args.keep and ok:
         shutil.rmtree(work, ignore_errors=True)
