@@ -93,10 +93,20 @@ In place:
   `GManager` vault loading, `GVault`
 - `port/src/Audio/EAAudioFormat.*`: EA-XA R2 / SCxl stream / BNKl bank
   decoding (not wired to the game yet)
+- NIS (in-engine cutscenes): the EAGL4 animation data loads
+  (`src/Game/EAGL4Native.cpp`: the ELF objects' 32-bit pointer slots are
+  relocated as PORT_PTR32), `NISActivity` plays race intros (`NIS.Play`,
+  `EPlayRaceNIS`), the blacklist rival intros and the arrest scenes
+  (busted), with their ICE camera tracks, the cars on their animation and
+  skinned characters (`IDI_WORLDBONE_FX`); its event sequence runs
+  (`EventSequencer::Engine`), though most `ENIS*` events aren't ported.
+  `HUDACTION_SKIPNIS` (enter) skips a skippable one, as on PC. PC draws no
+  letterbox (the ICE keys' letterbox height is stored and never read).
+  `NFSMW_TRACE_NIS=1` logs them, `NFSMW_TRACE_EAGL4=1` the loaded objects.
 
 Not yet: reflections/env maps, sound output (the Csis/snd9 layers),
-saves, movies, EAGL4 animation data (32-bit ELF objects; skeletons, world
-animations and NIS scenes are skipped natively), the in-game simulation.
+saves, movies (VP6), world animations (toll booth arms and the like) and
+world moments (cinematic moment NIS), the in-game simulation.
 
 Aspect ratio (`NFSMW_ASPECT`): `fill` (default) scales the 640x480
 frontend by window height and lets elements outside the 4:3 area use the
@@ -172,10 +182,16 @@ and exits.
 | `career-save` | profiles on (needs `NFSMW_SAVE_DIR`, a scratch folder): the boot's "Create a new alias?" (yes, the name typed: `BENCH`), a new career, the `career-event` race, the game's autosave after it (the career's state at that moment to `career-save.state`); then `NFSMW_BENCHMARK_PHASE=load`: the boot loads the profile, the profile saved again in memory must match the file byte for byte and the career's state the saved one, "Career", "Resume Career", "Resume Free Roam" and the state checked again in free roam (`PASS`/`FAIL`); `NFSMW_BENCHMARK_PHASE=menu-save` is the load phase that, in the safehouse's career menu, adds 12345 cash and saves with the menu's Save (memory card screens), the next `load` checking that save. `python3 port/tools/career_save_test.py` runs save, load, menu-save, load in a temporary folder |
 | `career-rival` | the same free roam; at frame 60 the bin's requirements are met as playing would meet them (`NFSMW_DEBUG_RACES_WON=<n>` world races won, `NFSMW_DEBUG_CHALLENGES=<n>` milestones completed with their bounty, `NFSMW_DEBUG_BOUNTY=<n>` bounty in all; each defaults to the bin's requirement), the bin's script unlocks the boss races; at frame 720 the player is put in the boss race's trigger: the rival challenge (`InGameRivalChallenge.fng`), both boss races (the AI, `NFSMW_DEBUG_SKIP_RACE`), the rival flow in the frontend (rival challenge results, the marker selection: the first card, the pink slip, and the next, the next rival's bio, `EEnterBin`), free roam in the next bin; logs the bin's progress, the markers offered, the pink slip car, and ends 600 frames in. With `NFSMW_SAVE_DIR` (a scratch folder without the benchmark's profile) profiles are on: the boot creates `BENCH`, and each time the profile is written (the rival flow's autosave, `MCE_RivalFlow`) it must equal the profile saved again in memory and the career's state goes to `career-save.state` for career-save's load phase; `career_save_test.py --rival` runs both |
 
+| `career-busted` | the same free roam; a heat 2 pursuit from frame 120; at `NFSMW_BENCHMARK_BUST` (frame 600) the AI lets go and the car is held still until the cops bust it: the arrest NIS (a random `ArrestM/F` scene: the cop and the perp, skinned, at an arrest marker near the car, the busted overlay), then the rap sheet in the safehouse; ends 300 frames into the frontend |
+| `list-races` | prints the race database's event IDs |
+
 The free roam scenarios start the career as one that played D-Day would be
 (bin 16, then `EEnterBin(15)`: the bin's milestones and speed traps), give
-player 1 pad 0 and close SMS screens with escape.
-| `list-races` | prints the race database's event IDs |
+player 1 pad 0 and close SMS screens with escape. They log each NIS as it
+plays (`career-event`: the race's intro, `IntroNis01`; `career-rival`: the
+rival's, `IntroNisBL15`, then the second boss race's; `career-busted`: the
+arrest) and, unless `NFSMW_BENCHMARK_SHOTS` is given, screenshot it 1, 3
+and 5 seconds in.
 
 Overrides: `NFSMW_BENCHMARK_FRAMES`, `NFSMW_BENCHMARK_SHOTS=<f>,<f>`,
 `NFSMW_BENCHMARK_RACE=<event id>`, `NFSMW_BENCHMARK_CAR=<vehicle>`,

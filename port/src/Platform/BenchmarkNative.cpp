@@ -442,6 +442,30 @@ void CareerEventUpdate() {
     }
 }
 
+// The free roam scenarios: each NIS (a race's intro, an arrest) logged as it
+// starts and ends; without NFSMW_BENCHMARK_SHOTS, screenshots 1, 3 and 5
+// seconds into it (<scenario>_<frame>.png).
+void NISUpdate() {
+    static bool playing = false;
+    INIS *nis = INIS::Get();
+    if (nis != nullptr && nis->IsPlaying() && !playing) {
+        playing = true;
+        char name[32] = "";
+        if (TheAnimDirectory != nullptr && nis->GetAnimScene() != nullptr) {
+            TheAnimDirectory->GetNameOfSceneHash(nis->GetAnimScene()->GetSceneHash(), name);
+        }
+        std::fprintf(stderr, "[benchmark] NIS %s playing (frame %d)\n", name, gBenchFrame);
+        if (std::getenv("NFSMW_BENCHMARK_SHOTS") == nullptr) {
+            for (int s : {60, 180, 300}) {
+                gShots.push_back(gBenchFrame + s);
+            }
+        }
+    } else if ((nis == nullptr || !nis->IsPlaying()) && playing) {
+        playing = false;
+        std::fprintf(stderr, "[benchmark] NIS done (frame %d)\n", gBenchFrame);
+    }
+}
+
 // The busted scenario: a heat 2 pursuit from frame 120 (as the milestone
 // scenario), at NFSMW_BENCHMARK_BUST (frame 600) the AI lets go and the car
 // stops; the cops bust it (MPerpBusted): the arrest NIS (NISListenerActivity,
@@ -471,23 +495,9 @@ void BustedUpdate() {
             ivehicle->SetSpeed(0.0f);
         }
     }
-    INIS *nis = INIS::Get();
-    if (nis != nullptr && nis_frame < 0) {
+    if (INIS::Get() != nullptr && nis_frame < 0) {
         nis_frame = gBenchFrame;
-        std::fprintf(stderr, "[benchmark] busted: arrest NIS (frame %d)\n", gBenchFrame);
-    }
-    static bool playing = false;
-    if (nis != nullptr && nis->IsPlaying() && !playing) {
-        playing = true;
-        char name[32] = "";
-        if (TheAnimDirectory != nullptr && nis->GetAnimScene() != nullptr) {
-            TheAnimDirectory->GetNameOfSceneHash(nis->GetAnimScene()->GetSceneHash(), name);
-        }
-        std::fprintf(stderr, "[benchmark] arrest NIS %s playing (frame %d)\n", name, gBenchFrame);
-    }
-    if (nis == nullptr && playing) {
-        playing = false;
-        std::fprintf(stderr, "[benchmark] arrest NIS done (frame %d)\n", gBenchFrame);
+        std::fprintf(stderr, "[benchmark] busted: the arrest NIS loads (frame %d)\n", gBenchFrame);
     }
     if (fe_frame < 0 && TheGameFlowManager.IsInFrontend()) {
         fe_frame = gBenchFrame;
@@ -1496,6 +1506,7 @@ void PortBenchmarkEndFrame(uint64_t render_start_ns) {
         gBenchFrame++;
         if (gScenario->free_roam) {
             FreeRoamScreens();
+            NISUpdate();
         }
         if (gScenario->career_event || gScenario->rival || (gScenario->career_save && !gLoadPhase)) {
             CareerEventUpdate();
