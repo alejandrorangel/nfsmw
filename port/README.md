@@ -18,10 +18,11 @@ NFSMW_DATA=~/Games/NFSMW port/tools/crashtrace.sh   # stubs hit + backtrace unde
 python3 port/tools/port_report.py          # categorised native compile errors
 ```
 
-Debug builds the decompiled game code and the drawing-only port sources (the
-renderer, the frame build, culling) at -O2; `-DNFSMW_PORT_OPTIMIZE_GAME=OFF`
-and `-DNFSMW_PORT_OPTIMIZE_RENDERER=OFF` build them at -O0, for debugging.
-Neither changes a frame: the game code's float math is built so that it gives
+Debug builds the decompiled game code, the platform layer and the renderer at
+-O2; `-DNFSMW_PORT_OPTIMIZE_GAME=OFF` (the game code and the platform layer)
+and `-DNFSMW_PORT_OPTIMIZE_RENDERER=OFF` (the renderer, the frame build,
+culling) build them at -O0, for debugging. Neither changes a frame: the game
+and platform code's float math is built so that it gives
 the same bits at any level (clang's default `-ffp-contract=on`, which fuses
 `a*b+c` at -O0 too; no libm rewrites of sin/cos/pow/...:
 `NFSMW_PORT_EXACT_FP_FLAGS`), and the undefined behaviour that -O2 exposed in

@@ -95,12 +95,13 @@ foreach(fn sin cos tan asin acos atan atan2 sinh cosh tanh exp exp2 expm1 log lo
     list(APPEND NFSMW_PORT_EXACT_FP_FLAGS -fno-builtin-${fn} -fno-builtin-${fn}f)
 endforeach()
 target_compile_options(nfsmw_game PRIVATE ${NFSMW_PORT_EXACT_FP_FLAGS})
-# The game code is optimized even in Debug: at -O0 the game loop and the
-# frame build took about twice as long. It needs the flags above, and the UB
-# fixes that -O2 exposed in decompiled code (Attrib::RotateNTo32's shift
-# width, PORT_FTOU, CompressVector's uninitialised vector).
-# -DNFSMW_PORT_OPTIMIZE_GAME=OFF builds it at -O0, for debugging.
-option(NFSMW_PORT_OPTIMIZE_GAME "Build the decompiled game code at -O2 in Debug too" ON)
+# The game code (and the platform layer below) is optimized even in Debug:
+# at -O0 the game loop and the frame build took 3-4 times as long. It needs
+# the flags above, and the UB fixes that -O2 exposed in decompiled code
+# (Attrib::RotateNTo32's shift width, PORT_FTOU, CompressVector's
+# uninitialised vector). -DNFSMW_PORT_OPTIMIZE_GAME=OFF builds them at -O0,
+# for debugging.
+option(NFSMW_PORT_OPTIMIZE_GAME "Build the decompiled game code and the platform layer at -O2 in Debug too" ON)
 if(NFSMW_PORT_OPTIMIZE_GAME)
     target_compile_options(nfsmw_game PRIVATE $<$<CONFIG:Debug>:-O2>)
 endif()
@@ -160,6 +161,12 @@ target_compile_options(nfsmw_platform PRIVATE
     -include "${CMAKE_CURRENT_SOURCE_DIR}/include/PortConfig.h"
     -fms-extensions -fdeclspec -Wall -Wno-unused-parameter -Wno-mismatched-tags
 )
+# The simulation reads this code too (math, camera, game shims): the same
+# exact float flags, and optimized with the game code.
+target_compile_options(nfsmw_platform PRIVATE ${NFSMW_PORT_EXACT_FP_FLAGS})
+if(NFSMW_PORT_OPTIMIZE_GAME)
+    target_compile_options(nfsmw_platform PRIVATE $<$<CONFIG:Debug>:-O2>)
+endif()
 
 # ---------------------------------------------------------------------------
 # macOS platform layer + app bundle.
@@ -185,23 +192,23 @@ endif()
 # The renderer's per-frame CPU work (frame build, culling, Metal encoding)
 # is optimized even in Debug: at -O0 it took about half of a race frame.
 # Only code that draws: it changes no game state, so the frames are the
-# same at either level (the benchmark's screenshots are identical). The
-# platform code the simulation reads (math, camera, game shims) stays at -O0:
-# without NFSMW_PORT_EXACT_FP_FLAGS -O2's sin/cos -> sincos and similar libm
-# rewrites move the simulation by an ulp. (The game code: see
-# NFSMW_PORT_OPTIMIZE_GAME.)
+# same at either level (the benchmark's screenshots are identical). (The
+# game code and the rest of the platform layer: NFSMW_PORT_OPTIMIZE_GAME.)
 option(NFSMW_PORT_OPTIMIZE_RENDERER "Build the renderer at -O2 in Debug too" ON)
 if(NFSMW_PORT_OPTIMIZE_RENDERER)
-    set_source_files_properties(
-        src/Mac/MetalRenderer.mm src/Mac/MetalPrelit.mm src/Mac/BenchmarkMac.mm
-        src/Platform/SceneNative.cpp src/Platform/SolidNative.cpp src/Platform/ViewsNative.cpp
-        src/Platform/TexturePackNative.cpp src/Platform/TexturePlatMetal.cpp src/Platform/FERenderMetal.cpp
-        src/Platform/RealFontNative.cpp src/Platform/EnvMapNative.cpp src/Platform/VisualTreatmentNative.cpp
-        src/Platform/ParticlesNative.cpp src/Platform/LightFlaresNative.cpp src/Platform/ScreenEffectsNative.cpp
-        src/Platform/ShadowMapMeshNative.cpp
-        TARGET_DIRECTORY nfsmw nfsmw_platform
-        PROPERTIES COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O2>")
+    set(NFSMW_PORT_RENDERER_OPT -O2)
+else()
+    set(NFSMW_PORT_RENDERER_OPT -O0) # comes after the platform layer's -O2
 endif()
+set_source_files_properties(
+    src/Mac/MetalRenderer.mm src/Mac/MetalPrelit.mm src/Mac/BenchmarkMac.mm
+    src/Platform/SceneNative.cpp src/Platform/SolidNative.cpp src/Platform/ViewsNative.cpp
+    src/Platform/TexturePackNative.cpp src/Platform/TexturePlatMetal.cpp src/Platform/FERenderMetal.cpp
+    src/Platform/RealFontNative.cpp src/Platform/EnvMapNative.cpp src/Platform/VisualTreatmentNative.cpp
+    src/Platform/ParticlesNative.cpp src/Platform/LightFlaresNative.cpp src/Platform/ScreenEffectsNative.cpp
+    src/Platform/ShadowMapMeshNative.cpp
+    TARGET_DIRECTORY nfsmw nfsmw_platform
+    PROPERTIES COMPILE_OPTIONS "$<$<CONFIG:Debug>:${NFSMW_PORT_RENDERER_OPT}>")
 target_link_libraries(nfsmw PRIVATE
     "-framework Cocoa"
     "-framework Metal"
